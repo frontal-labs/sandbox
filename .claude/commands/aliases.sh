@@ -1,4 +1,4 @@
-# Claude Code Command Aliases for Vibe
+# Claude Code Command Aliases for Frontal Sandbox
 # These are shorthand references to common operations
 
 # Development shortcuts
@@ -33,22 +33,15 @@ alias rust:check="bun run cargo:check"
 alias rust:clippy="bun run cargo:clippy"
 alias rust:fmt="bun run cargo:fmt"
 
-# Changeset workflow
-alias changeset:new="bun run changeset"
-alias version:patch="bun run version"
-alias release:publish="bun run release"
-
 # Analysis shortcuts
-alias analyze:deps="bun run depcheck"
-alias analyze:complexity="npm run complexity-report"
-alias analyze:bundlesize="npm run bundle-analysis"
+alias analyze:plan="rg -n 'Milestone|Acceptance|Goal|Non-goal' PLAN.md"
 
 # Utility shortcuts
-alias cache:clear="rm -rf node_modules/.cache && rm -rf .turbo && bun install"
+alias cache:clear="rm -rf target node_modules/.cache"
 alias reset:hard="git reset --hard HEAD && git clean -fd"
 alias prune:branches="git branch --merged | grep -v '\\*\\|main\\|master' | xargs -n 1 git branch -d"
 
-# Vibe specific shortcuts
-alias vibe:agent:create="python scripts/generate_agent.py"
-alias vibe:tool:create="python scripts/generate_tool.py"
-alias vibe:wf:create="python scripts/generate_workflow.py"
+# Sandbox-specific shortcuts
+alias sandbox:plan="sed -n '1,240p' PLAN.md"
+alias sandbox:architecture="rg -n 'invariant|backend|capability|promotion' PLAN.md"
+alias sandbox:security="rg -n 'security|capability|network|isolate|microVM' PLAN.md"

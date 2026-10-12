@@ -1,87 +1,18 @@
-# Claude Code Commands for Vige Development
+# Claude Code Commands for Frontal Sandbox
 
-## Agent Commands
+Project commands should be added as the planned Rust crates and service tools
+are implemented. Use the following command families for the current roadmap:
 
-### /vibe:analyze
-Analyze the codebase structure and provide insights about architecture patterns
-Usage: /vibe:analyze [path]
+- `/sandbox:plan` — review `PLAN.md` and identify the next milestone.
+- `/sandbox:architecture` — inspect boundaries, invariants, and data flow.
+- `/sandbox:security` — review capabilities, isolation, and promotion paths.
+- `/sandbox:types` — work on shared IDs, errors, events, and configuration.
+- `/sandbox:vfs` — work on the copy-on-write virtual filesystem.
+- `/sandbox:shell` — work on parsing, interpretation, and builtins.
+- `/sandbox:session` — work on the session and backend boundary.
+- `/sandbox:trace` — work on event logging, diffs, and replay.
+- `/sandbox:docs` — update design and API documentation.
 
-### /vibe:generate:agent
-Generate a new Vibe agent with standard structure
-Usage: /vibe:generate:agent [name] [description]
-
-### /vibe:generate:tool
-Generate a new Vibe tool with proper type safety
-Usage: /vibe:generate:tool [name] [description]
-
-### /vibe:generate:workflow
-Generate a new Vibe workflow definition
-Usage: /vibe:generate:workflow [name] [description]
-
-### /vibe:test:agent
-Run tests for a specific agent
-Usage: /vibe:test:agent [agent-name]
-
-### /vibe:test:tool
-Run tests for a specific tool
-Usage: /vibe:test:tool [tool-name]
-
-## Development Commands
-
-### /vibe:dev:start
-Start the development server
-Usage: /vibe:dev:start
-
-### /vibe:dev:build
-Build the project
-Usage: /vibe:dev:build
-
-### /vibe:dev:test
-Run the test suite
-Usage: /vibe:dev:test
-
-### /vibe:dev:lint
-Run the linter
-Usage: /vibe:dev:lint
-
-### /vibe:dev:fmt
-Format the code
-Usage: /vibe:dev:fmt
-
-## Code Quality Commands
-
-### /vibe:quality:check
-Run all code quality checks (lint, typecheck, format)
-Usage: /vibe:quality:check
-
-### /vibe:quality:fix
-Auto-fix code quality issues where possible
-Usage: /vibe:quality:fix
-
-### /vibe:security:audit
-Run security audit on dependencies
-Usage: /vibe:security:audit
-
-## Documentation Commands
-
-### /vibe:docs:generate
-Generate documentation from code comments
-Usage: /vibe:docs:generate
-
-### /vibe:docs:validate
-Validate existing documentation
-Usage: /vibe:docs:validate
-
-## Utility Commands
-
-### /vibe:cache:clear
-Clear development caches
-Usage: /vibe:cache:clear
-
-### /vibe:deps:update
-Update project dependencies
-Usage: /vibe:deps:update
-
-### /vibe:repl:start
-Start a REPL for interactive development
-Usage: /vibe:repl:start
+Each command should inspect first, make a focused change, and report validation
+honestly. Do not run project commands when the user explicitly requests review or
+editing without execution.
