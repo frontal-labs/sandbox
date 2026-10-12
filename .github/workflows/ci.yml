@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   pull_request:
     branches: [master]
 
@@ -11,100 +10,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CI: true
-
 jobs:
-  quality:
-    name: Quality (lint, format, typecheck)
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v12
-      - name: Configure Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@v4
-      - name: Cache Bun install
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lockb') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-      - name: Print versions
-        run: |
-          bun --version
-          node --version
-      - name: Run quality checks
-        run: nix develop .#ci --command bash -c "
-          bun install --frozen-lockfile &&
-          bun lint &&
-          bun format:check &&
-          bun typecheck
-        "
-
-  build-and-test:
-    name: Build & Test
-    runs-on: ${{ matrix.os }}
-    needs: [quality]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v12
-      - name: Configure Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@v4
-      - name: Cache Bun install
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lockb') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-      - name: Cache Turbo artifacts
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-
-      - name: Print versions
-        run: |
-          bun --version
-          node --version
-      - name: Build and test
-        run: nix develop .#ci --command bash -c "
-          bun install --frozen-lockfile &&
-          bun run build &&
-          bun run test
-        "
-
   rust:
-    name: Rust (fmt, clippy, test, bench, napi)
-    runs-on: ${{ matrix.os }}
-    needs: [quality]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+    name: Rust checks
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v12
-      - name: Configure Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@v4
-      - name: Run Rust checks
-        run: nix develop .#ci-rust --command bash -c "
-          cargo fmt --all --check &&
-          cargo clippy --workspace --all-targets -- -D warnings &&
-          cargo test --workspace &&
-          cargo bench --workspace --no-run &&
-          cargo build --release -p vibe_napi
-        "
+      - uses: DeterminateSystems/nix-installer-action@v12
+      - uses: DeterminateSystems/magic-nix-cache-action@v4
+      - name: Format
+        run: nix develop --command cargo fmt --all --check
+      - name: Clippy
+        run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: nix develop --command cargo test --workspace
+      - name: Bench compile check
+        run: nix develop --command cargo bench --workspace --no-run

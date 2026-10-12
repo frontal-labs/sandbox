@@ -1,4 +1,4 @@
-name: Release binaries
+name: Release Sandbox binaries
 
 on:
   push:
@@ -14,8 +14,8 @@ env:
   NODE_VERSION: "22"
 
 jobs:
-  napi:
-    name: napi ${{ matrix.target }}
+  cli:
+    name: sandbox CLI ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -35,34 +35,23 @@ jobs:
       - name: Install Rust
         run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Build addon
-        run: cargo build --release -p vibe_napi --target ${{ matrix.target }}
-      - name: Package npm tarball
+      - name: Build CLI
+        run: cargo build --release -p sandbox-cli --target ${{ matrix.target }}
+      - name: Package CLI binary
         shell: bash
         run: |
-          LIB="$(ls target/${{ matrix.target }}/release/*vibe_napi.* 2>/dev/null | grep -E '\.(dylib|so|dll)$' | head -1)"
-          PKG_NAME="@vibe/napi-${{ matrix.arch }}"
+          LIB="target/${{ matrix.target }}/release/sandbox"
           PKG_DIR="target/npm-pkg/${{ matrix.target }}"
           mkdir -p "$PKG_DIR"
-          cp "$LIB" "$PKG_DIR/index.node"
-          cat > "$PKG_DIR/package.json" <<- EOF
-          {
-            "name": "$PKG_NAME",
-            "version": "${GITHUB_REF_NAME#v}",
-            "os": ["${{ matrix.os_name }}"],
-            "cpu": ["${{ matrix.arch }}"],
-            "main": "index.node",
-            "license": "Apache-2.0"
-          }
-          EOF
+          cp "$LIB" "$PKG_DIR/sandbox"
       - uses: actions/upload-artifact@v4
         with:
-          name: vibe_napi-${{ matrix.target }}
+          name: sandbox-${{ matrix.target }}
           path: target/npm-pkg/${{ matrix.target }}
 
   publish-npm:
     name: Publish to npm
-    needs: [napi]
+    needs: [cli]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -82,7 +71,7 @@ jobs:
 
   release:
     name: Attach to release
-    needs: [napi]
+    needs: [cli]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
