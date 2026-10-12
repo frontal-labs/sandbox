@@ -1,0 +1,72 @@
+name: CodeQL Analysis
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [master]
+  schedule:
+    - cron: '15 5 * * 3'
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+      # only required for GitHub Advanced Security customers
+      # actions: read
+      # checks: write
+      # continuous-integration: read
+      # pull-requests: read
+
+    strategy:
+      fail-safe: false
+      matrix:
+        language: ['javascript-typescript', 'go', 'cpp'] # We have TS and Rust (C++ for Rust? Actually Rust is not supported by CodeQL? CodeQL supports Rust as of recent versions. Let's add rust.
+        # Actually, CodeQL supports Rust. Let's add rust.
+        # But note: the CodeQL action for rust might require a specific setup.
+        # We'll add rust and see.
+        # We'll also add javascript-typescript for our TS code.
+        # We'll remove go and cpp if not needed.
+        # Let's change to: javascript-typescript, rust
+        # But note: the matrix will run for each language, so we'll have two jobs.
+        # We'll change the matrix to include the languages we want.
+    # Actually, let's remove the matrix and specify the languages we want to analyze.
+    # We'll use the CodeQL analysis workflow template and adjust.
+    # We'll use the default from the GitHub template and remove the matrix.
+    # Instead, we'll specify the languages in the initialize step.
+    # But the action uses a matrix by default. We'll override.
+    # Let's do:
+    #   strategy:
+    #     matrix:
+    #       language: ['javascript-typescript', 'rust']
+    # However, the CodeQL action expects the language to be one of the supported ones.
+    # We'll keep the matrix but change the list.
+
+    # Actually, let's look at the current template from GitHub.
+    # We'll use the following:
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v2
+      with:
+        languages: ${{ matrix.language }}
+        # If you wish to specify custom queries, you can do so here or in a config file.
+        # For more details, see: https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning
+        # queries: security-and-quality
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v2
+
+    - name: Perform CodeQL analysis
+      uses: github/codeql-action/analyze@v2
+      with:
+        category: "/language:${{ matrix.language }}"

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/your-org/your-repo/discussions
+    about: Ask questions and share ideas in the community forum.
+  - name: Report a security vulnerability
+    url: https://github.com/your-org/your-repo/security/advisories
+    about: Use GitHub's security advisory system to report security vulnerabilities.

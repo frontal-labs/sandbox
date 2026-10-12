@@ -1,0 +1,40 @@
+# Pre-commit framework configuration (replaces husky + commitlint + lint-staged)
+# Managed by the `pre-commit` tool: https://pre-commit.com
+# Install hooks once with: pre-commit install --hook-type pre-commit --hook-type commit-msg
+fail_fast: false
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  # Format + lint staged TypeScript/TSX files with Biome
+  - repo: local
+    hooks:
+      - id: biome-check-ts
+        name: biome check (ts/tsx)
+        entry: bunx biome check --write --no-errors-on-unmatched
+        language: system
+        files: \.(ts|tsx|mts|cts)$
+        stages: [pre-commit]
+
+      - id: biome-format-ts
+        name: biome format (ts/tsx)
+        entry: bunx biome format --write --no-errors-on-unmatched
+        language: system
+        files: \.(ts|tsx|mts|cts)$
+        stages: [pre-commit]
+
+      # Format staged JSON / YAML / YML files with Biome
+      - id: biome-format-data
+        name: biome format (json/yaml/yml)
+        entry: bunx biome format --write --no-errors-on-unmatched
+        language: system
+        files: \.(json|yaml|yml)$
+        stages: [pre-commit]
+
+  # Enforce Conventional Commits on the commit message (replaces commitlint + husky)
+  - repo: local
+    hooks:
+      - id: commitlint
+        name: commitlint
+        entry: bunx commitlint --edit
+        language: system
+        stages: [commit-msg]

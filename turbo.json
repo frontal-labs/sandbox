@@ -1,0 +1,70 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["**/.env.*local", "tsconfig.json", "biome.jsonc"],
+  "globalEnv": ["NODE_ENV", "LOG_LEVEL", "CI"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build", "//#cargo:build"],
+      "outputs": ["dist/**", ".next/**"],
+      "inputs": [
+        "src/**",
+        "content/**",
+        "vite.config.ts",
+        "tsconfig.json",
+        "package.json",
+        "next.config.mjs"
+      ],
+      "env": ["NODE_ENV"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true,
+      "interactive": true
+    },
+    "test": {
+      "dependsOn": ["build", "//#cargo:test"],
+      "inputs": ["src/**", "tests/**", "tsconfig.json"],
+      "outputs": ["coverage/**"]
+    },
+    "test:types": {
+      "dependsOn": ["build"],
+      "inputs": ["src/**", "type-tests/**", "tsconfig.json"],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "tsconfig.json"],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "biome.json", "package.json"],
+      "outputs": []
+    },
+    "format:check": {
+      "inputs": ["src/**", "biome.json"],
+      "outputs": []
+    },
+    "clean": {
+      "cache": false
+    },
+    "//#cargo:build": {
+      "inputs": ["crates/**/*.rs", "crates/**/Cargo.toml", "Cargo.toml", "Cargo.lock"],
+      "outputs": ["target/release/**"],
+      "cache": false
+    },
+    "//#cargo:test": {
+      "inputs": ["crates/**/*.rs", "crates/**/Cargo.toml", "Cargo.toml", "Cargo.lock"],
+      "outputs": [],
+      "cache": false
+    },
+    "//#cargo:check": {
+      "inputs": ["crates/**/*.rs", "crates/**/Cargo.toml", "Cargo.toml", "Cargo.lock"],
+      "outputs": [],
+      "cache": false
+    },
+    "//#format": {},
+    "//#lint:fix": {}
+  }
+}

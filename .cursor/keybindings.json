@@ -1,0 +1,89 @@
+[
+  [
+    {
+      "key": "ctrl+shift+p",
+      "command": "workbench.action.showCommands",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "ctrl+shift+l",
+      "command": "editor.action.selectHighlights",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "ctrl+d",
+      "command": "editor.action.addSelectionToNextFindMatch",
+      "when": "editorHasSelection && editorTextFocus && !editorReadonly"
+    },
+    {
+      "key": "ctrl+shift+alt+right",
+      "command": "editor.action.cursorColumnSelectRight",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "ctrl+shift+alt+left",
+      "command": "editor.action.cursorColumnSelectLeft",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "ctrl+alt+down",
+      "command": "editor.action.insertCursorBelow",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "ctrl+alt+up",
+      "command": "editor.action.insertCursorAbove",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "shift+alt+f",
+      "command": "editor.action.formatDocument",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "ctrl+k ctrl+c",
+      "command": "editor.action.blockComment",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "ctrl+k ctrl+u",
+      "command": "editor.action.removeBlockComment",
+      "when": "editorTextFocus"
+    },
+    {
+      "key": "f12",
+      "command": "editor.action.revealDefinition",
+      "when": "editorHasDefinitionProvider && editorTextFocus"
+    },
+    {
+      "key": "shift+f12",
+      "command": "editor.action.goToReferences",
+      "when": "editorHasReferenceProvider && editorTextFocus"
+    },
+    {
+      "key": "ctrl+shift+f12",
+      "command": "editor.action.peekReferences",
+      "when": "editorHasReferenceProvider && editorTextFocus"
+    },
+    {
+      "key": "ctrl+k f12",
+      "command": "editor.action.openDefinitionToTheSide",
+      "when": "editorHasDefinitionProvider && editorTextFocus"
+    },
+    {
+      "key": "ctrl+shift+.",
+      "command": "cursor.chat.open",
+      "when": "true"
+    },
+    {
+      "key": "ctrl+shift+l",
+      "command": "cursor.chat.ask",
+      "when": "true"
+    },
+    {
+      "key": "ctrl+shift+i",
+      "command": "cursor.chat.openInline",
+      "when": "editorTextFocus"
+    }
+  ]
+]

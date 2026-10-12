@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+*.log
+target/
+
+# Vite build temp artifacts
+*.timestamp-*.mjs
+
+# Nix
+.envrc
+.direnv/
+result*

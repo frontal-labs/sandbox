@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest an idea for this project
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees:
+  - octocat
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest a feature!
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Please provide a clear and concise description of the feature you'd like to see.
+      placeholder: |
+        I'd like to be able to ...
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: What category does this feature belong to?
+      multiple: false
+      options:
+        - Core
+        - CLI
+        - API
+        - Documentation
+        - Other
+  - type: textarea
+    id: benefits
+    attributes:
+      label: Benefits
+      description: |
+        Please describe the benefits of this feature.
+        How would it improve the project?
+    validations:
+      required: true
+  - type: textarea
+    id: drawbacks
+    attributes:
+      label: Drawbacks
+      description: |
+        Please describe any potential drawbacks or considerations for this feature.
+    validations:
+      required: false
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/your-org/your-repo/blob/main/CODE_OF_CONDUCT.md)
+      options:
+        - label: I agree to follow this project's Code of Commitment
+          required: true

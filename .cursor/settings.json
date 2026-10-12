@@ -1,0 +1,54 @@
+{
+  "tab.autocomplete": true,
+  "tab.codeGeneration": true,
+  "chat.codeGeneration": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports.biome": "explicit",
+    "quickfix.biome": "explicit",
+    "source.fixAll.biome": "explicit"
+  },
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": true,
+  "editor.formatOnType": true,
+  "editor.codeLens": true,
+  "editor.codeLensOnSave": true,
+  "editor.inlayHints.enabled": true,
+  "editor.inlineSuggest.enabled": true,
+  "editor.suggest.showStatus": true,
+  "editor.suggest.showIcons": true,
+  "editor.snippetSuggestions": "top",
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/*/**": true,
+    "**/bower_components/*/**": true,
+    "**/.cache/*/**": true,
+    "**/dist/*/**": true,
+    "**/build/*/**": true,
+    "**/.next/*/**": true,
+    "**/.turbo/*/**": true,
+    "**/.vercel/*/**": true
+  },
+  "files.search.exclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/*/**": true,
+    "**/bower_components/*/**": true,
+    "**/.cache/*/**": true,
+    "**/dist/*/**": true,
+    "**/build/*/**": true,
+    "**/.next/*/**": true,
+    "**/.turbo/*/**": true,
+    "**/.vercel/*/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/bower_components": true,
+    "**/*.code-search": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/.next": true,
+    "**/.turbo": true,
+    "**/.vercel": true
+  }
+}

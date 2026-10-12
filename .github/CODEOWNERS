@@ -1,0 +1,63 @@
+# This file defines who is responsible for maintaining different parts of the project.
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners for more information.
+
+# Global defaults
+* @gabrielfonseca
+
+# Core infrastructure
+/.github/ @gabrielfonseca
+/nix/ @gabrielfonseca
+/flake.nix @gabrielfonseca
+/flake.lock @gabrielfonseca
+
+# Documentation
+/docs/ @gabrielfonseca
+/README.md @gabrielfonseca
+/CONTRIBUTING.md @gabrielfonseca
+/CODE_OF_CONDUCT.md @gabrielfonseca
+
+# Examples and tutorials
+/examples/ @gabrielfonseca
+/cookbooks/ @gabrielfonseca
+
+# Benchmarks
+/benchmarks/ @gabrielfonseca
+
+# Tests
+/tests/ @gabrielfonseca
+
+# Scripts
+/scripts/ @gabrielfonseca
+/tools/ @gabrielfonseca
+
+# Editors and IDE configs
+/editors/ @gabrielfonseca
+/.vscode/ @gabrielfonseca
+/.cursor/ @gabrielfonseca
+
+# Configuration files
+/.gitignore @gabrielfonseca
+/.gitattributes @gabrielfonseca
+/.npmrc @gabrielfonseca
+/.pre-commit-config.yaml @gabrielfonseca
+/commitlint.config.js @gabrielfonseca
+/renovate.json @gabrielfonseca
+/rust-toolchain.toml @gabrielfonseca
+/rustfmt.toml @gabrielfonseca
+/clippy.toml @gabrielfonseca
+/biome.json @gabrielfonseca
+/turbo.json @gabrielfonseca
+/tsconfig.json @gabrielfonseca
+
+# Package management
+/package.json @gabrielfonseca
+/bun.lockb @gabrielfonseca
+
+# Rust workspace
+/Cargo.toml @gabrielfonseca
+/Cargo.lock @gabrielfonseca
+/crates/ @gabrielfonseca
+
+# Node.js packages
+/packages/ @gabrielfonseca
+/apps/ @gabrielfonseca

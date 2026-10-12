@@ -1,0 +1,76 @@
+name: Bug report
+description: File a bug report
+title: "[Bug]: "
+labels: ["bug"]
+assignees:
+  - octocat
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What version of our software are you running?
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Please provide a clear and concise description of the bug.
+      placeholder: |
+        What happened?
+        What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Please provide a step-by-step description of how to reproduce the bug.
+        The more details, the better.
+      placeholder: |
+        1. Go to '...'
+        2. Click on the app crashed
+    validations:
+        to reproduce the bug.
+        Be as specific as possible.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Please copy and paste any relevant log output.
+        This will be automatically formatted into code, so no need for backticks.
+      render: shell
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: What environment are you experiencing the issue in?
+      multiple: false
+      options:
+        - Linux
+        - MacOS
+        - Windows
+        - Other
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/your-org/your-repo/blob/main/CODE_OF_CONDUCT.md)
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

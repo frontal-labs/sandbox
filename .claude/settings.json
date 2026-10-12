@@ -1,0 +1,106 @@
+{
+  "agent": {
+    "name": "Vibe Autonomous Engineer",
+    "description": "Claude configured as an autonomous software engineer for the Vibe framework",
+    "version": "1.0.0"
+  },
+
+  "behavior": {
+    "inspectFirst": true,
+    "planBeforeCode": true,
+    "useSkillsProactively": true,
+    "reuseExistingPatterns": true,
+    "workInSmallSteps": true,
+    "runTestsAfterChanges": true,
+    "updateDocumentation": true,
+    "preferParallelExecution": true,
+    "verifyCompletion": true
+  },
+
+  "workflow": {
+    "phases": ["exploration", "planning", "implementation", "validation", "completion"],
+    "validationSteps": [
+      "runRelevantTests",
+      "checkTypes",
+      "validateCodeQuality",
+      "verifyFormatting",
+      "manualVerificationIfNeeded"
+    ]
+  },
+
+  "skillPreferences": {
+    "autoLoad": true,
+    "discovery": {
+      "enabled": true,
+      "method": "find-skills"
+    },
+    "preferredSources": [".claude/skills/", "../skills/"]
+  },
+
+  "project": {
+    "name": "Vibe",
+    "description": "TypeScript framework for building reliable enterprise agentic systems",
+    "technologyStack": {
+      "runtime": "Bun v1.3+",
+      "language": "TypeScript 5.6+ / Rust",
+      "build": "Turborepo + Vite",
+      "linting": "Biome",
+      "testing": "Vitest",
+      "versioning": "Changesets"
+    },
+    "importantPaths": {
+      "packages": "./packages/",
+      "vibe": "./vibe/",
+      "vibeCli": "./vibe-cli/",
+      "examples": "./examples/",
+      "docs": "./docs/",
+      "scripts": "./scripts/"
+    }
+  },
+
+  "commands": {
+    "development": {
+      "install": "bun install",
+      "build": "bun run build",
+      "dev": "bun run dev",
+      "test": "bun run test",
+      "testWatch": "bun run test --watch",
+      "lint": "bun run lint",
+      "lintFix": "bun run lint:fix",
+      "format": "bun run format",
+      "typecheck": "bun run typecheck"
+    },
+    "rust": {
+      "build": "bun run cargo:build",
+      "test": "bun run cargo:test",
+      "check": "bun run cargo:check",
+      "clippy": "bun run cargo:clippy",
+      "fmt": "bun run cargo:fmt"
+    },
+    "changesets": {
+      "create": "bun run changeset",
+      "version": "bun run version",
+      "publish": "bun run release"
+    }
+  },
+
+  "codeQuality": {
+    "typescript": {
+      "namingConvention": "camelCase",
+      "interfacePrefix": "I",
+      "maxLineLength": 100,
+      "functionMaxLines": 50,
+      "parameterMaxCount": 4
+    },
+    "rust": {
+      "clippyEnabled": true,
+      "fmtEnabled": true,
+      "docCommentsRequired": true
+    }
+  },
+
+  "commitMessage": {
+    "type": "conventionalCommits",
+    "scopes": ["agent", "model", "tools", "memory", "workflow", "runtime", "cli", "docs", "shared"]
+  }
+}

@@ -1,0 +1,9 @@
+# Clippy configuration for the Vibe compiler crates.
+# CI runs `cargo clippy --workspace --all-targets -- -D warnings`.
+msrv = "1.95.0"
+# Flag large error/result types so diagnostics stay cheap to move around.
+enum-variant-size-threshold = 256
+# Keep public functions from taking an unreasonable number of positional args.
+too-many-arguments-threshold = 8
+# Cognitive-complexity ceiling before clippy nudges a refactor.
+cognitive-complexity-threshold = 30

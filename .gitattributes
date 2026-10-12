@@ -1,0 +1,66 @@
+# Auto-detect text files and use LF line endings
+* text=auto eol=lf
+
+# Shell scripts must have LF line endings
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+*.fish text eol=lf
+
+# TypeScript and JavaScript with diff support
+*.ts text diff=typescript
+*.tsx text diff=typescript
+*.js text diff=typescript
+*.jsx text diff=typescript
+*.mjs text diff=typescript
+*.cjs text diff=typescript
+
+# Documentation
+*.md text diff=markdown
+*.mdx text diff=markdown
+
+# Configuration
+*.json text diff=json
+*.jsonc text diff=json
+*.yaml text diff=yaml
+*.yml text diff=yaml
+*.toml text diff=toml
+*.ini text diff=ini
+*.cfg text diff=ini
+
+# Environment files
+.env text
+.env.* text
+.env.example text
+
+# Docker
+Dockerfile text
+*.dockerfile text
+
+# CI/CD
+*.yml text diff=yaml
+
+# SVG treated as binary (rendered, not diffed)
+*.svg text binary
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.avif binary
+*.mp4 binary
+*.mov binary
+*.woff binary
+*.woff2 binary
+*.eot binary
+*.ttf binary
+
+# Lock files (binary — don't diff)
+package-lock.json binary
+pnpm-lock.yaml binary
+yarn.lock binary
+bun.lock binary
+*.lock binary

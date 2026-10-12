@@ -1,0 +1,94 @@
+name: Release binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  napi:
+    name: napi ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin, os_name: darwin, arch: arm64 }
+          - { os: macos-latest, target: x86_64-apple-darwin, os_name: darwin, arch: x64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, os_name: linux, arch: x64 }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, os_name: linux, arch: arm64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, os_name: win32, arch: x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://npm.pkg.github.com"
+      - name: Install Rust
+        run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build addon
+        run: cargo build --release -p vibe_napi --target ${{ matrix.target }}
+      - name: Package npm tarball
+        shell: bash
+        run: |
+          LIB="$(ls target/${{ matrix.target }}/release/*vibe_napi.* 2>/dev/null | grep -E '\.(dylib|so|dll)$' | head -1)"
+          PKG_NAME="@vibe/napi-${{ matrix.arch }}"
+          PKG_DIR="target/npm-pkg/${{ matrix.target }}"
+          mkdir -p "$PKG_DIR"
+          cp "$LIB" "$PKG_DIR/index.node"
+          cat > "$PKG_DIR/package.json" <<- EOF
+          {
+            "name": "$PKG_NAME",
+            "version": "${GITHUB_REF_NAME#v}",
+            "os": ["${{ matrix.os_name }}"],
+            "cpu": ["${{ matrix.arch }}"],
+            "main": "index.node",
+            "license": "Apache-2.0"
+          }
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibe_napi-${{ matrix.target }}
+          path: target/npm-pkg/${{ matrix.target }}
+
+  publish-npm:
+    name: Publish to npm
+    needs: [napi]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://npm.pkg.github.com"
+      - name: Publish platform packages
+        run: |
+          for dir in dist/*/; do
+            (cd "$dir" && npm publish --access public)
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Attach to release
+    needs: [napi]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist }
+      - name: Publish to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*

@@ -1,0 +1,5 @@
+[install]
+exact = true
+frozen-lockfile = true
+cache = true
+prefer-offline = true

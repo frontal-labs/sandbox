@@ -1,0 +1,21 @@
+{
+  "recommendations": [
+    "biomejs.biome",
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "vitest.explorer",
+    "github.vscode-github-actions",
+    "github.copilot",
+    "github.copilot-chat",
+    "ms-vscode.vscode-typescript-next",
+    "streetsidesoftware.code-spell-checker",
+    "mikestead.dotenv",
+    "yzhang.markdown-all-in-one",
+    "redhat.vscode-yaml",
+    "eamodio.gitlens",
+    "wix.vscode-import-cost",
+    "christian-kohler.path-intellisense",
+    "formulahendry.auto-rename-tag"
+  ],
+  "unwantedRecommendations": ["esbenp.prettier-vscode", "dbaeumer.vscode-eslint"]
+}

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "master"
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**/*",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/out",
+      "!**/.next",
+      "!**/.source",
+      "!**/.turbo",
+      "!**/.vercel",
+      "!**/coverage",
+      "!**/target",
+      "!**/*.gen.ts",
+      "!**/*.tmLanguage.json",
+      "!**/next-env.d.ts",
+      "!**/CHANGELOG.md",
+      "!**/bun.lock"
+    ]
+  },
+  "assist": {
+    "enabled": true,
+    "actions": { "source": { "organizeImports": "on" } }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        "noBannedTypes": "error",
+        "noExtraBooleanCast": "error",
+        "noUselessCatch": "error",
+        "noUselessConstructor": "error",
+        "noUselessLoneBlockStatements": "error",
+        "noUselessRename": "error",
+        "noUselessSwitchCase": "error",
+        "noUselessTernary": "error",
+        "noVoid": "error",
+        "useFlatMap": "error",
+        "useLiteralKeys": "error",
+        "useOptionalChain": "error",
+        "useSimplifiedLogicExpression": "error"
+      },
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error",
+        "noUnusedFunctionParameters": "error",
+        "noPrecisionLoss": "error",
+        "useExhaustiveDependencies": "warn"
+      },
+      "performance": {
+        "noAccumulatingSpread": "error",
+        "noDelete": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "warn",
+        "noParameterAssign": "error",
+        "useConst": "error",
+        "useTemplate": "error",
+        "useShorthandAssign": "error",
+        "useEnumInitializers": "error",
+        "useNodejsImportProtocol": "error",
+        "useNumberNamespace": "error",
+        "useAsConstAssertion": "error",
+        "useDefaultParameterLast": "error"
+      },
+      "suspicious": {
+        "noConsole": "warn",
+        "noDebugger": "error",
+        "noDoubleEquals": "error",
+        "noExplicitAny": "error",
+        "noArrayIndexKey": "error",
+        "useAwait": "warn",
+        "useDefaultSwitchClauseLast": "error",
+        "noConfusingVoidType": "error"
+      }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all",
+      "semicolons": "asNeeded",
+      "arrowParentheses": "always",
+      "bracketSameLine": false,
+      "bracketSpacing": true
+    }
+  },
+  "json": {
+    "formatter": { "trailingCommas": "none" }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/logger/src/transports/**",
+        "vibe-cli/**",
+        "packages/devtools/**",
+        "packages/tracing/**",
+        "examples/**",
+        "tools/**",
+        "scripts/**"
+      ],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      "includes": ["**/tests/**", "**/type-tests/**", "**/*.test.ts", "**/*.test-d.ts"],
+      "linter": {
+        "rules": {
+          "style": { "noNonNullAssertion": "off" },
+          "suspicious": { "noExplicitAny": "off" }
+        }
+      }
+    }
+  ]
+}
