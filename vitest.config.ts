@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config"
 
 const root = __dirname
 
-function vibeAliases(dir: string): Record<string, string> {
+function sandboxAliases(dir: string): Record<string, string> {
   const base = resolve(root, dir)
   if (!existsSync(base)) return {}
   return Object.fromEntries(
@@ -13,16 +13,16 @@ function vibeAliases(dir: string): Record<string, string> {
       .flatMap((name) => {
         const src = resolve(base, name, "src")
         return [
-          [`vibe/${name}`, src],
-          [`vibe/${name}/*`, resolve(src, "*")],
+          [`@frontal-labs/sandbox/${name}`, src],
+          [`@frontal-labs/sandbox/${name}/*`, resolve(src, "*")],
         ]
       }),
   )
 }
 
 const aliases = {
-  ...vibeAliases("packages"),
-  ...vibeAliases("tools/generators"),
+  ...sandboxAliases("packages"),
+  ...sandboxAliases("crates"),
 }
 
 function project(name: string, rootDir: string) {
@@ -48,7 +48,7 @@ const packageDirs = readdirSync(resolve(root, "packages")).filter((name) =>
 export default defineConfig({
   test: {
     root: __dirname,
-    projects: packageDirs.map((name) => project(`pkg:${name}`, `packages/${name}`)),
+  projects: packageDirs.map((name) => project(`sandbox:${name}`, `packages/${name}`)),
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html", "json-summary"],

@@ -107,15 +107,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "packages/logger/src/transports/**",
-        "vibe-cli/**",
-        "packages/devtools/**",
-        "packages/tracing/**",
-        "examples/**",
-        "tools/**",
-        "scripts/**"
-      ],
+      "includes": ["packages/sdk-ts/**"],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
     },
     {

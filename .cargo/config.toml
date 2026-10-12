@@ -1,7 +1,5 @@
-# Cargo configuration for the Vibe native addon.
+# Cargo configuration for Frontal Sandbox.
 [alias]
 # The Rust side is the bundler's static-analysis addon, not a language compiler.
-# `cargo addon` builds the napi `.node` addon (vibe_napi) for the current platform;
-# `vibe/build` loads it to accelerate its agent→tool graph analysis (optional —
-# point `VIBE_NATIVE_ADDON` at the resulting library, or omit it for the pure-TS path).
-addon = "build --package vibe_napi --features node --release"
+# Native acceleration is configured by the individual sandbox crates as they are
+# introduced. Keep this file focused on the Sandbox workspace.

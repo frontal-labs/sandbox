@@ -1,4 +1,4 @@
-# Clippy configuration for the Vibe compiler crates.
+# Clippy configuration for the Frontal Sandbox crates.
 # CI runs `cargo clippy --workspace --all-targets -- -D warnings`.
 msrv = "1.95.0"
 # Flag large error/result types so diagnostics stay cheap to move around.

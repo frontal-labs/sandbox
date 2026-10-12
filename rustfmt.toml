@@ -1,4 +1,4 @@
-# Formatting rules for the Vibe compiler crates. Stable-rustfmt options only, so
+# Formatting rules for the Frontal Sandbox crates. Stable-rustfmt options only, so
 # `cargo fmt --check` works on the pinned stable toolchain (see rust-toolchain.toml).
 edition = "2021"
 max_width = 100
