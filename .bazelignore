@@ -1,0 +1,8 @@
+# Bazel ignore patterns
+node_modules
+target
+.git
+dist
+build
+*.log
+.DS_Store

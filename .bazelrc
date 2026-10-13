@@ -1,0 +1,47 @@
+# Bazel configuration file
+
+# Build configuration
+build --color=yes
+build --show_progress_rate_limit=30
+build --keep_going
+build --jobs=auto
+
+# Test configuration
+test --test_output=errors
+test --test_timeout=300
+test --test_arg=--nocapture
+test --runs_per_test=1
+test --flaky_test_attempts=3
+test --keep_going
+
+# Platform configuration - use x86_64 for Intel Mac
+build --platforms=//:x86_64_apple_darwin
+
+# Release configuration
+build:release --compilation_mode=opt
+build:release --strip=always
+build:release --define=release=true
+
+# Debug configuration
+build:debug --compilation_mode=dbg
+build:debug --strip=never
+
+# Lint configuration
+build --define=lint=1
+
+# Common flags for all languages
+common --noshow_loading_progress
+common --show_timestamps
+common --announce_rc
+
+# Query configuration
+query --output=label
+query --order_output=no
+
+# Test configuration
+test --test_summary=detailed
+test --noverbose_failures
+
+# Coverage
+coverage --combined_report=lcov
+coverage --coverage_report_generator=@bazel_skylib//rules/coverage:lcov_merger
