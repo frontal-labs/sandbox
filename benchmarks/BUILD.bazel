@@ -1,0 +1,133 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+
+rust_library(
+    name = "bench_common",
+    edition = "2021",
+    srcs = glob(["common/**/*.rs"]),
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-shell:sandbox_shell",
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-snapshot:sandbox_snapshot",
+        "//crates/sandbox-promote:sandbox_promote",
+        "//crates/sandbox-policy:sandbox_policy",
+        "@rules_rust//cargo/remote:tokio",
+        "@rules_rust//cargo/remote:bytes",
+        "@rules_rust//cargo/remote:tracing",
+        "@rules_rust//cargo/remote:tracing_subscriber",
+        "@rules_rust//cargo/remote:criterion",
+        "@rules_rust//cargo/remote:serde",
+        "@rules_rust//cargo/remote:serde_json",
+        "@rules_rust//cargo/remote:anyhow",
+        "@rules_rust//cargo/remote:clap",
+        "@rules_rust//cargo/remote:tempfile",
+        "@rules_rust//cargo/remote:futures",
+        "@rules_rust//cargo/remote:parking_lot",
+        "@rules_rust//cargo/remote:sysinfo",
+        "@rules_rust//cargo/remote:hdrhistogram",
+        "@rules_rust//cargo/remote:indicatif",
+        "@rules_rust//cargo/remote:csv",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Individual benchmark binaries
+rust_binary(
+    name = "vfs_bench",
+    edition = "2021",
+    srcs = ["benches/vfs_bench.rs"],
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:criterion",
+    ],
+    testonly = True,
+)
+
+rust_binary(
+    name = "cas_bench",
+    edition = "2021",
+    srcs = ["benches/cas_bench.rs"],
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:criterion",
+    ],
+    testonly = True,
+)
+
+rust_binary(
+    name = "shell_bench",
+    edition = "2021",
+    srcs = ["benches/shell_bench.rs"],
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:criterion",
+    ],
+    testonly = True,
+)
+
+rust_binary(
+    name = "runtime_bench",
+    edition = "2021",
+    srcs = ["benches/runtime_bench.rs"],
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:criterion",
+    ],
+    testonly = True,
+)
+
+rust_binary(
+    name = "wasm_bench",
+    edition = "2021",
+    srcs = ["benches/wasm_bench.rs"],
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:criterion",
+    ],
+    testonly = True,
+)
+
+rust_binary(
+    name = "session_bench",
+    edition = "2021",
+    srcs = ["benches/session_bench.rs"],
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:criterion",
+    ],
+    testonly = True,
+)
+
+rust_binary(
+    name = "promotion_bench",
+    edition = "2021",
+    srcs = ["benches/promotion_bench.rs"],
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:criterion",
+    ],
+    testonly = True,
+)
+
+# Alias to run all benchmarks
+alias(
+    name = "all_benches",
+    actual = ":vfs_bench",
+    visibility = ["//visibility:public"],
+)
+
+# Test target for bench crate itself
+rust_library(
+    name = "bench_test",
+    edition = "2021",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    deps = [
+        ":bench_common",
+        "@rules_rust//cargo/remote:tokio",
+    ],
+    testonly = True,
+)

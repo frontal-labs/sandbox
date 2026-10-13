@@ -1,0 +1,36 @@
+[package]
+name = "sandbox-load"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Load testing tool for the sandbox system"
+
+[[bin]]
+name = "sandbox-load"
+path = "src/main.rs"
+
+[dependencies]
+sandbox-types = { workspace = true }
+sandbox-sdk = { workspace = true, features = ["embedded"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sysinfo = { workspace = true }
+hdrhistogram = { workspace = true }
+indicatif = { workspace = true }
+csv = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

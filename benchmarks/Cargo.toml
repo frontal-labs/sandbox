@@ -1,0 +1,75 @@
+[package]
+name = "sandbox-bench"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Benchmarks for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../crates/sandbox-types" }
+sandbox-vfs = { path = "../crates/sandbox-vfs" }
+sandbox-cas = { path = "../crates/sandbox-cas" }
+sandbox-shell = { path = "../crates/sandbox-shell" }
+sandbox-runtime = { path = "../crates/sandbox-runtime" }
+sandbox-wasm = { path = "../crates/sandbox-wasm" }
+sandbox-session = { path = "../crates/sandbox-session" }
+sandbox-snapshot = { path = "../crates/sandbox-snapshot" }
+sandbox-promote = { path = "../crates/sandbox-promote" }
+sandbox-policy = { path = "../crates/sandbox-policy" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+criterion = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tempfile = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+sysinfo = "0.30"
+hdrhistogram = "7"
+indicatif = "0.17"
+csv = "1"
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "vfs_bench"
+harness = false
+
+[[bench]]
+name = "cas_bench"
+harness = false
+
+[[bench]]
+name = "shell_bench"
+harness = false
+
+[[bench]]
+name = "runtime_bench"
+harness = false
+
+[[bench]]
+name = "wasm_bench"
+harness = false
+
+[[bench]]
+name = "session_bench"
+harness = false
+
+[[bench]]
+name = "promotion_bench"
+harness = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+debug = true
