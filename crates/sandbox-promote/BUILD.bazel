@@ -1,0 +1,35 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "sandbox_promote",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-vmm:sandbox_vmm",
+        "//crates/sandbox-snapshot:sandbox_snapshot",
+        "@crates//:tokio",
+        "@crates//:bytes",
+        "@crates//:tracing",
+        "@crates//:thiserror",
+        "@crates//:schemars",
+        "@crates//:serde",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_library(
+    name = "sandbox_promote_test",
+    edition = "2021",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    deps = [
+        ":sandbox_promote",
+        "@crates//:tokio",
+    ],
+    testonly = True,
+)
