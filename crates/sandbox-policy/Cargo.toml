@@ -1,0 +1,24 @@
+[package]
+name = "sandbox-policy"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Policy and capabilities for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
+webpki = { workspace = true }
+ipnet = { workspace = true }
+
+[features]
+default = []
