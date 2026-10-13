@@ -1,71 +1,79 @@
-# @frontal/sandbox-sdk
+# sandbox-sdk (TypeScript)
 
-TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox) — instant, low-cost execution environments for AI agents.
+TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox), the execution platform for AI agents. The npm package is `sandbox-sdk`. Source is in `sdks/typescript/`.
+
+**Status: early.** The HTTP client and the Zod types are written, but the client's request paths do not match `sandbox-server` (see Known issues), and the server's handlers return placeholder strings. "Embedded" mode does not start a local backend. Treat this SDK as unverified against a live server.
 
 ## Installation
 
+The package is not published yet. To use it from this repo, build it first:
+
 ```bash
-npm install @frontal/sandbox-sdk
-# or
-bun add @frontal/sandbox-sdk
-# or
-pnpm add @frontal/sandbox-sdk
+cd sdks/typescript
+bun install
+bun run build   # tsc --build, emits dist/
 ```
 
-Requires Node.js 20+ or Bun 1.0+.
+Requires Node.js 20+ (per `engines` in `package.json`).
 
 ## Quick Start
 
-```typescript
-import { Client, EmbeddedSandbox } from "@frontal/sandbox-sdk"
+This shows the intended usage. It will not work end to end until the path mismatch below is fixed.
 
-// Connect to a running sandbox server
+```typescript
+import { Client, isSandboxError } from "sandbox-sdk"
+
+// Explicit configuration
 const client = new Client({
   baseUrl: "http://localhost:8080",
-  apiKey: "sk_..." // optional, from env SANDBOX_API_KEY
+  apiKey: "sk_...", // optional
 })
 
-// Or auto-detect from environment
-const client = Client.fromEnv()
+// Or read SANDBOX_BASE_URL and SANDBOX_API_KEY from the environment
+// const client = Client.fromEnv()
 
-// Create a session
 const session = await client.createSession({
   tenantId: "my-tenant",
-  tierPreference: "auto", // auto-promote to VM when needed
+  tierPreference: "auto",
 })
+if (isSandboxError(session)) throw session
 
-// Execute a command
 const result = await client.exec(session, {
   argv: ["npm", "test"],
   cwd: "/work",
 })
 
-if (result instanceof Error) {
-  console.error("Execution failed:", result.message)
+if (isSandboxError(result)) {
+  console.error("Execution failed:", result.code, result.message)
 } else {
   console.log("Exit code:", result.exitCode)
   console.log("Stdout:", new TextDecoder().decode(result.stdout))
 }
 ```
 
-## Embedded Mode (No Server Required)
+## Embedded Mode (not implemented as described)
 
-Run sandbox locally without a separate server process:
+`EmbeddedSandbox` does not run a local backend. Today it is a thin wrapper over `Client`:
+
+- `EmbeddedSandbox.new()` checks `http://localhost:8080/health` when `SANDBOX_BASE_URL` is unset, then creates a session on that server. It returns `UNAVAILABLE` if the check fails. The server does not route `/health` yet.
+- `serverPath` in `EmbeddedSandboxConfig` is accepted and ignored.
+- `exec(command)` runs `sh -c <command>` through the remote `Client`, so it needs a running server.
+
+Local in-process execution is planned. See `PLAN.md`.
 
 ```typescript
-import { EmbeddedSandbox } from "@frontal/sandbox-sdk"
+import { EmbeddedSandbox, isSandboxError } from "sandbox-sdk"
 
-const sandbox = await EmbeddedSandbox.new({
-  tenantId: "local-dev",
-  tierPreference: "isolate",
-})
+const sandbox = await EmbeddedSandbox.new({ tenantId: "local-dev" })
+if (isSandboxError(sandbox)) throw sandbox
 
-const result = await sandbox.exec("git clone https://github.com/x/y && cd y && npm test")
-
+const result = await sandbox.exec("echo hi")
 await sandbox.destroy()
 ```
 
 ## API Reference
+
+Status key: **Implemented** means the code calls the server; it does not mean the server responds today.
 
 ### Client
 
@@ -74,28 +82,26 @@ await sandbox.destroy()
 ```typescript
 interface ClientConfig {
   baseUrl: string      // e.g. "http://localhost:8080"
-  apiKey?: string      // optional, can use SANDBOX_API_KEY env var
+  apiKey?: string      // sent as "Authorization: Bearer <key>"
 }
 ```
 
 #### `Client.fromEnv(): Client`
 
-Creates a client from environment variables:
-- `SANDBOX_BASE_URL` (default: `http://localhost:8080`)
-- `SANDBOX_API_KEY` (optional)
+Reads `SANDBOX_BASE_URL` (default `http://localhost:8080`) and `SANDBOX_API_KEY` (optional).
 
 #### `client.createSession(config: SessionConfig): Promise<Result<string>>`
 
-Creates a new session. Returns session ID on success.
+Validates the config with Zod, then POSTs it. Returns the session ID.
 
 ```typescript
 interface SessionConfig {
-  tenantId: string
-  tierPreference?: "auto" | "isolate" | "vm"
+  tenantId: string                              // required, min length 1
+  tierPreference?: "auto" | "isolate" | "vm"    // default "auto"
   limits?: ResourceLimits
-  network?: NetworkPolicy
+  network?: NetworkPolicy                       // default defaultDeny: true
   env?: Record<string, string>
-  cwd?: string
+  cwd?: string                                  // default "/work"
   initialSnapshot?: string
   secrets?: SecretsConfig
   labels?: Record<string, string>
@@ -108,20 +114,20 @@ Gets session status and metadata.
 
 #### `client.destroySession(sessionId: string): Promise<Result<void>>`
 
-Destroys a session and frees resources.
+Destroys a session.
 
 #### `client.exec(sessionId: string, request: ExecRequest): Promise<Result<ExecResult>>`
 
-Executes a command (non-streaming).
+Runs a command and waits for the result (non-streaming).
 
 ```typescript
 interface ExecRequest {
-  argv: string[]
+  argv: string[]          // at least one non-empty element
   env?: Record<string, string>
   cwd?: string
   stdin?: Uint8Array
   timeoutMs?: number
-  stream?: false
+  stream?: boolean        // default false
 }
 
 interface ExecResult {
@@ -135,17 +141,15 @@ interface ExecResult {
 
 #### `client.execStream(sessionId: string, request: ExecRequest): AsyncGenerator<Result<ExecResult>>`
 
-Executes a command with streaming output (NDJSON).
+POSTs to the exec endpoint with `?stream=true` and parses newline-delimited JSON. Each line must match the `ExecResult` schema, so the server must send full `ExecResult` objects per line. The streaming chunk format is not defined by the server yet.
 
 ```typescript
-for await (const chunk of client.execStream(sessionId, { argv: ["npm", "test"], stream: true })) {
-  if (chunk instanceof Error) {
+for await (const chunk of client.execStream(sessionId, { argv: ["npm", "test"] })) {
+  if (isSandboxError(chunk)) {
     console.error("Error:", chunk.message)
     break
   }
-  if (chunk.stdout.length) process.stdout.write(new TextDecoder().decode(chunk.stdout))
-  if (chunk.stderr.length) process.stderr.write(new TextDecoder().decode(chunk.stderr))
-  if (chunk.exitCode !== undefined) console.log("Exit:", chunk.exitCode)
+  process.stdout.write(new TextDecoder().decode(chunk.stdout))
 }
 ```
 
@@ -155,204 +159,79 @@ Creates a snapshot of the session.
 
 #### `client.listSnapshots(sessionId: string): Promise<Result<Snapshot[]>>`
 
-Lists all snapshots for a session.
+Lists snapshots for a session.
 
 #### `client.getSnapshot(sessionId: string, snapshotId: string): Promise<Result<Snapshot>>`
 
-Gets a specific snapshot.
+Gets one snapshot.
 
 ### EmbeddedSandbox
 
-#### `EmbeddedSandbox.new(config: EmbeddedSandboxConfig): Promise<Result<EmbeddedSandbox>>`
+See "Embedded Mode" above.
 
-Creates an embedded sandbox (starts local server if needed).
-
-```typescript
-interface EmbeddedSandboxConfig extends SessionConfig {
-  serverPath?: string // path to sandbox-server binary
-}
-```
-
-#### `sandbox.exec(command: string): Promise<Result<ExecResult>>`
-
-Executes a shell command string.
-
-#### `sandbox.snapshot(): Promise<Result<Snapshot>>`
-
-Creates a snapshot.
-
-#### `sandbox.destroy(): Promise<Result<void>>`
-
-Destroys the sandbox.
-
-#### `sandbox.getSessionId(): string | undefined`
-
-Returns the current session ID.
+- `EmbeddedSandbox.new(config: EmbeddedSandboxConfig): Promise<Result<EmbeddedSandbox>>`
+- `sandbox.exec(command: string): Promise<Result<ExecResult>>`
+- `sandbox.snapshot(): Promise<Result<Snapshot>>`
+- `sandbox.destroy(): Promise<Result<void>>`
+- `sandbox.getSessionId(): string | undefined`
 
 ### Types
 
-All types are exported and validated with Zod schemas:
-
-```typescript
-import {
-  SessionConfig,
-  SessionConfigSchema,
-  ExecRequest,
-  ExecRequestSchema,
-  ExecResult,
-  ExecResultSchema,
-  SessionState,
-  SessionStateSchema,
-  Snapshot,
-  SnapshotSchema,
-  Tier,
-  TierPreference,
-  ResourceLimits,
-  NetworkPolicy,
-  NetworkPolicyRule,
-  SecretsConfig,
-  SecretEntry,
-  TierSchema,
-  TierPreferenceSchema,
-  // ... schemas for validation
-} from "@frontal/sandbox-sdk/types"
-```
+Zod schemas and inferred types are exported from `sandbox-sdk/types` (and re-exported from the root). Examples: `SessionConfigSchema`, `ExecRequestSchema`, `ExecResultSchema`, `SessionStateSchema`, `SnapshotSchema`, `TierSchema`, `TierPreferenceSchema`, and the `ResourceLimits`, `NetworkPolicy`, `NetworkPolicyRule`, `SecretsConfig`, and `SecretEntry` types. See `sdks/typescript/src/types/index.ts`.
 
 ### Errors
 
-```typescript
-import {
-  SandboxError,
-  SandboxErrorCodes,
-  isSandboxError,
-  Result,
-} from "@frontal/sandbox-sdk/errors"
-
-// Error codes
-type ErrorCode =
-  | "INTERNAL"
-  | "INVALID_ARGUMENT"
-  | "NOT_FOUND"
-  | "ALREADY_EXISTS"
-  | "PERMISSION_DENIED"
-  | "RESOURCE_EXHAUSTED"
-  | "UNAVAILABLE"
-  | "TIMEOUT"
-  | "CANCELLED"
-  | "INVALID_STATE"
-  | "UNSUPPORTED"
-  | "POLICY_DENIED"
-  | "PROMOTION_FAILED"
-  | "SNAPSHOT_FAILED"
-  | "VM_BOOT_FAILED"
-  | "NETWORK_ERROR"
-  | "CAS_ERROR"
-  | "VFS_ERROR"
-  | "SHELL_ERROR"
-  | "RUNTIME_ERROR"
-  | "WASM_ERROR"
-
-// Result type: T | SandboxError
-type Result<T> = T | SandboxError
-
-// Check if error
-if (isSandboxError(result)) {
-  console.log(result.code, result.message)
-}
-```
-
-## Error Handling
-
-All methods return `Result<T>` which is a union of `T | SandboxError`. Check with `isSandboxError()`:
+Errors are returned as values, not thrown. `Result<T>` is `T | SandboxError`. `SandboxError` is an interface extending `Error` with a `code` field.
 
 ```typescript
-const result = await client.exec(sessionId, { argv: ["ls"] })
-
-if (isSandboxError(result)) {
-  switch (result.code) {
-    case "NOT_FOUND":
-      console.log("Session not found")
-      break
-    case "POLICY_DENIED":
-      console.log("Command blocked by policy")
-      break
-    case "TIMEOUT":
-      console.log("Execution timed out")
-      break
-    default:
-      console.error("Error:", result.message)
-  }
-} else {
-  // Success: result is ExecResult
-  console.log(new TextDecoder().decode(result.stdout))
-}
+import { isSandboxError, SandboxErrorCodes, type Result, type SandboxError } from "sandbox-sdk/errors"
 ```
 
-## Streaming Example
+`ErrorCode` values: `INTERNAL`, `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `TIMEOUT`, `CANCELLED`, `INVALID_STATE`, `UNSUPPORTED`, `POLICY_DENIED`, `PROMOTION_FAILED`, `SNAPSHOT_FAILED`, `VM_BOOT_FAILED`, `NETWORK_ERROR`, `CAS_ERROR`, `VFS_ERROR`, `SHELL_ERROR`, `RUNTIME_ERROR`, `WASM_ERROR`.
 
-```typescript
-import { Client } from "@frontal/sandbox-sdk"
-
-const client = Client.fromEnv()
-const sessionId = await client.createSession({ tenantId: "demo" })
-
-for await (const chunk of client.execStream(sessionId, {
-  argv: ["python3", "-c", "import time; [print(i) or time.sleep(0.5) for i in range(5)]"],
-  stream: true,
-})) {
-  if (isSandboxError(chunk)) {
-    console.error("Stream error:", chunk.message)
-    break
-  }
-  if (chunk.stdout.length) process.stdout.write(new TextDecoder().decode(chunk.stdout))
-}
-```
+Note: the client currently maps every non-OK HTTP response to `INTERNAL`. It does not map HTTP status codes to `NOT_FOUND`, `POLICY_DENIED`, or `TIMEOUT`, so branch on those codes only once the server maps them.
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SANDBOX_BASE_URL` | Sandbox server URL | `http://localhost:8080` |
-| `SANDBOX_API_KEY` | API key for authentication | - |
+| `SANDBOX_API_KEY` | API key sent as a bearer token | none |
+
+## Known issues
+
+- **Snapshot list and get are not routed.** `listSnapshots` and `getSnapshot` call `/v1/sessions/:id/snapshots` routes that `crates/sandbox-server/src/api.rs` does not define, so they will 404. `snapshot()` uses the routed `POST /v1/sessions/:id/snapshot`.
+- **Server placeholders.** Every server handler returns a fixed string, so responses will not match the schemas.
+- **Not routed on the server:** `GET` session list, `listSnapshots`, `getSnapshot`, and the `/health` endpoint that `EmbeddedSandbox.new` checks.
+- **Tests.** `tests/types.test.ts` covers the types only. No client tests exist.
 
 ## Development
 
+Build and tests run through Bazel from the repo root (see the `ts:*` scripts in the root `package.json`). Package scripts also work from this directory:
+
 ```bash
-# Install dependencies
-bun install
-
-# Build
-bun run build
-
-# Watch mode
-bun run dev
-
-# Lint
-bun run lint
-
-# Format
-bun run format
-
-# Test
-bun run test
-
-# Test watch
-bun run test:watch
+bun run build      # tsc --build
+bun run lint       # biome check src
+bun run test       # vitest run
 ```
+
+These commands have not been run as part of this doc refresh.
 
 ## Project Structure
 
 ```
 src/
-├── index.ts           # Main exports
+├── index.ts           # Re-exports the modules below
 ├── client/
-│   └── index.ts       # HTTP client for sandbox server
+│   └── index.ts       # HTTP client for sandbox-server
 ├── embedded/
-│   └── index.ts       # Embedded sandbox (local server)
+│   └── index.ts       # EmbeddedSandbox wrapper over Client (needs a server)
 ├── errors/
-│   └── index.ts       # Error types and helpers
+│   └── index.ts       # SandboxError type and constructors
 └── types/
-    └── index.ts       # Zod schemas and TypeScript types
+    └── index.ts       # Zod schemas and inferred types
+tests/
+└── types.test.ts      # Type-level tests
 ```
 
 ## License
