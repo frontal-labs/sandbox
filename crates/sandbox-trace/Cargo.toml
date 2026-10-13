@@ -1,0 +1,23 @@
+[package]
+name = "sandbox-trace"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Trace and event logging for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+object_store = { workspace = true }
+parquet = { workspace = true }
+
+[features]
+default = []
