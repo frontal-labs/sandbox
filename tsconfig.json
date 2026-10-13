@@ -6,10 +6,12 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "paths": {
-      "@frontal-labs/sandbox-sdk": ["./packages/sdk-ts/src"],
-      "@frontal-labs/sandbox-sdk/*": ["./packages/sdk-ts/src/*"]
-    }
+    "composite": true,
+    "tsBuildInfoFile": "./dist/tsbuildinfo.json"
   },
-  "exclude": ["node_modules", "dist", "build", "coverage", "target"]
+  "include": [],
+  "exclude": ["node_modules", "dist", "build", "coverage", "target"],
+  "references": [
+    { "path": "./sdks/typescript" }
+  ]
 }

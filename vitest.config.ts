@@ -41,18 +41,24 @@ function project(name: string, rootDir: string) {
   }
 }
 
-const packageDirs = readdirSync(resolve(root, "packages")).filter((name) =>
-  existsSync(resolve(root, "packages", name, "src", "index.ts")),
-)
+const packagesDir = resolve(root, "packages")
+const packageDirs = existsSync(packagesDir)
+  ? readdirSync(packagesDir).filter((name) => existsSync(resolve(packagesDir, name, "src", "index.ts")))
+  : []
+
+const hasSdkIndex = existsSync(resolve(root, "sdks/typescript/src/index.ts"))
 
 export default defineConfig({
   test: {
     root: __dirname,
-  projects: packageDirs.map((name) => project(`sandbox:${name}`, `packages/${name}`)),
+    projects: [
+      ...packageDirs.map((name) => project(`sandbox:${name}`, `packages/${name}`)),
+      ...(hasSdkIndex ? [project("sandbox:sdk-ts", "sdks/typescript")] : []),
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html", "json-summary"],
-      include: ["packages/*/src/**"],
+      include: ["packages/*/src/**", "sdks/typescript/src/**"],
       exclude: ["**/*.test.ts", "**/*.test-d.ts", "**/*.d.ts", "**/types/**"],
       thresholds: {
         statements: 80,
