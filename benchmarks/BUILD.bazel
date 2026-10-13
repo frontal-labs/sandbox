@@ -15,22 +15,25 @@ rust_library(
         "//crates/sandbox-snapshot:sandbox_snapshot",
         "//crates/sandbox-promote:sandbox_promote",
         "//crates/sandbox-policy:sandbox_policy",
-        "@rules_rust//cargo/remote:tokio",
-        "@rules_rust//cargo/remote:bytes",
-        "@rules_rust//cargo/remote:tracing",
-        "@rules_rust//cargo/remote:tracing_subscriber",
-        "@rules_rust//cargo/remote:criterion",
-        "@rules_rust//cargo/remote:serde",
-        "@rules_rust//cargo/remote:serde_json",
-        "@rules_rust//cargo/remote:anyhow",
-        "@rules_rust//cargo/remote:clap",
-        "@rules_rust//cargo/remote:tempfile",
-        "@rules_rust//cargo/remote:futures",
-        "@rules_rust//cargo/remote:parking_lot",
-        "@rules_rust//cargo/remote:sysinfo",
-        "@rules_rust//cargo/remote:hdrhistogram",
-        "@rules_rust//cargo/remote:indicatif",
-        "@rules_rust//cargo/remote:csv",
+        "@crates//:tokio",
+        "@crates//:bytes",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        "@crates//:criterion",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:anyhow",
+        "@crates//:clap",
+        "@crates//:tempfile",
+        "@crates//:futures",
+        "@crates//:parking_lot",
+        "@crates//:sysinfo",
+        "@crates//:hdrhistogram",
+        "@crates//:indicatif",
+        "@crates//:csv",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )
@@ -42,7 +45,7 @@ rust_binary(
     srcs = ["benches/vfs_bench.rs"],
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:criterion",
+        "@crates//:criterion",
     ],
     testonly = True,
 )
@@ -53,7 +56,7 @@ rust_binary(
     srcs = ["benches/cas_bench.rs"],
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:criterion",
+        "@crates//:criterion",
     ],
     testonly = True,
 )
@@ -64,7 +67,7 @@ rust_binary(
     srcs = ["benches/shell_bench.rs"],
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:criterion",
+        "@crates//:criterion",
     ],
     testonly = True,
 )
@@ -75,7 +78,7 @@ rust_binary(
     srcs = ["benches/runtime_bench.rs"],
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:criterion",
+        "@crates//:criterion",
     ],
     testonly = True,
 )
@@ -86,7 +89,7 @@ rust_binary(
     srcs = ["benches/wasm_bench.rs"],
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:criterion",
+        "@crates//:criterion",
     ],
     testonly = True,
 )
@@ -97,7 +100,7 @@ rust_binary(
     srcs = ["benches/session_bench.rs"],
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:criterion",
+        "@crates//:criterion",
     ],
     testonly = True,
 )
@@ -108,7 +111,7 @@ rust_binary(
     srcs = ["benches/promotion_bench.rs"],
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:criterion",
+        "@crates//:criterion",
     ],
     testonly = True,
 )
@@ -127,7 +130,7 @@ rust_library(
     srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
         ":bench_common",
-        "@rules_rust//cargo/remote:tokio",
+        "@crates//:tokio",
     ],
     testonly = True,
 )

@@ -13,7 +13,7 @@ rust_library(
         "@crates//:schemars",
         "@crates//:serde",
         "@crates//:prost",
-        "@crates//:prost_types",
+        "@crates//:prost-types",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",

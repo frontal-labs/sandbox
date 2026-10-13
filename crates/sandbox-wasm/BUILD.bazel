@@ -15,7 +15,7 @@ rust_library(
         "@crates//:schemars",
         "@crates//:serde",
         "@crates//:wasmtime",
-        "@crates//:wasmtime_wasi",
+        "@crates//:wasmtime-wasi",
         "@crates//:wizer",
     ],
     proc_macro_deps = [

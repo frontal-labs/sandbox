@@ -7,14 +7,17 @@ rust_binary(
     deps = [
         "//sdks/rust:sandbox_sdk",
         "//crates/sandbox-types:sandbox_types",
-        "@rules_rust//cargo/remote:tokio",
-        "@rules_rust//cargo/remote:tracing",
-        "@rules_rust//cargo/remote:tracing_subscriber",
-        "@rules_rust//cargo/remote:clap",
-        "@rules_rust//cargo/remote:thiserror",
-        "@rules_rust//cargo/remote:schemars",
-        "@rules_rust//cargo/remote:serde",
-        "@rules_rust//cargo/remote:serde_json",
+        "@crates//:tokio",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        "@crates//:clap",
+        "@crates//:thiserror",
+        "@crates//:schemars",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )
@@ -25,7 +28,7 @@ rust_binary(
     srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
         ":sandbox",
-        "@rules_rust//cargo/remote:tokio",
+        "@crates//:tokio",
     ],
     testonly = True,
 )
