@@ -1,0 +1,25 @@
+[package]
+name = "sandbox-vfs"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Virtual filesystem for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+sandbox-cas = { path = "../sandbox-cas" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+notify = { workspace = true }
+
+[features]
+default = []
