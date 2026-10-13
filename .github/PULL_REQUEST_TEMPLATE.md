@@ -14,13 +14,15 @@ Closes #
 
 Please check if your PR fulfills the following requirements:
 
-- [ ] The commit message follows our guidelines: https://github.com/your-org/your-repo/blob/main/CONTRIBUTING.md
+- [ ] The PR title and commit messages follow Conventional Commits (see CONTRIBUTING.md)
+- [ ] A semver label is set (`semver-patch`, `semver-minor`, or `semver-major`)
 - [ ] Tests for the changes have been added (for bug fixes / features)
-- [ ] The code has been formatted (run `bun run format`)
-- [ ] The linting passes (run `bun run lint`)
-- [ ] The type checking passes (run `bun run typecheck`)
-- [ ] The tests pass (run `bun run test`)
-- [ ] Documentation has been updated if necessary
+- [ ] Rust formatting passes (`cargo fmt --all --check`)
+- [ ] Clippy passes (`cargo clippy --workspace --all-targets -- -D warnings`)
+- [ ] Rust tests pass (`cargo test --workspace`), if Rust code changed
+- [ ] TypeScript SDK lint and tests pass (`bun run lint`, `bun run ts:test`), if TypeScript changed
+- [ ] Documentation has been updated if necessary (including PLAN.md if behavior or public API changed)
+- [ ] I have only claimed checks in this description that I actually ran
 
 ## Additional Information
 

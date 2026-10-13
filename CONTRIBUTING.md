@@ -11,6 +11,8 @@ git clone https://github.com/frontal-labs/sandbox.git
 cd sandbox
 ```
 
+Build, lint, and test commands are listed in [README.md](README.md#development).
+
 The repository is currently in the foundation stage. New implementation work
 should follow the planned crate boundaries and preserve the core invariants:
 
@@ -22,7 +24,12 @@ should follow the planned crate boundaries and preserve the core invariants:
 
 ## Changes
 
-Use focused branches and Conventional Commits. Keep public APIs small, document
+Use focused branches and Conventional Commits, for example
+`feat(vfs): add rename`. Suggested scopes include `types`, `vfs`, `shell`,
+`runtime`, `policy`, `session`, `snapshot`, `trace`, `server`, `scheduler`,
+`sdk`, `cli`, and `docs`. PR titles are checked against the Conventional Commits
+pattern (types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`, `ci`,
+`build`, `style`, `revert`). Keep public APIs small, document
 security-sensitive decisions, and add tests with each implementation milestone.
 Avoid adding ambient host access or coupling the SDK to a specific backend.
 
