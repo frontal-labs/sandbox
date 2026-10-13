@@ -1,0 +1,29 @@
+[package]
+name = "sandbox-server"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "API server for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+sandbox-scheduler = { path = "../sandbox-scheduler" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+hyper = { workspace = true }
+utoipa = { workspace = true }
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+default = []

@@ -1,0 +1,37 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "sandbox_server",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "@rules_rust//cargo/remote:tokio",
+        "@rules_rust//cargo/remote:bytes",
+        "@rules_rust//cargo/remote:tracing",
+        "@rules_rust//cargo/remote:thiserror",
+        "@rules_rust//cargo/remote:schemars",
+        "@rules_rust//cargo/remote:serde",
+        "@rules_rust//cargo/remote:serde_json",
+        "@rules_rust//cargo/remote:axum",
+        "@rules_rust//cargo/remote:tower",
+        "@rules_rust//cargo/remote:hyper",
+        "@rules_rust//cargo/remote:utoipa",
+        "@rules_rust//cargo/remote:jsonwebtoken",
+        "@rules_rust//cargo/remote:argon2",
+        "@rules_rust//cargo/remote:uuid",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_library(
+    name = "sandbox_server_test",
+    edition = "2021",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    deps = [
+        ":sandbox_server",
+        "@rules_rust//cargo/remote:tokio",
+    ],
+    testonly = True,
+)
