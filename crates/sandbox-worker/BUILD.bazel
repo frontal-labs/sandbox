@@ -1,0 +1,46 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "sandbox_worker",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-session:sandbox_session",
+        "@rules_rust//cargo/remote:tokio",
+        "@rules_rust//cargo/remote:bytes",
+        "@rules_rust//cargo/remote:tracing",
+        "@rules_rust//cargo/remote:async_trait",
+        "@rules_rust//cargo/remote:thiserror",
+        "@rules_rust//cargo/remote:schemars",
+        "@rules_rust//cargo/remote:serde",
+        "@rules_rust//cargo/remote:tonic",
+        "@rules_rust//cargo/remote:prost",
+        "@rules_rust//cargo/remote:rustix",
+        "@rules_rust//cargo/remote:nix",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Optional seccomp feature
+rust_library(
+    name = "sandbox_worker_seccomp",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        ":sandbox_worker",
+        "@rules_rust//cargo/remote:seccompiler",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_library(
+    name = "sandbox_worker_test",
+    edition = "2021",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    deps = [
+        ":sandbox_worker",
+        "@rules_rust//cargo/remote:tokio",
+    ],
+    testonly = True,
+)
