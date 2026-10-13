@@ -1,0 +1,24 @@
+[package]
+name = "sandbox-guest"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Guest agent for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+vsock = { workspace = true, optional = true }
+
+[features]
+default = []
+vsock = ["dep:vsock"]
