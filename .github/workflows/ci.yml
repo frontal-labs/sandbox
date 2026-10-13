@@ -16,13 +16,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v12
-      - uses: DeterminateSystems/magic-nix-cache-action@v4
+      # rust-toolchain.toml pins the toolchain; rustup installs it on first use.
+      - uses: Swatinem/rust-cache@v2
       - name: Format
-        run: nix develop --command cargo fmt --all --check
+        run: cargo fmt --all --check
       - name: Clippy
-        run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: nix develop --command cargo test --workspace
+        run: cargo test --workspace
       - name: Bench compile check
-        run: nix develop --command cargo bench --workspace --no-run
+        run: cargo bench --workspace --no-run

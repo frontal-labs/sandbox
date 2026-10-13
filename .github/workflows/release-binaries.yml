@@ -36,14 +36,16 @@ jobs:
         run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build CLI
-        run: cargo build --release -p sandbox-cli --target ${{ matrix.target }}
+        run: cargo build --release -p cli --target ${{ matrix.target }}
       - name: Package CLI binary
         shell: bash
         run: |
-          LIB="target/${{ matrix.target }}/release/sandbox"
+          EXE=sandbox
+          if [ "${{ matrix.os_name }}" = "win32" ]; then EXE=sandbox.exe; fi
+          BIN="target/${{ matrix.target }}/release/$EXE"
           PKG_DIR="target/npm-pkg/${{ matrix.target }}"
           mkdir -p "$PKG_DIR"
-          cp "$LIB" "$PKG_DIR/sandbox"
+          cp "$BIN" "$PKG_DIR/$EXE"
       - uses: actions/upload-artifact@v4
         with:
           name: sandbox-${{ matrix.target }}
