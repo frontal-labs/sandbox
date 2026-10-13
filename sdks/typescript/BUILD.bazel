@@ -1,0 +1,41 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project", "ts_config")
+
+# TypeScript configuration
+ts_config(
+    name = "tsconfig",
+    src = "tsconfig.json",
+)
+
+# Main library
+ts_project(
+    name = "sandbox_sdk",
+    srcs = glob(["src/**/*.ts"]),
+    tsconfig = ":tsconfig",
+    deps = [],
+    visibility = ["//visibility:public"],
+)
+
+# Tests - use a separate ts_project for tests
+ts_project(
+    name = "sandbox_sdk_test",
+    srcs = glob(["tests/**/*.test.ts"]),
+    tsconfig = ":tsconfig",
+    deps = [
+        ":sandbox_sdk",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Alias for all tests
+alias(
+    name = "test",
+    actual = ":sandbox_sdk_test",
+    visibility = ["//visibility:public"],
+)
+
+# Alias for all build targets
+alias(
+    name = "all",
+    actual = ":sandbox_sdk",
+    visibility = ["//visibility:public"],
+)
