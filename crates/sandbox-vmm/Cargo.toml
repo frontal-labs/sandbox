@@ -1,0 +1,26 @@
+[package]
+name = "sandbox-vmm"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Firecracker VMM driver for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+hyper = { workspace = true }
+hyperlocal = { workspace = true }
+seccompiler = { workspace = true, optional = true }
+rustix = { workspace = true }
+nix = { workspace = true }
+
+[features]
+default = []
+seccomp = ["seccompiler"]
