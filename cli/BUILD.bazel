@@ -1,9 +1,9 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
 
-rust_binary(
-    name = "sandbox",
+rust_library(
+    name = "cli_lib",
     edition = "2021",
-    srcs = glob(["src/**/*.rs"]),
+    srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs"]),
     deps = [
         "//sdks/rust:sandbox_sdk",
         "//crates/sandbox-types:sandbox_types",
@@ -18,6 +18,16 @@ rust_binary(
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_binary(
+    name = "sandbox",
+    edition = "2021",
+    srcs = ["src/main.rs"],
+    deps = [
+        ":cli_lib",
     ],
     visibility = ["//visibility:public"],
 )
