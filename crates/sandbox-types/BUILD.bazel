@@ -1,0 +1,32 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "sandbox_types",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:schemars",
+        "@crates//:ulid",
+        "@crates//:blake3",
+        "@crates//:bytes",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_library(
+    name = "sandbox_types_test",
+    edition = "2021",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    deps = [
+        ":sandbox_types",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+    testonly = True,
+)

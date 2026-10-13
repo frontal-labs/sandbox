@@ -1,0 +1,22 @@
+[package]
+name = "sandbox-types"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+categories = ["system", "virtualization"]
+description = "Shared types for the sandbox system"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+ulid = { workspace = true }
+blake3 = { workspace = true }
+bytes = { workspace = true }
+async-trait = { workspace = true }
+
+[features]
+default = []
