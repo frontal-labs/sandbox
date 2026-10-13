@@ -1,0 +1,26 @@
+[package]
+name = "sandbox-wasm"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "WASM/WASI host for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+sandbox-vfs = { path = "../sandbox-vfs" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+wizer = { workspace = true }
+
+[features]
+default = []
