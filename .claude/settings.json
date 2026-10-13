@@ -1,5 +1,5 @@
 {
-  "agent": {
+  "agentProfile": {
     "name": "Frontal Sandbox Engineer",
     "description": "Claude configured as an autonomous software engineer for Frontal Sandbox",
     "version": "1.0.0"
