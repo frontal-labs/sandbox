@@ -1,0 +1,27 @@
+[package]
+name = "cli"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "CLI for the sandbox system"
+
+[[bin]]
+name = "sandbox"
+path = "src/main.rs"
+
+[dependencies]
+sandbox-sdk = { path = "../sdks/rust" }
+sandbox-types = { path = "../crates/sandbox-types" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[features]
+default = []
