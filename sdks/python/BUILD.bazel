@@ -1,0 +1,93 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_binary", "py_test")
+
+# Python SDK library
+py_library(
+    name = "sandbox_sdk",
+    srcs = glob(["sandbox_sdk/**/*.py"]),
+    imports = ["."],
+    deps = [
+        "@rules_python//python/pip:httpx",
+        "@rules_python//python/pip:pydantic",
+        "@rules_python//python/pip:ulid_py",
+        "@rules_python//python/pip:python_dotenv",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Tests
+py_test(
+    name = "sandbox_sdk_test",
+    srcs = glob(["tests/**/*.py"], allow_empty = True),
+    deps = [
+        ":sandbox_sdk",
+        "@rules_python//python/pip:pytest",
+        "@rules_python//python/pip:pytest_asyncio",
+        "@rules_python//python/pip:pytest_cov",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Type checking (mypy)
+py_binary(
+    name = "typecheck",
+    main = "@rules_python//python/pip:mypy",
+    args = [
+        "--strict",
+        "--warn-return-any",
+        "--warn-unused-configs",
+        "--disallow-untyped-defs",
+        "--disallow-incomplete-defs",
+        "--check-untyped-defs",
+        "--no-implicit-optional",
+        "--warn-redundant-casts",
+        "--warn-unused-ignores",
+        "--warn-no-return",
+        "sandbox_sdk",
+    ],
+    deps = [
+        ":sandbox_sdk",
+        "@rules_python//python/pip:mypy",
+        "@rules_python//python/pip:types_requests",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Linting (ruff)
+py_binary(
+    name = "lint",
+    main = "@rules_python//python/pip:ruff",
+    args = ["check", "sandbox_sdk", "tests"],
+    deps = [
+        "@rules_python//python/pip:ruff",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Format check
+py_binary(
+    name = "format_check",
+    main = "@rules_python//python/pip:ruff",
+    args = ["format", "--check", "sandbox_sdk", "tests"],
+    deps = [
+        "@rules_python//python/pip:ruff",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Format fix
+py_binary(
+    name = "format_fix",
+    main = "@rules_python//python/pip:ruff",
+    args = ["format", "sandbox_sdk", "tests"],
+    deps = [
+        "@rules_python//python/pip:ruff",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Alias for all checks
+alias(
+    name = "check",
+    actual = ":typecheck",
+    visibility = ["//visibility:public"],
+)
