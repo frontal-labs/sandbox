@@ -1,0 +1,43 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "sandbox_scheduler",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "@rules_rust//cargo/remote:tokio",
+        "@rules_rust//cargo/remote:bytes",
+        "@rules_rust//cargo/remote:tracing",
+        "@rules_rust//cargo/remote:async_trait",
+        "@rules_rust//cargo/remote:thiserror",
+        "@rules_rust//cargo/remote:schemars",
+        "@rules_rust//cargo/remote:serde",
+        "@rules_rust//cargo/remote:redb",
+        "@rules_rust//cargo/remote:tonic",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Optional clustered feature
+rust_library(
+    name = "sandbox_scheduler_clustered",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        ":sandbox_scheduler",
+        "@rules_rust//cargo/remote:sqlx",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_library(
+    name = "sandbox_scheduler_test",
+    edition = "2021",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    deps = [
+        ":sandbox_scheduler",
+        "@rules_rust//cargo/remote:tokio",
+    ],
+    testonly = True,
+)

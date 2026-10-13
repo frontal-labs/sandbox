@@ -1,0 +1,25 @@
+[package]
+name = "sandbox-scheduler"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Scheduler for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+redb = "2"
+sqlx = { workspace = true, optional = true }
+tonic = { workspace = true }
+
+[features]
+default = []
+clustered = ["sqlx"]
