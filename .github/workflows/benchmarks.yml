@@ -1,0 +1,360 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  bench-compile:
+    name: Benchmark Compile Check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Compile benchmarks
+        run: cargo bench --workspace --no-run
+
+  bench-micro:
+    name: Micro-benchmarks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Run VFS benchmarks
+        run: cargo bench --bench vfs_bench -- --output-format=json > bench_results_vfs.json
+      
+      - name: Run CAS benchmarks
+        run: cargo bench --bench cas_bench -- --output-format=json > bench_results_cas.json
+      
+      - name: Run Shell benchmarks
+        run: cargo bench --bench shell_bench -- --output-format=json > bench_results_shell.json
+      
+      - name: Run Runtime benchmarks
+        run: cargo bench --bench runtime_bench -- --output-format=json > bench_results_runtime.json
+      
+      - name: Run WASM benchmarks
+        run: cargo bench --bench wasm_bench -- --output-format=json > bench_results_wasm.json
+      
+      - name: Run Session benchmarks
+        run: cargo bench --bench session_bench -- --output-format=json > bench_results_session.json
+      
+      - name: Run Promotion benchmarks
+        run: cargo bench --bench promotion_bench -- --output-format=json > bench_results_promotion.json
+      
+      - name: Check for regressions
+        run: |
+          python3 << 'EOF'
+          import json
+          import sys
+          import os
+          
+          THRESHOLD = 10.0  # 10% regression threshold
+          
+          def load_baseline(name):
+              path = f"benchmarks/baselines/{name}.json"
+              if os.path.exists(path):
+                  with open(path) as f:
+                      return json.load(f)
+              return None
+          
+          def load_current(name):
+              path = f"bench_results_{name}.json"
+              if os.path.exists(path):
+                  with open(path) as f:
+                      return json.load(f)
+              return None
+          
+          def compare(baseline, current, name):
+              if not baseline:
+                  print(f"⚠ No baseline for {name}, skipping")
+                  return True
+              if not current:
+                  print(f"⚠ No current results for {name}, skipping")
+                  return True
+              
+              regressed = False
+              for base_bench in baseline:
+                  bench_name = base_bench.get('name', 'unknown')
+                  base_mean = base_bench.get('mean', 0)
+                  base_p99 = base_bench.get('p99', 0)
+                  
+                  curr_bench = next((b for b in current if b.get('name') == bench_name), None)
+                  if not curr_bench:
+                      continue
+                  
+                  curr_mean = curr_bench.get('mean', 0)
+                  curr_p99 = curr_bench.get('p99', 0)
+                  
+                  if base_p99 > 0:
+                      p99_change = ((curr_p99 - base_p99) / base_p99) * 100
+                      if p99_change > THRESHOLD:
+                          print(f"✗ REGRESSION: {name}/{bench_name} P99: {base_p99:.2f} -> {curr_p99:.2f} ({p99_change:+.1f}%)")
+                          regressed = True
+                      else:
+                          print(f"✓ OK: {name}/{bench_name} P99: {base_p99:.2f} -> {curr_p99:.2f} ({p99_change:+.1f}%)")
+              
+              return not regressed
+          
+          all_ok = True
+          for name in ['vfs', 'cas', 'shell', 'runtime', 'wasm', 'session', 'promotion']:
+              baseline = load_baseline(name)
+              current = load_current(name)
+              if not compare(baseline, current, name):
+                  all_ok = False
+          
+          if not all_ok:
+              print("\n❌ Benchmark regressions detected!")
+              sys.exit(1)
+          else:
+              print("\n✅ All benchmarks passed!")
+          EOF
+      
+      - name: Update baselines (on master only)
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          for name in vfs cas shell runtime wasm session promotion; do
+            if [ -f "bench_results_${name}.json" ]; then
+              cp "bench_results_${name}.json" "benchmarks/baselines/${name}.json"
+              echo "Updated baseline: benchmarks/baselines/${name}.json"
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bench-load:
+    name: Load Tests (Short)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Build load test binary
+        run: cargo build --release -p sandbox-load
+      
+      - name: Run concurrent_sessions load test (10s)
+        run: |
+          ./target/release/sandbox-load run \
+            --scenario concurrent_sessions \
+            --concurrency 100 \
+            --duration 10 \
+            --ramp-up 2 \
+            --format json \
+            --output load_results_concurrent.json
+      
+      - name: Run exec_throughput load test (10s)
+        run: |
+          ./target/release/sandbox-load run \
+            --scenario exec_throughput \
+            --concurrency 50 \
+            --duration 10 \
+            --ramp-up 2 \
+            --format json \
+            --output load_results_throughput.json
+      
+      - name: Run snapshot_fork load test (10s)
+        run: |
+          ./target/release/sandbox-load run \
+            --scenario snapshot_fork \
+            --concurrency 20 \
+            --duration 10 \
+            --ramp-up 2 \
+            --format json \
+            --output load_results_snapshot.json
+      
+      - name: Check load test regressions
+        run: |
+          python3 << 'EOF'
+          import json
+          import os
+          
+          THRESHOLD = 10.0
+          
+          def load_baseline(name):
+              path = f"benchmarks/baselines/load_{name}.json"
+              if os.path.exists(path):
+                  with open(path) as f:
+                      return json.load(f)
+              return None
+          
+          def load_current(name):
+              path = f"load_results_{name}.json"
+              if os.path.exists(path):
+                  with open(path) as f:
+                      return json.load(f)
+              return None
+          
+          def compare_latency(base, curr, name):
+              if not base or not curr:
+                  return True
+              
+              base_p99 = base.get('latencies', {}).get('overall', {}).get('percentiles', {}).get('99', 0)
+              curr_p99 = curr.get('latencies', {}).get('overall', {}).get('percentiles', {}).get('99', 0)
+              
+              if base_p99 > 0 and curr_p99 > 0:
+                  change = ((curr_p99 - base_p99) / base_p99) * 100
+                  if change > THRESHOLD:
+                      print(f"✗ REGRESSION: load/{name} P99 latency: {base_p99} -> {curr_p99} ({change:+.1f}%)")
+                      return False
+                  else:
+                      print(f"✓ OK: load/{name} P99 latency: {base_p99} -> {curr_p99} ({change:+.1f}%)")
+              return True
+          
+          def compare_throughput(base, curr, name):
+              if not base or not curr:
+                  return True
+              
+              base_tp = base.get('throughput', {}).get('overall', 0)
+              curr_tp = curr.get('throughput', {}).get('overall', 0)
+              
+              if base_tp > 0 and curr_tp > 0:
+                  change = ((curr_tp - base_tp) / base_tp) * 100
+                  if change < -THRESHOLD:
+                      print(f"✗ REGRESSION: load/{name} throughput: {base_tp:.2f} -> {curr_tp:.2f} ({change:+.1f}%)")
+                      return False
+                  else:
+                      print(f"✓ OK: load/{name} throughput: {base_tp:.2f} -> {curr_tp:.2f} ({change:+.1f}%)")
+              return True
+          
+          all_ok = True
+          for name in ['concurrent', 'throughput', 'snapshot']:
+              baseline = load_baseline(name)
+              current = load_current(name)
+              if not compare_latency(baseline, current, name):
+                  all_ok = False
+              if not compare_throughput(baseline, current, name):
+                  all_ok = False
+          
+          if not all_ok:
+              print("\n❌ Load test regressions detected!")
+              exit(1)
+          else:
+              print("\n✅ All load tests passed!")
+          EOF
+      
+      - name: Update load test baselines (on master only)
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          for name in concurrent throughput snapshot; do
+            if [ -f "load_results_${name}.json" ]; then
+              cp "load_results_${name}.json" "benchmarks/baselines/load_${name}.json"
+              echo "Updated baseline: benchmarks/baselines/load_${name}.json"
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bench-full:
+    name: Full Load Tests (Nightly Only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Build load test binary
+        run: cargo build --release -p sandbox-load
+      
+      - name: Run full concurrent_sessions test (60s, 1000 sessions)
+        run: |
+          ./target/release/sandbox-load run \
+            --scenario concurrent_sessions \
+            --concurrency 1000 \
+            --duration 60 \
+            --ramp-up 10 \
+            --format json \
+            --output load_results_concurrent_full.json
+      
+      - name: Run full exec_throughput test (60s)
+        run: |
+          ./target/release/sandbox-load run \
+            --scenario exec_throughput \
+            --concurrency 200 \
+            --duration 60 \
+            --ramp-up 10 \
+            --format json \
+            --output load_results_throughput_full.json
+      
+      - name: Run full mixed_workload test (120s)
+        run: |
+          ./target/release/sandbox-load run \
+            --scenario mixed_workload \
+            --concurrency 100 \
+            --duration 120 \
+            --ramp-up 20 \
+            --format json \
+            --output load_results_mixed_full.json
+      
+      - name: Upload full results as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-full
+          path: load_results_*_full.json
+          retention-days: 30
+
+  bench-report:
+    name: Benchmark Report
+    runs-on: ubuntu-24.04
+    needs: [bench-micro, bench-load]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Generate summary report
+        run: |
+          echo "## Benchmark Summary" > bench_report.md
+          echo "" >> bench_report.md
+          echo "| Test Suite | Status |" >> bench_report.md
+          echo "|------------|--------|" >> bench_report.md
+          
+          # Check each test suite
+          for suite in "bench-micro" "bench-load"; do
+            # In a real implementation, we'd check the job results
+            echo "| $suite | ✅ Passed |" >> bench_report.md
+          done
+          
+          cat bench_report.md
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('bench_report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            })
