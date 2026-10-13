@@ -1,4 +1,4 @@
-# sandbox CLI
+# Sandbox CLI
 
 Command-line interface for Frontal Sandbox. The crate is `cli` (`cli/`), and it builds a binary named `sandbox`.
 
