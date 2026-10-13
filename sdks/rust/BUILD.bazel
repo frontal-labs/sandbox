@@ -1,0 +1,57 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "sandbox_sdk",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "//crates/sandbox-shell:sandbox_shell",
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-policy:sandbox_policy",
+        "//crates/sandbox-snapshot:sandbox_snapshot",
+        "@rules_rust//cargo/remote:tokio",
+        "@rules_rust//cargo/remote:bytes",
+        "@rules_rust//cargo/remote:tracing",
+        "@rules_rust//cargo/remote:thiserror",
+        "@rules_rust//cargo/remote:schemars",
+        "@rules_rust//cargo/remote:serde",
+        "@rules_rust//cargo/remote:reqwest",
+        "@rules_rust//cargo/remote:futures",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Embedded feature - includes all optional dependencies
+rust_library(
+    name = "sandbox_sdk_embedded",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        ":sandbox_sdk",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "//crates/sandbox-shell:sandbox_shell",
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-policy:sandbox_policy",
+        "//crates/sandbox-snapshot:sandbox_snapshot",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_library(
+    name = "sandbox_sdk_test",
+    edition = "2021",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    deps = [
+        ":sandbox_sdk",
+        "@rules_rust//cargo/remote:tokio",
+    ],
+    testonly = True,
+)
