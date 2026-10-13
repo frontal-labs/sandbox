@@ -56,11 +56,15 @@ trace sink (append-only event log)
 
 ## 3. Repository layout
 
+Status: the workspace, crates, SDKs, and CLI below exist as scaffolds (see
+`Cargo.toml`, `crates/`, `sdks/`, `cli/`). `deny.toml`, `tools/`, `images/`,
+`deploy/`, `tests/`, and `examples/` are planned and not yet present.
+
 ```
 sandbox/
 ├── Cargo.toml                 # workspace
 ├── rust-toolchain.toml        # pin stable
-├── deny.toml                  # cargo-deny: licenses + advisories
+├── deny.toml                  # cargo-deny: licenses + advisories (planned)
 ├── crates/
 │   ├── sandbox-types/            # shared IDs, errors, event schema, config
 │   ├── sandbox-vfs/              # virtual filesystem
@@ -77,17 +81,18 @@ sandbox/
 │   ├── sandbox-trace/            # event log, diff, replay
 │   ├── sandbox-worker/           # per-tenant process entrypoint
 │   ├── sandbox-scheduler/        # placement, pools, idle, metering
-│   ├── sandbox-server/           # axum API
-│   ├── sandbox-sdk/              # Rust client
-│   └── sandbox-cli/              # `sandbox` binary
-├── packages/
-│   └── sdk-ts/                # thin TS client generated from OpenAPI
-├── tools/                     # build scripts: tools to WASM, rootfs images
-├── images/                    # Tier 2 rootfs recipes
-├── deploy/                    # Dockerfile, Terraform, systemd units
-├── bench/                     # criterion benches + load tests
-├── tests/                     # cross-crate integration + conformance
-├── examples/                  # coding-agent, data-agent, browser-agent
+│   └── sandbox-server/           # axum API
+├── sdks/
+│   ├── rust/                  # Rust client SDK (crate: sandbox-sdk)
+│   ├── typescript/            # TS client SDK (npm: sandbox-sdk)
+│   └── python/                # Python client SDK (package: sandbox_sdk)
+├── cli/                       # `sandbox` binary (crate: cli)
+├── benchmarks/                # criterion benches + load tests
+├── tools/                     # build scripts: tools to WASM, rootfs images (planned)
+├── images/                    # Tier 2 rootfs recipes (planned)
+├── deploy/                    # Dockerfile, Terraform, systemd units (planned)
+├── tests/                     # cross-crate integration + conformance (planned)
+├── examples/                  # coding-agent, data-agent, browser-agent (planned)
 └── docs/                      # architecture, security, API, limits
 ```
 
@@ -269,7 +274,7 @@ Be explicit in docs: running processes do not survive promotion. Include a `prom
 - Generate an OpenAPI spec from types (`utoipa` or `schemars`); CI fails if the committed spec drifts.
 - Rate limiting, request IDs, structured logs, Prometheus metrics, OpenTelemetry traces.
 
-### 4.16 `sandbox-sdk` and `sandbox-cli`
+### 4.16 `sandbox-sdk` and `cli` (binary `sandbox`)
 
 ```rust
 let client = sandbox::from_env()?;
@@ -342,7 +347,7 @@ Rule: justify every new dependency in the PR description; prefer well-maintained
 
 ### M1: Isolate + VFS + shell core (weeks 2-5)
 
-- `sandbox-vfs` (overlay, commit, quotas), `sandbox-runtime` (deno\_core, startup snapshot, limits), `sandbox-shell` (parser, pipes, redirects, 20 builtins), `sandbox-session` IsolateBackend, `sandbox-sdk` embedded mode, `sandbox-cli run`.
+- `sandbox-vfs` (overlay, commit, quotas), `sandbox-runtime` (deno\_core, startup snapshot, limits), `sandbox-shell` (parser, pipes, redirects, 20 builtins), `sandbox-session` IsolateBackend, `sandbox-sdk` embedded mode, `sandbox run`.
 - **Accept:** `sandbox run "echo hi | cat > /a && cat /a"` works; `node -e` and a `.ts` script run against the VFS; cold start < 5 ms from warm pool in `bench/`; 200+ shell conformance cases pass.
 
 ### M2: WASM tools + Node compat + trace (weeks 6-9)

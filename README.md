@@ -2,6 +2,8 @@
 
 ![Frontal Banner](./banner.jpg)
 
+**Millisecond sandboxes for AI agents**
+
 Frontal Sandbox provides instant, low-cost execution environments for AI agents.
 Sessions begin in V8-fast isolates and promote to real Linux microVMs only when a
 command requires them.
@@ -28,36 +30,60 @@ Client (Rust SDK / TypeScript SDK / CLI)
 The VFS is the source of truth. The SDK does not need to know which execution
 tier is active; tier is exposed as read-only session state.
 
-## Planned layout
+## Repository layout
 
 ```text
-crates/
-├── sandbox-types       Shared IDs, errors, events, and configuration
-├── sandbox-vfs         Copy-on-write virtual filesystem
-├── sandbox-cas         Content-addressed blob storage
-├── sandbox-shell       POSIX-ish shell and builtins
-├── sandbox-runtime     Deno/V8 isolate host
-├── sandbox-wasm        Wasmtime and WASI tool host
-├── sandbox-session     Session trait and backends
-├── sandbox-snapshot    Snapshot, fork, and restore
-├── sandbox-vmm         Firecracker driver
-├── sandbox-guest       In-VM guest agent
-├── sandbox-promote     Isolate-to-VM handoff
-├── sandbox-policy      Capabilities, network policy, and limits
-├── sandbox-trace       Event log, diff, and replay
-├── sandbox-worker      Per-tenant worker process
-├── sandbox-scheduler   Placement, pools, sleep, and metering
-├── sandbox-server      HTTP and WebSocket API
-├── sandbox-sdk         Rust client
-└── sandbox-cli         Command-line client
+crates/                     Rust workspace members (crate names are sandbox-*)
+├── sandbox-types           Shared IDs, errors, events, and configuration
+├── sandbox-vfs             Copy-on-write virtual filesystem
+├── sandbox-cas             Content-addressed blob storage
+├── sandbox-shell           POSIX-ish shell and builtins
+├── sandbox-runtime         Deno/V8 isolate host
+├── sandbox-wasm            Wasmtime and WASI tool host
+├── sandbox-session         Session trait and backends
+├── sandbox-snapshot        Snapshot, fork, and restore
+├── sandbox-vmm             Firecracker driver
+├── sandbox-guest           In-VM guest agent
+├── sandbox-promote         Isolate-to-VM handoff
+├── sandbox-policy          Capabilities, network policy, and limits
+├── sandbox-trace           Event log, diff, and replay
+├── sandbox-worker          Per-tenant worker process
+├── sandbox-scheduler       Placement, pools, sleep, and metering
+└── sandbox-server          HTTP and WebSocket API
+cli/                        Command-line client (crate `cli`, binary `sandbox`)
+sdks/
+├── rust/                   Rust client SDK (crate `sandbox-sdk`)
+├── typescript/             TypeScript SDK (npm `sandbox-sdk`, built with Bazel)
+└── python/                 Python SDK (package `sandbox_sdk`)
+benchmarks/                 Criterion benches and load tests
+docs/                       Architecture, security model, API, and limits
 ```
 
-See [PLAN.md](PLAN.md) for the complete milestone plan and design specification.
+Most crates are early scaffolds or stubs. The server routes return placeholder
+responses, and `sandbox run` and `sandbox shell` are not yet implemented. See [PLAN.md](PLAN.md) for the milestone status,
+the complete design specification, and target behavior.
 
 ## Development
 
-The repository is currently at the planning and foundation stage. Rust workspace
-crates will be introduced milestone by milestone according to `PLAN.md`.
+Rust (workspace root `Cargo.toml`, toolchain pinned in `rust-toolchain.toml`):
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+TypeScript and repository tooling (root `package.json`; the `ts:*` scripts run
+through Bazel):
+
+```bash
+bun install
+bun run lint          # biome check
+bun run ts:build      # bazel build //sdks/typescript:all
+bun run ts:test       # bazel test //sdks/typescript:test
+```
+
+Contribution guidelines are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
