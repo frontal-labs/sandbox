@@ -1,0 +1,24 @@
+[package]
+name = "sandbox-snapshot"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frontal-labs/sandbox"
+authors = ["Frontal Labs"]
+description = "Snapshot and fork functionality for the sandbox system"
+
+[dependencies]
+sandbox-types = { path = "../sandbox-types" }
+sandbox-vfs = { path = "../sandbox-vfs" }
+sandbox-cas = { path = "../sandbox-cas" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+
+[features]
+default = []
