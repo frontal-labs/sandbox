@@ -14,6 +14,7 @@ rust_library(
         "@crates//:parking_lot",
         "@crates//:schemars",
         "@crates//:serde",
+        "@crates//:deno_core",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
