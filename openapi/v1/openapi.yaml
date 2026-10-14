@@ -196,6 +196,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+        '413':
+          description: File is larger than the 16 MiB read limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
       security:
       - bearer: []
     put:

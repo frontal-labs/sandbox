@@ -38,6 +38,8 @@ Errors use the `ErrorBody` shape (`code`, `message`). Status codes follow the er
 | Live sessions across all keys | 4096 | `429`, `RESOURCE_EXHAUSTED` |
 | Snapshots per key | 32 | `429`, `RESOURCE_EXHAUSTED` |
 | Sessions per fork call | 1 to 64 | `400` |
+| File read size | 16 MiB | `413`, `RESOURCE_EXHAUSTED` |
+| Request body size | 2 MiB | `413` from the framework |
 
 The process-wide snapshot registry in `sandbox-session` is separate, and caps at 1024 snapshots across all keys. A key that fills it blocks other keys' snapshots, so the registry should move into the server before the server is exposed to untrusted keys.
 

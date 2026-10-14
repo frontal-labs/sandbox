@@ -52,6 +52,11 @@ const MAX_FORK_COUNT: u32 = 64;
 pub const MAX_SESSIONS_PER_KEY: usize = 64;
 /// Live sessions the server holds across all keys.
 pub const MAX_SESSIONS_TOTAL: usize = 4096;
+/// Largest file one read returns. A read holds the whole file in memory, and a
+/// session may hold files up to the VFS quota of 100 MiB, so reads are capped.
+pub const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
+/// Largest request body. Writes are bounded by this, not by the VFS quota.
+pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 /// Snapshots one key may hold. Snapshots pin blobs in the shared store, and
 /// the process-wide snapshot registry is capped separately.
 pub const MAX_SNAPSHOTS_PER_KEY: usize = 32;
@@ -162,6 +167,11 @@ fn vfs_error(error: VfsError) -> SandboxError {
         VfsError::Unsupported(m) => SandboxError::unsupported(m),
         other => SandboxError::new(ErrorCode::VfsError, other.to_string()),
     }
+}
+
+/// Whether a file of `size` bytes is too large to read in one call.
+fn over_read_limit(size: u64) -> bool {
+    size > MAX_READ_BYTES
 }
 
 /// Turns a request path into an absolute VFS path. `..` is refused, so a path
@@ -307,6 +317,7 @@ pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Route
             require_api_key,
         ))
         .route("/v1/openapi.json", get(openapi_json))
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
 
@@ -440,6 +451,7 @@ pub async fn exec_command(
         (status = 200, description = "File contents", content_type = "application/octet-stream"),
         (status = 400, description = "Path is a directory or contains '..'", body = ErrorBody),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 413, description = "File is larger than the 16 MiB read limit", body = ErrorBody),
         (status = 404, description = "No such session, or no such file", body = ErrorBody),
     ),
     security(("bearer" = []))
@@ -457,6 +469,16 @@ pub async fn read_file(
     let stat = fs.stat(&target).await.map_err(vfs_error)?;
     if stat.is_dir {
         return Err(SandboxError::invalid_argument("path is a directory").into());
+    }
+    if over_read_limit(stat.size) {
+        let body = ErrorBody {
+            code: ErrorCode::ResourceExhausted,
+            message: format!(
+                "file is {} bytes; reads are limited to {MAX_READ_BYTES} bytes",
+                stat.size
+            ),
+        };
+        return Ok((StatusCode::PAYLOAD_TOO_LARGE, Json(body)).into_response());
     }
     let handle = fs.open(&target, read_flags()).await.map_err(vfs_error)?;
     let read = fs.read(&handle, 0, stat.size as usize).await;
@@ -681,5 +703,19 @@ fn write_flags() -> OpenFlags {
         create: true,
         truncate: true,
         exclusive: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_are_capped_at_the_limit() {
+        assert!(!over_read_limit(0));
+        assert!(!over_read_limit(MAX_READ_BYTES));
+        assert!(over_read_limit(MAX_READ_BYTES + 1));
+        // The VFS allows 100 MiB per file, which is above the read cap.
+        assert!(over_read_limit(100 * 1024 * 1024));
     }
 }
