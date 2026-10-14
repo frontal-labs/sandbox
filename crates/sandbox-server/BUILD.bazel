@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
 
 rust_library(
     name = "sandbox_server",
@@ -21,6 +21,7 @@ rust_library(
         "@crates//:jsonwebtoken",
         "@crates//:argon2",
         "@crates//:uuid",
+        "@crates//:blake3",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
@@ -28,13 +29,14 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_server_test",
+# The spec generator. Writes openapi/v1/ (run from a Cargo checkout; the Bazel
+# build only compiles it).
+rust_binary(
+    name = "gen_openapi",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_server",
-        "@crates//:tokio",
-    ],
-    testonly = True,
+    srcs = ["src/bin/gen_openapi.rs"],
+    deps = [":sandbox_server"],
 )
+
+# Contract tests (tests/openapi.rs) read openapi/v1 through CARGO_MANIFEST_DIR,
+# which only Cargo sets. They run under `cargo test -p sandbox-server`.

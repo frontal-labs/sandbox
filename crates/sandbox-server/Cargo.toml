@@ -9,7 +9,7 @@ title = "Sandbox Server"
 description = "API server for the sandbox system"
 
 [dependencies]
-sandbox-types = { path = "../sandbox-types" }
+sandbox-types = { path = "../sandbox-types", features = ["openapi"] }
 sandbox-scheduler = { path = "../sandbox-scheduler" }
 tokio = { workspace = true }
 bytes = { workspace = true }

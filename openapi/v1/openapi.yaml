@@ -1,0 +1,735 @@
+openapi: 3.0.3
+info:
+  title: Frontal Sandbox API
+  description: 'REST API for sandboxes: sessions, commands, files, and snapshots. Routes marked 501 are placeholders that do not do the work yet.'
+  contact:
+    name: Frontal Labs
+  license:
+    name: Apache-2.0
+  version: v1
+paths:
+  /v1/sessions:
+    post:
+      tags:
+      - sessions
+      summary: Create a session from a config.
+      operationId: create_session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionConfig'
+        required: true
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSessionResponse'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/sessions/{id}:
+    get:
+      tags:
+      - sessions
+      summary: Read a session's state.
+      operationId: get_session
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      responses:
+        '200':
+          description: Session state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionState'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+    delete:
+      tags:
+      - sessions
+      summary: Destroy a session.
+      operationId: destroy_session
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      responses:
+        '204':
+          description: Session destroyed
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/sessions/{id}/exec:
+    post:
+      tags:
+      - exec
+      summary: Run one command in a session.
+      operationId: exec_command
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecRequest'
+        required: true
+      responses:
+        '200':
+          description: Command finished
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResult'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/sessions/{id}/fs/{path}:
+    get:
+      tags:
+      - fs
+      summary: Read a file from a session's filesystem.
+      operationId: read_file
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      - name: path
+        in: path
+        description: Absolute path inside the session
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: File contents
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+    put:
+      tags:
+      - fs
+      summary: Write a file in a session's filesystem.
+      operationId: write_file
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      - name: path
+        in: path
+        description: Absolute path inside the session
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+        required: true
+      responses:
+        '204':
+          description: File written
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+    delete:
+      tags:
+      - fs
+      summary: Delete a file or directory in a session's filesystem.
+      operationId: delete_file
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      - name: path
+        in: path
+        description: Absolute path inside the session
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/sessions/{id}/snapshot:
+    post:
+      tags:
+      - snapshots
+      summary: Take a snapshot of a session.
+      operationId: take_snapshot
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      responses:
+        '201':
+          description: Snapshot taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TakeSnapshotResponse'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/snapshots/{id}/fork:
+    post:
+      tags:
+      - snapshots
+      summary: Fork a snapshot into new sessions.
+      operationId: fork_snapshot
+      parameters:
+      - name: id
+        in: path
+        description: Snapshot ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForkRequest'
+        required: true
+      responses:
+        '200':
+          description: Sessions created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForkResponse'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Not implemented yet (placeholder)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+components:
+  schemas:
+    CreateSessionResponse:
+      type: object
+      required:
+      - session_id
+      properties:
+        session_id:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+    ErrorBody:
+      type: object
+      description: Error body for every non-2xx response on `/v1`.
+      required:
+      - code
+      - message
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+    ErrorCode:
+      type: string
+      enum:
+      - INTERNAL
+      - INVALID_ARGUMENT
+      - NOT_FOUND
+      - ALREADY_EXISTS
+      - PERMISSION_DENIED
+      - RESOURCE_EXHAUSTED
+      - UNAVAILABLE
+      - TIMEOUT
+      - CANCELLED
+      - INVALID_STATE
+      - UNSUPPORTED
+      - POLICY_DENIED
+      - PROMOTION_FAILED
+      - SNAPSHOT_FAILED
+      - VM_BOOT_FAILED
+      - NETWORK_ERROR
+      - CAS_ERROR
+      - VFS_ERROR
+      - SHELL_ERROR
+      - RUNTIME_ERROR
+      - WASM_ERROR
+    ExecRequest:
+      type: object
+      required:
+      - argv
+      - env
+      - stream
+      properties:
+        argv:
+          type: array
+          items:
+            type: string
+        cwd:
+          type: string
+          nullable: true
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        stdin:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+          description: Bytes as an integer array, 0-255 each (serde default).
+          nullable: true
+        stream:
+          type: boolean
+        timeout_ms:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+    ExecResult:
+      type: object
+      required:
+      - exit_code
+      - stdout
+      - stderr
+      - cpu_ms
+      - wall_ms
+      properties:
+        cpu_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        exit_code:
+          type: integer
+          format: int32
+        stderr:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+          description: Bytes as an integer array, 0-255 each (serde default).
+        stdout:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+          description: Bytes as an integer array, 0-255 each (serde default).
+        wall_ms:
+          type: integer
+          format: int64
+          minimum: 0
+    ForkRequest:
+      type: object
+      required:
+      - count
+      properties:
+        count:
+          type: integer
+          format: int32
+          description: Number of sessions to create from the snapshot.
+          minimum: 0
+    ForkResponse:
+      type: object
+      required:
+      - session_ids
+      properties:
+        session_ids:
+          type: array
+          items:
+            type: string
+            pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+    NetworkPolicy:
+      type: object
+      required:
+      - default_deny
+      - rules
+      properties:
+        default_deny:
+          type: boolean
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkPolicyRule'
+    NetworkPolicyRule:
+      type: object
+      required:
+      - action
+      - host_pattern
+      properties:
+        action:
+          $ref: '#/components/schemas/PolicyAction'
+        host_pattern:
+          type: string
+        ports:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+          nullable: true
+    PolicyAction:
+      type: string
+      enum:
+      - allow
+      - deny
+    ResourceLimits:
+      type: object
+      properties:
+        cpu_ms_per_sec:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        max_file_size:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        max_inodes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        max_open_files:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        max_path_depth:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        max_processes:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
+        max_total_size:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        memory_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        wall_timeout_secs:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+    SecretEntry:
+      type: object
+      required:
+      - value
+      - hosts
+      properties:
+        hosts:
+          type: array
+          items:
+            type: string
+        value:
+          type: string
+    SecretsConfig:
+      type: object
+      required:
+      - secrets
+      properties:
+        secrets:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/SecretEntry'
+    SessionConfig:
+      type: object
+      required:
+      - tenant_id
+      - tier_preference
+      - limits
+      - network
+      - env
+      - cwd
+      - labels
+      properties:
+        cwd:
+          type: string
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        initial_snapshot:
+          type: string
+          nullable: true
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        limits:
+          $ref: '#/components/schemas/ResourceLimits'
+        network:
+          $ref: '#/components/schemas/NetworkPolicy'
+        secrets:
+          allOf:
+          - $ref: '#/components/schemas/SecretsConfig'
+          nullable: true
+        tenant_id:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+        tier_preference:
+          $ref: '#/components/schemas/TierPreference'
+    SessionState:
+      type: object
+      required:
+      - id
+      - tenant_id
+      - tier
+      - status
+      - config_hash
+      - created_at
+      - updated_at
+      - labels
+      properties:
+        config_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        created_at:
+          type: string
+          format: date-time
+        id:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        status:
+          $ref: '#/components/schemas/SessionStatus'
+        tenant_id:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+        tier:
+          $ref: '#/components/schemas/Tier'
+        updated_at:
+          type: string
+          format: date-time
+        vfs_root:
+          type: string
+          nullable: true
+          pattern: ^[0-9a-f]{64}$
+    SessionStatus:
+      type: string
+      enum:
+      - creating
+      - running
+      - sleeping
+      - promoting
+      - destroyed
+      - error
+    Snapshot:
+      type: object
+      required:
+      - id
+      - vfs_root
+      - env
+      - cwd
+      - tier
+      - created_at
+      - labels
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        cwd:
+          type: string
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        id:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        parent:
+          type: string
+          nullable: true
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+        runtime_blob:
+          type: string
+          nullable: true
+          pattern: ^[0-9a-f]{64}$
+        tier:
+          $ref: '#/components/schemas/Tier'
+        vfs_root:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    TakeSnapshotResponse:
+      type: object
+      required:
+      - snapshot_id
+      properties:
+        snapshot_id:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+    Tier:
+      type: string
+      enum:
+      - isolate
+      - vm
+    TierPreference:
+      type: string
+      enum:
+      - auto
+      - isolate
+      - vm
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: sbx_<key-id>_<secret>
+tags:
+- name: sessions
+  description: Session lifecycle
+- name: exec
+  description: Running commands
+- name: fs
+  description: Files inside a session
+- name: snapshots
+  description: Snapshots and forks
