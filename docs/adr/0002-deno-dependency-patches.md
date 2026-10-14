@@ -1,7 +1,7 @@
 # 0002: Patched Deno crates from frontal-labs repos
 
 ## Status
-Accepted
+Superseded by 0003 (the patched Deno crates were removed as unused)
 
 ## Date
 2026-10-14
