@@ -15,7 +15,9 @@ rust_library(
         "@crates//:schemars",
         "@crates//:serde",
         "@crates//:wasmtime",
-        "@crates//:wasmtime-wasi",
+        "@crates//:futures",
+        "@crates//:getrandom",
+        "@crates//:toml",
         "@crates//:wizer",
     ],
     proc_macro_deps = [
@@ -30,6 +32,9 @@ rust_library(
     srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
         ":sandbox_wasm",
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
         "@crates//:tokio",
     ],
     testonly = True,

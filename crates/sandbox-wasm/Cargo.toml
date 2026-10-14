@@ -1,10 +1,11 @@
 [package]
-name = "sandbox-wasm"
+name = "sandbox-WASM"
 version = "0.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frontal-labs/sandbox"
 authors = ["Frontal Labs"]
+title = "Sandbox Wasm"
 description = "WASM/WASI host for the sandbox system"
 
 [dependencies]

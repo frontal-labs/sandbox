@@ -1,0 +1,13 @@
+# Test fixture: a WASI program that exercises the host's filesystem calls.
+# Built for wasm32-wasip1 and committed as ../wasi_tool.wasm. Not a workspace member.
+[package]
+name = "wasi_tool"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+strip = true
