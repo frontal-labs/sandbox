@@ -1,4 +1,4 @@
-# sandbox-server
+# Sandbox Server
 
 HTTP API server for the sandbox system, built on `axum`.
 

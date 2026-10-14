@@ -1,56 +1,133 @@
+use crate::auth::{AuthManager, KeyId};
 use axum::{
-    routing::{get, post, put},
+    extract::{Request, State},
+    http::{header, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{delete, get, post, put},
     Router,
 };
 use sandbox_scheduler::Scheduler;
 use std::sync::Arc;
 
-pub fn create_router(scheduler: Arc<Scheduler>) -> Router {
+#[derive(Clone)]
+pub struct AppState {
+    pub scheduler: Arc<Scheduler>,
+    pub auth: Arc<AuthManager>,
+}
+
+/// Builds the API router. Every `/v1` route requires a valid bearer API key.
+///
+/// The handlers below are placeholders and answer `501 Not Implemented`. They
+/// do not report success for work that was not done.
+pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Router {
+    let state = AppState {
+        scheduler,
+        auth: auth.clone(),
+    };
+
     Router::new()
-        .route("/v1/sessions", post(create_session))
-        .route("/v1/sessions/:id", get(get_session))
-        .route("/v1/sessions/:id", axum::routing::delete(destroy_session))
-        .route("/v1/sessions/:id/exec", post(exec_command))
-        .route("/v1/sessions/:id/fs/*path", get(read_file))
-        .route("/v1/sessions/:id/fs/*path", put(write_file))
-        .route("/v1/sessions/:id/fs/*path", axum::routing::delete(delete_file))
-        .route("/v1/sessions/:id/snapshot", post(take_snapshot))
-        .route("/v1/snapshots/:id/fork", post(fork_snapshot))
-        .with_state(scheduler)
+        .route("/v1/sessions", post(not_implemented))
+        .route("/v1/sessions/:id", get(not_implemented))
+        .route("/v1/sessions/:id", delete(not_implemented))
+        .route("/v1/sessions/:id/exec", post(not_implemented))
+        .route("/v1/sessions/:id/fs/*path", get(not_implemented))
+        .route("/v1/sessions/:id/fs/*path", put(not_implemented))
+        .route("/v1/sessions/:id/fs/*path", delete(not_implemented))
+        .route("/v1/sessions/:id/snapshot", post(not_implemented))
+        .route("/v1/snapshots/:id/fork", post(not_implemented))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_api_key,
+        ))
+        .with_state(state)
 }
 
-async fn create_session() -> &'static str {
-    "create_session"
+/// Rejects requests without a valid `Authorization: Bearer <key>` header.
+async fn require_api_key(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let presented = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+
+    let Some(key) = presented else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    match state.auth.validate_api_key(key) {
+        Ok(id) => {
+            tracing::debug!(key_id = %KeyId::as_str(&id), "request authenticated");
+            next.run(request).await
+        }
+        Err(_) => StatusCode::UNAUTHORIZED.into_response(),
+    }
 }
 
-async fn get_session() -> &'static str {
-    "get_session"
+async fn not_implemented() -> StatusCode {
+    StatusCode::NOT_IMPLEMENTED
 }
 
-async fn destroy_session() -> &'static str {
-    "destroy_session"
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request as HttpRequest;
+    use sandbox_scheduler::Scheduler;
+    use tower::ServiceExt;
 
-async fn exec_command() -> &'static str {
-    "exec_command"
-}
+    fn router(auth: Arc<AuthManager>) -> Router {
+        create_router(Arc::new(Scheduler::new()), auth)
+    }
 
-async fn read_file() -> &'static str {
-    "read_file"
-}
+    async fn status(app: Router, auth_header: Option<&str>) -> StatusCode {
+        let mut builder = HttpRequest::builder().uri("/v1/sessions").method("POST");
+        if let Some(value) = auth_header {
+            builder = builder.header(header::AUTHORIZATION, value);
+        }
+        let request = builder.body(Body::empty()).unwrap();
+        app.oneshot(request).await.unwrap().status()
+    }
 
-async fn write_file() -> &'static str {
-    "write_file"
-}
+    #[tokio::test]
+    async fn missing_key_is_unauthorized() {
+        let app = router(Arc::new(AuthManager::new()));
+        assert_eq!(status(app, None).await, StatusCode::UNAUTHORIZED);
+    }
 
-async fn delete_file() -> &'static str {
-    "delete_file"
-}
+    #[tokio::test]
+    async fn malformed_key_is_unauthorized() {
+        let app = router(Arc::new(AuthManager::new()));
+        assert_eq!(
+            status(app, Some("Bearer sbx_bad_key")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
 
-async fn take_snapshot() -> &'static str {
-    "take_snapshot"
-}
+    #[tokio::test]
+    async fn valid_key_reaches_handler() {
+        let auth = Arc::new(AuthManager::new());
+        let key = auth.create_key();
+        let app = router(auth);
+        let header_value = format!("Bearer {key}");
+        // Authenticated, but the handler is a placeholder.
+        assert_eq!(
+            status(app, Some(&header_value)).await,
+            StatusCode::NOT_IMPLEMENTED
+        );
+    }
 
-async fn fork_snapshot() -> &'static str {
-    "fork_snapshot"
+    #[tokio::test]
+    async fn revoked_key_is_unauthorized() {
+        let auth = Arc::new(AuthManager::new());
+        let key = auth.create_key();
+        let id = auth.validate_api_key(&key).unwrap();
+        auth.revoke(&id);
+        let app = router(auth);
+        let header_value = format!("Bearer {key}");
+        assert_eq!(
+            status(app, Some(&header_value)).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
 }

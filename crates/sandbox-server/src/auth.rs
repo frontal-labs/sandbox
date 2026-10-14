@@ -1,20 +1,131 @@
+//! API key authentication.
+//!
+//! Keys look like `sbx_<key-id>_<secret>`. The key id is public and selects
+//! the record; the 256-bit secret is never stored. Only its BLAKE3 digest is
+//! kept, so a leaked store does not reveal usable keys. The secret has full
+//! entropy, so a fast hash is appropriate here; slow password hashing would
+//! only add per-request cost.
+
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 use sandbox_types::SandboxError;
+use std::collections::HashMap;
+use std::sync::RwLock;
 
-pub struct AuthManager;
+const KEY_PREFIX: &str = "sbx_";
 
-impl AuthManager {
-    pub fn new() -> Self {
-        Self
-    }
+/// Opaque id of a stored key. Safe to log.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeyId(String);
 
-    pub fn validate_api_key(&self, _api_key: &str) -> Result<(), SandboxError> {
-        // TODO: Implement API key validation
-        Ok(())
+impl KeyId {
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-impl Default for AuthManager {
-    fn default() -> Self {
-        Self::new()
+#[derive(Default)]
+pub struct AuthManager {
+    keys: RwLock<HashMap<String, blake3::Hash>>,
+}
+
+impl AuthManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a key and returns its plaintext. The plaintext is not stored
+    /// and cannot be recovered; the caller must hand it to the user now.
+    pub fn create_key(&self) -> String {
+        let mut id_bytes = [0u8; 8];
+        let mut secret_bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut id_bytes);
+        OsRng.fill_bytes(&mut secret_bytes);
+
+        let id = hex(&id_bytes);
+        let secret = hex(&secret_bytes);
+        let digest = blake3::hash(secret.as_bytes());
+
+        self.keys
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(id.clone(), digest);
+
+        format!("{KEY_PREFIX}{id}_{secret}")
+    }
+
+    /// Checks a presented key. Returns the key id on success.
+    pub fn validate_api_key(&self, api_key: &str) -> Result<KeyId, SandboxError> {
+        let denied = || SandboxError::permission_denied("invalid API key");
+
+        let body = api_key.strip_prefix(KEY_PREFIX).ok_or_else(denied)?;
+        let (id, secret) = body.split_once('_').ok_or_else(denied)?;
+
+        let keys = self
+            .keys
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stored = keys.get(id).copied().ok_or_else(denied)?;
+
+        // blake3::Hash equality is constant-time, so a wrong secret leaks no
+        // timing information about the stored digest.
+        if blake3::hash(secret.as_bytes()) == stored {
+            Ok(KeyId(id.to_string()))
+        } else {
+            Err(denied())
+        }
+    }
+
+    /// Revokes a key by id. Returns whether a key was removed.
+    pub fn revoke(&self, id: &KeyId) -> bool {
+        self.keys
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(id.as_str())
+            .is_some()
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_key_is_accepted() {
+        let auth = AuthManager::new();
+        let key = auth.create_key();
+        assert!(auth.validate_api_key(&key).is_ok());
+    }
+
+    #[test]
+    fn wrong_secret_is_rejected() {
+        let auth = AuthManager::new();
+        let key = auth.create_key();
+        let (prefix, _) = key.rsplit_once('_').unwrap();
+        let forged = format!("{prefix}_{}", "0".repeat(64));
+        assert!(auth.validate_api_key(&forged).is_err());
+    }
+
+    #[test]
+    fn unknown_or_malformed_keys_are_rejected() {
+        let auth = AuthManager::new();
+        let _ = auth.create_key();
+        assert!(auth.validate_api_key("").is_err());
+        assert!(auth.validate_api_key("sbx_nounderscore").is_err());
+        assert!(auth.validate_api_key("sbx_deadbeef_secret").is_err());
+        assert!(auth.validate_api_key("Bearer sbx_x_y").is_err());
+    }
+
+    #[test]
+    fn revoked_key_is_rejected() {
+        let auth = AuthManager::new();
+        let key = auth.create_key();
+        let id = auth.validate_api_key(&key).unwrap();
+        assert!(auth.revoke(&id));
+        assert!(auth.validate_api_key(&key).is_err());
+        assert!(!auth.revoke(&id));
     }
 }
