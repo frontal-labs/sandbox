@@ -52,6 +52,10 @@ struct Entry {
     owner: KeyId,
     state: SessionState,
     session: Arc<dyn Session>,
+    /// Held for every command, file operation, and snapshot on this session.
+    /// A checkpoint must not interleave with a write, or the write can be lost
+    /// from the snapshot or from the overlay.
+    gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Error body for every non-2xx response on `/v1`.
@@ -193,6 +197,7 @@ fn entry(
         owner,
         state,
         session,
+        gate: Arc::new(tokio::sync::Mutex::new(())),
     }
 }
 
@@ -201,6 +206,7 @@ fn entry(
 struct Owned {
     session: Arc<dyn Session>,
     state: SessionState,
+    gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 async fn owned(state: &AppState, owner: &KeyId, raw: &str) -> Result<Owned, ApiError> {
@@ -211,6 +217,7 @@ async fn owned(state: &AppState, owner: &KeyId, raw: &str) -> Result<Owned, ApiE
         Some(entry) if entry.owner == *owner => Ok(Owned {
             session: entry.session.clone(),
             state: entry.state.clone(),
+            gate: entry.gate.clone(),
         }),
         _ => Err(not_found().into()),
     }
@@ -382,7 +389,9 @@ pub async fn exec_command(
     Path(id): Path<String>,
     Json(request): Json<ExecRequest>,
 ) -> Result<Json<ExecResult>, ApiError> {
-    let session = owned(&state, &owner, &id).await?.session;
+    let own = owned(&state, &owner, &id).await?;
+    let _gate = own.gate.lock().await;
+    let session = own.session;
     Ok(Json(session.exec(request).await?))
 }
 
@@ -408,7 +417,9 @@ pub async fn read_file(
     Extension(owner): Extension<KeyId>,
     Path((id, path)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
-    let session = owned(&state, &owner, &id).await?.session;
+    let own = owned(&state, &owner, &id).await?;
+    let _gate = own.gate.lock().await;
+    let session = own.session;
     let target = vfs_path(&path)?;
     let fs = session.fs();
     let stat = fs.stat(&target).await.map_err(vfs_error)?;
@@ -450,7 +461,9 @@ pub async fn write_file(
     Path((id, path)): Path<(String, String)>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let session = owned(&state, &owner, &id).await?.session;
+    let own = owned(&state, &owner, &id).await?;
+    let _gate = own.gate.lock().await;
+    let session = own.session;
     let target = vfs_path(&path)?;
     let fs = session.fs();
     let handle = fs.open(&target, write_flags()).await.map_err(vfs_error)?;
@@ -499,7 +512,9 @@ pub async fn delete_file(
     Extension(owner): Extension<KeyId>,
     Path((id, path)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    let session = owned(&state, &owner, &id).await?.session;
+    let own = owned(&state, &owner, &id).await?;
+    let _gate = own.gate.lock().await;
+    let session = own.session;
     let target = vfs_path(&path)?;
     session.fs().rm(&target, false).await.map_err(vfs_error)?;
     Ok(StatusCode::NO_CONTENT)
@@ -524,7 +539,9 @@ pub async fn take_snapshot(
     Extension(owner): Extension<KeyId>,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<TakeSnapshotResponse>), ApiError> {
-    let session = owned(&state, &owner, &id).await?.session;
+    let own = owned(&state, &owner, &id).await?;
+    let _gate = own.gate.lock().await;
+    let session = own.session;
     let snapshot_id = session.snapshot().await?;
     state.snapshots.0.write().await.insert(snapshot_id, owner);
     Ok((
