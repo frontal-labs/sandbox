@@ -53,7 +53,9 @@ impl WorkerService for WorkerImpl {
             .run_script(&script)
             .await
             .map_err(|e| to_status(&e))?;
-        Ok(Response::new(result.into()))
+        let out = pb::ExecResult::from(result);
+        check_encoded_size(&out, "result").map_err(|e| to_status(&e))?;
+        Ok(Response::new(out))
     }
 
     async fn exec(
@@ -62,7 +64,9 @@ impl WorkerService for WorkerImpl {
     ) -> Result<Response<pb::ExecResult>, Status> {
         let req = ExecRequest::try_from(request.into_inner()).map_err(|e| to_status(&e))?;
         let result = self.session.exec(req).await.map_err(|e| to_status(&e))?;
-        Ok(Response::new(result.into()))
+        let out = pb::ExecResult::from(result);
+        check_encoded_size(&out, "result").map_err(|e| to_status(&e))?;
+        Ok(Response::new(out))
     }
 
     async fn health(&self, _: Request<()>) -> Result<Response<HealthResponse>, Status> {
@@ -154,19 +158,12 @@ impl Worker {
     /// Runs a script in the worker. A script error comes back as its own
     /// `ErrorCode`. A dead or unreachable worker returns `Unavailable`.
     pub async fn run_script(&mut self, script: &str) -> Result<ExecResult, SandboxError> {
-        // Checked here too, so the caller gets a clear code instead of a reset stream.
-        if script.len() > MAX_MESSAGE_BYTES {
-            return Err(SandboxError::new(
-                ErrorCode::ResourceExhausted,
-                format!(
-                    "script of {} bytes exceeds the {MAX_MESSAGE_BYTES} byte limit",
-                    script.len()
-                ),
-            ));
-        }
-        let mut request = Request::new(RunScriptRequest {
+        let message = RunScriptRequest {
             script: script.to_string(),
-        });
+        };
+        // Checked before sending, so the caller gets `ResourceExhausted` instead of a reset stream.
+        check_encoded_size(&message, "script")?;
+        let mut request = Request::new(message);
         request.set_timeout(RPC_DEADLINE);
         let response = self.client.run_script(request).await.map_err(map_status)?;
         ExecResult::try_from(response.into_inner())
@@ -174,7 +171,9 @@ impl Worker {
 
     /// Runs one command in the worker's session.
     pub async fn exec(&mut self, req: ExecRequest) -> Result<ExecResult, SandboxError> {
-        let mut request = Request::new(pb::ExecRequest::from(req));
+        let message = pb::ExecRequest::from(req);
+        check_encoded_size(&message, "exec request")?;
+        let mut request = Request::new(message);
         request.set_timeout(RPC_DEADLINE);
         let response = self.client.exec(request).await.map_err(map_status)?;
         ExecResult::try_from(response.into_inner())
@@ -209,6 +208,20 @@ impl Drop for Worker {
         let _ = self.child.start_kill();
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// Refuses a message whose encoded size is over `MAX_MESSAGE_BYTES`. Used on both
+/// sides, so an oversize request or result gets `ResourceExhausted` rather than a
+/// transport error.
+fn check_encoded_size<M: prost::Message>(message: &M, what: &str) -> Result<(), SandboxError> {
+    let len = message.encoded_len();
+    if len > MAX_MESSAGE_BYTES {
+        return Err(SandboxError::new(
+            ErrorCode::ResourceExhausted,
+            format!("{what} of {len} bytes exceeds the {MAX_MESSAGE_BYTES} byte limit"),
+        ));
+    }
+    Ok(())
 }
 
 fn map_status(status: Status) -> SandboxError {
@@ -304,6 +317,17 @@ mod tests {
             };
             let big = "x".repeat(MAX_MESSAGE_BYTES + 1);
             let err = worker.run_script(&big).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::ResourceExhausted);
+            // Exec is checked the same way: stdin alone can push the message over the limit.
+            let req = ExecRequest {
+                argv: vec!["cat".into()],
+                env: Default::default(),
+                cwd: None,
+                stdin: Some(vec![0u8; MAX_MESSAGE_BYTES]),
+                timeout_ms: None,
+                stream: false,
+            };
+            let err = worker.exec(req).await.unwrap_err();
             assert_eq!(err.code, ErrorCode::ResourceExhausted);
             let _ = worker.child.kill().await;
             // Do not run Drop: it would remove the shared temp directory.
