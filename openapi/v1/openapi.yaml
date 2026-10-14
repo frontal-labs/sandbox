@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Frontal Sandbox API
-  description: 'REST API for sandboxes: sessions, commands, files, and snapshots. Snapshot and fork return 501 until the session backend can capture and restore state.'
+  description: 'REST API for sandboxes: sessions, commands, files, and snapshots. Snapshots capture the committed filesystem. Settings the backend does not enforce are refused with 501.'
   contact:
     name: Frontal Labs
   license:
@@ -35,6 +35,18 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '401':
           description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: initial_snapshot is not one of this key's snapshots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: A requested setting is not enforced yet, so the request is refused
           content:
             application/json:
               schema:
@@ -279,8 +291,8 @@ paths:
     post:
       tags:
       - snapshots
-      summary: Take a snapshot of a session. Returns `501` when the session's backend
-      description: cannot snapshot, which the isolate backend does not yet do.
+      summary: Take a snapshot of a session's committed filesystem. The caller owns the
+      description: snapshot, and only that key can fork it or start a session from it.
       operationId: take_snapshot
       parameters:
       - name: id
@@ -308,20 +320,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: The backend cannot snapshot yet
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
       security:
       - bearer: []
   /v1/snapshots/{id}/fork:
     post:
       tags:
       - snapshots
-      summary: Fork a snapshot into new sessions. Returns `501` until the backend can
-      description: restore snapshots, because restoring needs captured filesystem state.
+      summary: Fork a snapshot into new sessions, each owned by the caller. The caller must
+      description: own the snapshot.
       operationId: fork_snapshot
       parameters:
       - name: id
@@ -343,14 +349,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ForkResponse'
+        '400':
+          description: Count must be between 1 and 64
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '401':
           description: Missing or invalid API key
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Restoring snapshots is not implemented yet
+        '404':
+          description: No such snapshot for this key
           content:
             application/json:
               schema:

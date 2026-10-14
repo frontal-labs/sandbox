@@ -2,7 +2,7 @@
 
 HTTP API server for the sandbox system, built on `axum`.
 
-**Status: early.** Session, exec, and filesystem routes run against real in-memory sessions. Snapshot and fork return `501 Not Implemented`, because the session backend cannot capture or restore state yet. The crate has a library and the `gen_openapi` binary, but no server binary.
+**Status: early.** Session, exec, filesystem, snapshot, and fork routes run against real in-memory sessions. Snapshots capture the committed filesystem root, and forks restore it. Settings the backend does not enforce are refused with `501`. The crate has a library and the `gen_openapi` binary, but no server binary.
 
 ## Public API
 
@@ -25,8 +25,8 @@ Every `/v1` route requires `Authorization: Bearer <key>`. `GET /v1/openapi.json`
 | GET | `/v1/sessions/:id/fs/*path` | Reads a file as `application/octet-stream`. |
 | PUT | `/v1/sessions/:id/fs/*path` | Creates or replaces a file. Returns `204`. |
 | DELETE | `/v1/sessions/:id/fs/*path` | Deletes a file or an empty directory. Returns `204`. |
-| POST | `/v1/sessions/:id/snapshot` | Returns `501` until the backend can snapshot. |
-| POST | `/v1/snapshots/:id/fork` | Returns `501` until snapshots can be restored. |
+| POST | `/v1/sessions/:id/snapshot` | Takes a snapshot of the committed filesystem. Returns `201`. |
+| POST | `/v1/snapshots/:id/fork` | Starts `count` sessions (1 to 64) from the snapshot. Returns `200`. |
 
 Errors use the `ErrorBody` shape (`code`, `message`). Status codes follow the error code: `NOT_FOUND` is 404, `INVALID_ARGUMENT` is 400, `UNSUPPORTED` is 501, and so on.
 

@@ -14,7 +14,7 @@ use utoipa::{Modify, OpenApi};
         title = "Frontal Sandbox API",
         version = "v1",
         description = "REST API for sandboxes: sessions, commands, files, and snapshots. \
-            Snapshot and fork return 501 until the session backend can capture and restore state."
+            Snapshots capture the committed filesystem. Settings the backend does not enforce are refused with 501."
     ),
     paths(
         crate::api::create_session,

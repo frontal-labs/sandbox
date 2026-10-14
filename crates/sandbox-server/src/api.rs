@@ -15,9 +15,10 @@ use sandbox_scheduler::Scheduler;
 use sandbox_session::session::SessionFs;
 use sandbox_session::{IsolateBackend, Session};
 use sandbox_types::hash::ContentHash;
+use sandbox_types::policy::{NetworkPolicy, ResourceLimits};
 use sandbox_types::{
     ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, SessionState,
-    SessionStatus, SnapshotId, TenantId,
+    SessionStatus, SnapshotId, TenantId, Tier, TierPreference,
 };
 use sandbox_vfs::{OpenFlags, VfsError};
 use serde::{Deserialize, Serialize};
@@ -33,7 +34,15 @@ pub struct AppState {
     pub scheduler: Arc<Scheduler>,
     pub auth: Arc<AuthManager>,
     pub sessions: SessionTable,
+    pub snapshots: SnapshotOwners,
 }
+
+/// The key that took each snapshot. Snapshots are visible only to that key.
+#[derive(Clone, Default)]
+pub struct SnapshotOwners(Arc<RwLock<HashMap<SnapshotId, KeyId>>>);
+
+/// Most sessions one fork call may create.
+const MAX_FORK_COUNT: u32 = 64;
 
 /// Live sessions, keyed by ID, each with the key that owns it.
 #[derive(Clone, Default)]
@@ -128,6 +137,65 @@ fn vfs_path(raw: &str) -> Result<PathBuf, ApiError> {
     Ok(PathBuf::from(format!("/{raw}")))
 }
 
+/// Refuses a config that asks for something the backend does not enforce.
+/// Ignoring such a setting would look like success while giving no protection.
+fn refuse_unenforced(config: &SessionConfig) -> Result<(), ApiError> {
+    let refuse = |what: &str| {
+        Err(SandboxError::unsupported(format!(
+            "{what} is not enforced yet, so the request is refused rather than ignored"
+        ))
+        .into())
+    };
+    if !matches!(
+        config.tier_preference,
+        TierPreference::Auto | TierPreference::Isolate
+    ) {
+        return refuse("the vm tier");
+    }
+    if config.limits != ResourceLimits::default() {
+        return refuse("per-session resource limits");
+    }
+    if config.network != NetworkPolicy::default() {
+        return refuse("a network policy");
+    }
+    if config.secrets.is_some() {
+        return refuse("secrets");
+    }
+    if !config.env.is_empty() {
+        return refuse("environment variables");
+    }
+    if config.cwd != SessionConfig::default().cwd {
+        return refuse("a working directory");
+    }
+    Ok(())
+}
+
+/// Wraps a live session with its metadata and owner.
+fn entry(
+    owner: KeyId,
+    session: Arc<dyn Session>,
+    tenant_id: TenantId,
+    labels: HashMap<String, String>,
+) -> Entry {
+    let now = SystemTime::now();
+    let state = SessionState {
+        id: session.id(),
+        tenant_id,
+        tier: Tier::Isolate,
+        status: SessionStatus::Running,
+        config_hash: ContentHash::nil(),
+        vfs_root: None,
+        created_at: now,
+        updated_at: now,
+        labels,
+    };
+    Entry {
+        owner,
+        state,
+        session,
+    }
+}
+
 /// A session the caller owns. A session owned by another key is not found, so
 /// the response does not reveal that it exists.
 struct Owned {
@@ -182,6 +250,7 @@ pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Route
         scheduler,
         auth: auth.clone(),
         sessions: SessionTable::default(),
+        snapshots: SnapshotOwners::default(),
     };
 
     Router::new()
@@ -216,6 +285,8 @@ async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
         (status = 201, description = "Session created", body = CreateSessionResponse),
         (status = 400, description = "Invalid session config", body = ErrorBody),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "initial_snapshot is not one of this key's snapshots", body = ErrorBody),
+        (status = 501, description = "A requested setting is not enforced yet, so the request is refused", body = ErrorBody),
     ),
     security(("bearer" = []))
 )]
@@ -224,27 +295,18 @@ pub async fn create_session(
     Extension(owner): Extension<KeyId>,
     Json(config): Json<SessionConfig>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
-    let tenant_id: TenantId = config.tenant_id;
+    refuse_unenforced(&config)?;
+    let tenant_id = config.tenant_id;
     let labels = config.labels.clone();
-    let backend = IsolateBackend::new(config).await?;
-    let id = backend.id();
-    let now = SystemTime::now();
-    let session_state = SessionState {
-        id,
-        tenant_id,
-        tier: backend.tier(),
-        status: SessionStatus::Running,
-        config_hash: ContentHash::nil(),
-        vfs_root: None,
-        created_at: now,
-        updated_at: now,
-        labels,
+    let session: Arc<dyn Session> = match config.initial_snapshot {
+        Some(snapshot_id) => {
+            check_snapshot_owner(&state, &owner, snapshot_id).await?;
+            sandbox_session::restore(snapshot_id).await?.into()
+        }
+        None => Arc::new(IsolateBackend::new(config).await?),
     };
-    let entry = Entry {
-        owner,
-        state: session_state,
-        session: Arc::new(backend),
-    };
+    let id = session.id();
+    let entry = entry(owner, session, tenant_id, labels);
     state.sessions.0.write().await.insert(id, entry);
     Ok((
         StatusCode::CREATED,
@@ -443,8 +505,8 @@ pub async fn delete_file(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Take a snapshot of a session. Returns `501` when the session's backend
-/// cannot snapshot, which the isolate backend does not yet do.
+/// Take a snapshot of a session's committed filesystem. The caller owns the
+/// snapshot, and only that key can fork it or start a session from it.
 #[utoipa::path(
     post,
     path = "/v1/sessions/{id}/snapshot",
@@ -454,7 +516,6 @@ pub async fn delete_file(
         (status = 201, description = "Snapshot taken", body = TakeSnapshotResponse),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 404, description = "No such session for this key", body = ErrorBody),
-        (status = 501, description = "The backend cannot snapshot yet", body = ErrorBody),
     ),
     security(("bearer" = []))
 )]
@@ -465,14 +526,15 @@ pub async fn take_snapshot(
 ) -> Result<(StatusCode, Json<TakeSnapshotResponse>), ApiError> {
     let session = owned(&state, &owner, &id).await?.session;
     let snapshot_id = session.snapshot().await?;
+    state.snapshots.0.write().await.insert(snapshot_id, owner);
     Ok((
         StatusCode::CREATED,
         Json(TakeSnapshotResponse { snapshot_id }),
     ))
 }
 
-/// Fork a snapshot into new sessions. Returns `501` until the backend can
-/// restore snapshots, because restoring needs captured filesystem state.
+/// Fork a snapshot into new sessions, each owned by the caller. The caller must
+/// own the snapshot.
 #[utoipa::path(
     post,
     path = "/v1/snapshots/{id}/fork",
@@ -481,21 +543,54 @@ pub async fn take_snapshot(
     request_body = ForkRequest,
     responses(
         (status = 200, description = "Sessions created", body = ForkResponse),
+        (status = 400, description = "Count must be between 1 and 64", body = ErrorBody),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
-        (status = 501, description = "Restoring snapshots is not implemented yet", body = ErrorBody),
+        (status = 404, description = "No such snapshot for this key", body = ErrorBody),
     ),
     security(("bearer" = []))
 )]
 pub async fn fork_snapshot(
-    State(_state): State<AppState>,
-    Extension(_owner): Extension<KeyId>,
-    Path(_id): Path<String>,
-    Json(_request): Json<ForkRequest>,
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+    Json(request): Json<ForkRequest>,
 ) -> Result<Json<ForkResponse>, ApiError> {
-    Err(SandboxError::unsupported(
-        "forking snapshots is not implemented: restore needs captured filesystem state",
-    )
-    .into())
+    if request.count == 0 || request.count > MAX_FORK_COUNT {
+        return Err(SandboxError::invalid_argument(format!(
+            "count must be between 1 and {MAX_FORK_COUNT}"
+        ))
+        .into());
+    }
+    let snapshot_id = parse_snapshot_id(&id)?;
+    check_snapshot_owner(&state, &owner, snapshot_id).await?;
+
+    let mut session_ids = Vec::with_capacity(request.count as usize);
+    for _ in 0..request.count {
+        let session: Arc<dyn Session> = sandbox_session::restore(snapshot_id).await?.into();
+        let session_id = session.id();
+        let entry = entry(owner.clone(), session, TenantId::nil(), HashMap::new());
+        state.sessions.0.write().await.insert(session_id, entry);
+        session_ids.push(session_id);
+    }
+    Ok(Json(ForkResponse { session_ids }))
+}
+
+fn parse_snapshot_id(raw: &str) -> Result<SnapshotId, ApiError> {
+    raw.parse()
+        .map_err(|_| SandboxError::not_found(format!("snapshot {raw} not found")).into())
+}
+
+/// Fails with `NotFound` unless the caller took the snapshot.
+async fn check_snapshot_owner(
+    state: &AppState,
+    owner: &KeyId,
+    snapshot_id: SnapshotId,
+) -> Result<(), ApiError> {
+    let table = state.snapshots.0.read().await;
+    match table.get(&snapshot_id) {
+        Some(taken_by) if taken_by == owner => Ok(()),
+        _ => Err(SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into()),
+    }
 }
 
 fn read_flags() -> OpenFlags {
