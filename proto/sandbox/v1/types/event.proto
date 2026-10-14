@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package sandbox.v1.types;
+
+import "google/protobuf/timestamp.proto";
+import "sandbox/v1/types/ids.proto";
+import "sandbox/v1/types/session.proto";
+
+// Mirrors sandbox_types::Event. One variant per Rust variant.
+message Event {
+  oneof kind {
+    SessionCreated session_created = 1;
+    ExecStarted exec_started = 2;
+    ExecExited exec_exited = 3;
+    StdoutChunk stdout_chunk = 4;
+    StderrChunk stderr_chunk = 5;
+    FileChanged file_changed = 6;
+    NetRequest net_request = 7;
+    PolicyDenied policy_denied = 8;
+    SnapshotTaken snapshot_taken = 9;
+    Promoted promoted = 10;
+    Slept slept = 11;
+    Woken woken = 12;
+    SessionDestroyed session_destroyed = 13;
+  }
+}
+
+message SessionCreated {
+  SessionId session_id = 1;
+  TenantId tenant_id = 2;
+  Tier tier = 3;
+  ContentHash config_hash = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+message ExecStarted {
+  SessionId session_id = 1;
+  uint64 seq = 2;
+  repeated string argv = 3;
+  string cwd = 4;
+  ContentHash env_hash = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message ExecExited {
+  SessionId session_id = 1;
+  uint64 seq = 2;
+  int32 exit_code = 3;
+  uint64 cpu_ms = 4;
+  uint64 wall_ms = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message StdoutChunk {
+  SessionId session_id = 1;
+  uint64 seq = 2;
+  bytes data = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+message StderrChunk {
+  SessionId session_id = 1;
+  uint64 seq = 2;
+  bytes data = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+enum FileOp {
+  FILE_OP_UNSPECIFIED = 0;
+  FILE_OP_CREATE = 1;
+  FILE_OP_WRITE = 2;
+  FILE_OP_DELETE = 3;
+  FILE_OP_RENAME = 4;
+  FILE_OP_MKDIR = 5;
+  FILE_OP_SYMLINK = 6;
+}
+
+message FileChanged {
+  SessionId session_id = 1;
+  uint64 seq = 2;
+  string path = 3;
+  FileOp op = 4;
+  optional ContentHash before_hash = 5;
+  optional ContentHash after_hash = 6;
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+message NetRequest {
+  SessionId session_id = 1;
+  uint64 seq = 2;
+  string host = 3;
+  string method = 4;
+  optional uint32 status = 5;
+  uint64 request_bytes = 6;
+  uint64 response_bytes = 7;
+  google.protobuf.Timestamp timestamp = 8;
+}
+
+message PolicyDenied {
+  SessionId session_id = 1;
+  uint64 seq = 2;
+  string capability = 3;
+  string reason = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+message SnapshotTaken {
+  SessionId session_id = 1;
+  SnapshotId snapshot_id = 2;
+  optional SnapshotId parent = 3;
+  ContentHash vfs_root = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+message Promoted {
+  SessionId session_id = 1;
+  Tier from_tier = 2;
+  Tier to_tier = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+message Slept {
+  SessionId session_id = 1;
+  SnapshotId snapshot_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+message Woken {
+  SessionId session_id = 1;
+  SnapshotId snapshot_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+message SessionDestroyed {
+  SessionId session_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+}

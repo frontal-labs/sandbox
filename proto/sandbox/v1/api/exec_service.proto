@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package sandbox.v1.api;
+
+import "sandbox/v1/types/exec.proto";
+import "sandbox/v1/types/ids.proto";
+
+service ExecService {
+  // Buffered: returns when the command exits.
+  rpc Exec(ExecCommandRequest) returns (sandbox.v1.types.ExecResult);
+  // Streams output chunks, then one final exit event.
+  rpc ExecStream(ExecCommandRequest) returns (stream ExecOutput);
+}
+
+message ExecCommandRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+  sandbox.v1.types.ExecRequest request = 2;
+}
+
+message ExecOutput {
+  oneof event {
+    bytes stdout = 1;
+    bytes stderr = 2;
+    sandbox.v1.types.ExecResult exit = 3;
+  }
+}

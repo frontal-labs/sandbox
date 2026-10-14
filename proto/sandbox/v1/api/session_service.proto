@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package sandbox.v1.api;
+
+import "google/protobuf/empty.proto";
+import "sandbox/v1/types/ids.proto";
+import "sandbox/v1/types/session.proto";
+
+service SessionService {
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (sandbox.v1.types.SessionState);
+  rpc DestroySession(DestroySessionRequest) returns (google.protobuf.Empty);
+}
+
+message CreateSessionRequest {
+  sandbox.v1.types.SessionConfig config = 1;
+}
+
+message CreateSessionResponse {
+  sandbox.v1.types.SessionId session_id = 1;
+}
+
+message GetSessionRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+}
+
+message DestroySessionRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+}

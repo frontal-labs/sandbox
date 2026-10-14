@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package sandbox.v1.types;
+
+// IDs are ULID strings (26 Crockford base32 characters) unless noted.
+// Malformed IDs are rejected by the conversion layer, not here.
+
+message SessionId {
+  string value = 1;
+}
+
+message SnapshotId {
+  string value = 1;
+}
+
+message TenantId {
+  string value = 1;
+}
+
+// BLAKE3 digest, exactly 32 bytes.
+message ContentHash {
+  bytes value = 1;
+}

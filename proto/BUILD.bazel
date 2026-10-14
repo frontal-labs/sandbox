@@ -1,0 +1,12 @@
+# The proto sources. sandbox-proto's build script reads them through this filegroup.
+filegroup(
+    name = "protos",
+    srcs = glob(["sandbox/**/*.proto"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "buf_config",
+    srcs = ["buf.yaml"],
+    visibility = ["//visibility:public"],
+)

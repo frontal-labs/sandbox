@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package sandbox.v1.types;
+
+// Mirrors sandbox_types::ExecRequest.
+message ExecRequest {
+  repeated string argv = 1;
+  map<string, string> env = 2;
+  optional string cwd = 3;
+  optional bytes stdin = 4;
+  optional uint64 timeout_ms = 5;
+  bool stream = 6;
+}
+
+// Mirrors sandbox_types::ExecResult.
+message ExecResult {
+  int32 exit_code = 1;
+  bytes stdout = 2;
+  bytes stderr = 3;
+  uint64 cpu_ms = 4;
+  uint64 wall_ms = 5;
+}

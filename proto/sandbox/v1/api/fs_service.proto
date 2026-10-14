@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package sandbox.v1.api;
+
+import "google/protobuf/empty.proto";
+import "sandbox/v1/types/ids.proto";
+
+service FsService {
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (google.protobuf.Empty);
+  rpc DeleteFile(DeleteFileRequest) returns (google.protobuf.Empty);
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+  rpc Stat(StatRequest) returns (StatResponse);
+}
+
+message ReadFileRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+  string path = 2;
+}
+
+message ReadFileResponse {
+  bytes data = 1;
+}
+
+message WriteFileRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+  string path = 2;
+  bytes data = 3;
+}
+
+message DeleteFileRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+  string path = 2;
+  bool recursive = 3;
+}
+
+message ListDirRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+  string path = 2;
+}
+
+message DirEntry {
+  string name = 1;
+  bool is_dir = 2;
+  bool is_file = 3;
+  bool is_symlink = 4;
+  uint64 size = 5;
+}
+
+message ListDirResponse {
+  repeated DirEntry entries = 1;
+}
+
+message StatRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+  string path = 2;
+}
+
+message StatResponse {
+  bool is_dir = 1;
+  bool is_file = 2;
+  bool is_symlink = 3;
+  uint64 size = 4;
+}

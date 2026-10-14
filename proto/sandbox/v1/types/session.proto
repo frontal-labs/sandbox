@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package sandbox.v1.types;
+
+import "google/protobuf/timestamp.proto";
+import "sandbox/v1/types/ids.proto";
+import "sandbox/v1/types/policy.proto";
+
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_ISOLATE = 1;
+  TIER_VM = 2;
+}
+
+enum TierPreference {
+  TIER_PREFERENCE_UNSPECIFIED = 0;
+  TIER_PREFERENCE_AUTO = 1;
+  TIER_PREFERENCE_ISOLATE = 2;
+  TIER_PREFERENCE_VM = 3;
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_CREATING = 1;
+  SESSION_STATUS_RUNNING = 2;
+  SESSION_STATUS_SLEEPING = 3;
+  SESSION_STATUS_PROMOTING = 4;
+  SESSION_STATUS_DESTROYED = 5;
+  SESSION_STATUS_ERROR = 6;
+}
+
+// Mirrors sandbox_types::SessionConfig.
+message SessionConfig {
+  TenantId tenant_id = 1;
+  TierPreference tier_preference = 2;
+  ResourceLimits limits = 3;
+  NetworkPolicy network = 4;
+  map<string, string> env = 5;
+  string cwd = 6;
+  optional SnapshotId initial_snapshot = 7;
+  optional SecretsConfig secrets = 8;
+  map<string, string> labels = 9;
+}
+
+// Mirrors sandbox_types::SessionState.
+message SessionState {
+  SessionId id = 1;
+  TenantId tenant_id = 2;
+  Tier tier = 3;
+  SessionStatus status = 4;
+  ContentHash config_hash = 5;
+  optional ContentHash vfs_root = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  map<string, string> labels = 9;
+}
+
+// Mirrors sandbox_types::Snapshot.
+message Snapshot {
+  SnapshotId id = 1;
+  optional SnapshotId parent = 2;
+  ContentHash vfs_root = 3;
+  map<string, string> env = 4;
+  string cwd = 5;
+  Tier tier = 6;
+  optional ContentHash runtime_blob = 7;
+  google.protobuf.Timestamp created_at = 8;
+  map<string, string> labels = 9;
+}

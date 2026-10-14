@@ -1,0 +1,54 @@
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+# build.rs compiles ../../proto with tonic-build. protoc comes from the
+# protobuf module, so Cargo and Bazel use the same codegen path.
+cargo_build_script(
+    name = "build_script",
+    srcs = ["build.rs"],
+    build_script_env = {
+        "PROTOC": "$(execpath @protobuf//:protoc)",
+        "SANDBOX_PROTO_ROOT": "$(execpath //proto:buf_config)",
+        "SANDBOX_PROTO_WKT": "$(locations @protobuf//:well_known_type_protos)",
+    },
+    data = [
+        "@protobuf//:protoc",
+        "//proto:buf_config",
+        "//proto:protos",
+        "@protobuf//:well_known_type_protos",
+    ],
+    deps = [
+        "@crates//:tonic-build",
+    ],
+    edition = "2021",
+)
+
+rust_library(
+    name = "sandbox_proto",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    deps = [
+        ":build_script",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:blake3",
+        "@crates//:bytes",
+        "@crates//:prost",
+        "@crates//:prost-types",
+        "@crates//:tonic",
+        "@crates//:ulid",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_proto_test",
+    srcs = glob(["tests/**/*.rs"]),
+    edition = "2021",
+    crate = ":sandbox_proto",
+    deps = [
+        "@crates//:proptest",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+    data = ["//proto:protos"],
+)

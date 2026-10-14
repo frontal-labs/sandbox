@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package sandbox.v1.api;
+
+import "sandbox/v1/types/ids.proto";
+
+service SnapshotService {
+  rpc TakeSnapshot(TakeSnapshotRequest) returns (sandbox.v1.types.SnapshotId);
+  rpc ForkSnapshot(ForkSnapshotRequest) returns (ForkSnapshotResponse);
+}
+
+message TakeSnapshotRequest {
+  sandbox.v1.types.SessionId session_id = 1;
+}
+
+message ForkSnapshotRequest {
+  sandbox.v1.types.SnapshotId snapshot_id = 1;
+  // Number of sessions to create from the snapshot.
+  uint32 count = 2;
+}
+
+message ForkSnapshotResponse {
+  repeated sandbox.v1.types.SessionId session_ids = 1;
+}

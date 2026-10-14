@@ -1,0 +1,17 @@
+# Buf module for the sandbox wire contracts. The module root is proto/.
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # RPCs share domain messages (ExecRequest, ExecResult) and google.protobuf.Empty
+    # on purpose. Forcing one wrapper per RPC would duplicate the schema.
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - PACKAGE_VERSION_SUFFIX
+breaking:
+  use:
+    - FILE

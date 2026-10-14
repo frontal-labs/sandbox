@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package sandbox.v1.api;
+
+import "sandbox/v1/types/ids.proto";
+
+// Metering. The contract exists now; the scheduler does not record usage yet.
+service UsageService {
+  rpc GetUsage(GetUsageRequest) returns (Usage);
+}
+
+message GetUsageRequest {
+  sandbox.v1.types.TenantId tenant_id = 1;
+}
+
+message Usage {
+  uint64 session_count = 1;
+  uint64 cpu_ms = 2;
+  uint64 storage_bytes = 3;
+  uint64 egress_bytes = 4;
+}

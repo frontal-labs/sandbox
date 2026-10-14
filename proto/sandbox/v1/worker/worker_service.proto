@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package sandbox.v1.worker;
+
+import "google/protobuf/empty.proto";
+import "sandbox/v1/types/exec.proto";
+
+// Scheduler <-> worker. The worker serves this over a private Unix socket.
+// Guest code never shares a channel with this service.
+service WorkerService {
+  // Runs a shell script in the worker's session.
+  rpc RunScript(RunScriptRequest) returns (sandbox.v1.types.ExecResult);
+  // Runs one command (argv) in the worker's session.
+  rpc Exec(sandbox.v1.types.ExecRequest) returns (sandbox.v1.types.ExecResult);
+  rpc Health(google.protobuf.Empty) returns (HealthResponse);
+  rpc Shutdown(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+message RunScriptRequest {
+  string script = 1;
+}
+
+message HealthResponse {
+  bool ready = 1;
+  string version = 2;
+}

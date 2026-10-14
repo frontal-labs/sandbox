@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package sandbox.v1.types;
+
+// Mirrors sandbox_types::ResourceLimits. Unset means "no limit".
+message ResourceLimits {
+  optional uint64 memory_bytes = 1;
+  optional uint64 cpu_ms_per_sec = 2;
+  optional uint64 wall_timeout_secs = 3;
+  optional uint64 max_file_size = 4;
+  optional uint64 max_total_size = 5;
+  optional uint64 max_inodes = 6;
+  optional uint32 max_path_depth = 7;
+  optional uint32 max_processes = 8;
+  optional uint32 max_open_files = 9;
+}
+
+enum PolicyAction {
+  POLICY_ACTION_UNSPECIFIED = 0;
+  POLICY_ACTION_ALLOW = 1;
+  POLICY_ACTION_DENY = 2;
+}
+
+// Wrapper so "no port list" (every port) and "empty port list" (no port) stay
+// distinct. A bare repeated field cannot express that, and mixing them up would
+// widen a deny-by-default policy.
+message PortList {
+  repeated uint32 ports = 1;
+}
+
+message NetworkPolicyRule {
+  PolicyAction action = 1;
+  string host_pattern = 2;
+  // Unset means every port. Set means only the listed ports (possibly none).
+  optional PortList ports = 3;
+}
+
+message NetworkPolicy {
+  bool default_deny = 1;
+  repeated NetworkPolicyRule rules = 2;
+}
+
+message SecretEntry {
+  string value = 1;
+  repeated string hosts = 2;
+}
+
+message SecretsConfig {
+  map<string, SecretEntry> secrets = 1;
+}
+
+// Mirrors sandbox_types::Capability. Exactly one variant must be set.
+message Capability {
+  oneof kind {
+    string fs_read = 1;
+    string fs_write = 2;
+    string net_http = 3;
+    string net_tcp = 4;
+    string exec = 5;
+    string env = 6;
+    bool clock = 7;
+  }
+}

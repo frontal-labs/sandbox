@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package sandbox.v1.guest;
+
+import "google/protobuf/empty.proto";
+import "sandbox/v1/types/exec.proto";
+import "sandbox/v1/types/ids.proto";
+
+// Host <-> in-VM agent (PLAN.md section 4.10). Schema and framing only:
+// the VM tier cannot run in this repository's current test environment.
+service GuestService {
+  rpc Ping(google.protobuf.Empty) returns (PingResponse);
+  rpc Exec(sandbox.v1.types.ExecRequest) returns (sandbox.v1.types.ExecResult);
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (google.protobuf.Empty);
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+  // Makes the guest's writable tree match the given root, or reports the root it now has.
+  rpc Sync(SyncRequest) returns (SyncResponse);
+}
+
+message PingResponse {
+  string agent_version = 1;
+}
+
+message ReadFileRequest {
+  string path = 1;
+}
+
+message ReadFileResponse {
+  bytes data = 1;
+}
+
+message WriteFileRequest {
+  string path = 1;
+  bytes data = 2;
+}
+
+message ListDirRequest {
+  string path = 1;
+}
+
+message DirEntry {
+  string name = 1;
+  bool is_dir = 2;
+  uint64 size = 3;
+}
+
+message ListDirResponse {
+  repeated DirEntry entries = 1;
+}
+
+message SyncRequest {
+  optional sandbox.v1.types.ContentHash expected_root = 1;
+}
+
+message SyncResponse {
+  sandbox.v1.types.ContentHash root = 1;
+}
