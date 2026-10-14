@@ -39,7 +39,7 @@ Current state: `crates/sandbox-vmm` has driver, jailer, and pool scaffolding. `J
 
 Planned: one worker process per tenant, with `prctl(PR_SET_NO_NEW_PRIVS)`, a seccomp-bpf allowlist (`seccompiler`), cgroup v2 limits, optional namespaces (`rustix`/`nix`), and no host mounts.
 
-Current state: `crates/sandbox-worker/src/worker.rs` spawns the `sandbox worker` subcommand as a child process and talks to it over stdin and stdout. A crashed child returns `Unavailable` to the host. No seccomp, cgroup, or namespace code exists in the repository. A grep for `seccomp`, `cgroup`, and `prctl` in `crates/` finds no implementation.
+Current state: `crates/sandbox-worker/src/worker.rs` spawns the `sandbox worker --socket` subcommand as a child process and serves gRPC over a Unix socket in a directory the host creates with mode `0700`. Guest output is data in the reply, not a shared stream. A crashed child returns `Unavailable` to the host. No seccomp, cgroup, or namespace code exists in the repository. A grep for `seccomp`, `cgroup`, and `prctl` in `crates/` finds no implementation.
 
 ## Layer 3: Language runtimes (planned)
 

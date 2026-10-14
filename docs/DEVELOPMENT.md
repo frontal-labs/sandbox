@@ -19,6 +19,9 @@ build does not mean the feature works.
   a Bazel or Bazelisk version compatible with `bazel_dep` entries in
   `MODULE.bazel`.
 - **Python 3.11+** for the Python SDK (`sdks/python/pyproject.toml`).
+- **protoc** (Protocol Buffers compiler), on `PATH` or set as `PROTOC`. Needed
+  to build `crates/sandbox-proto`. Bazel builds protoc itself from the
+  `protobuf` module. Optional: **buf**, for `buf lint proto`.
 
 There is no Nix flake. `flake.nix` and `flake.lock` have been removed, and CI
 installs the toolchain through `rust-toolchain.toml` instead of `nix develop`.
@@ -226,3 +229,12 @@ Whether the CLI or tests actually install a subscriber has not been verified.
   `tests/`). They do not exist yet.
 - The release process (`release.yml`, `.changeset/`) was not reviewed in this
   update.
+
+## Contracts
+
+- **Protobuf** (`proto/`): edit the `.proto` files, then `cargo build -p
+  sandbox-proto` regenerates the Rust bindings. Check with `buf lint proto` and
+  `buf build proto`.
+- **OpenAPI** (`openapi/v1/`): after changing a route or a REST type, run
+  `cargo run -p sandbox-server --bin gen_openapi`. Then run `cargo test -p
+  sandbox-server --test openapi`, which fails if the committed spec is stale.

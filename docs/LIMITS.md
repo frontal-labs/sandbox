@@ -70,3 +70,15 @@ These appear in PLAN.md and are not defined in code:
 - Capacity targets for a single host (PLAN.md section 6, for example "10,000+ idle sessions per 64 GB host").
 
 Add concrete values to this file when the matching code exists, and cite the source line.
+
+## Worker channel
+
+These limits apply to the gRPC channel between the scheduler and a worker
+(`crates/sandbox-worker`, `crates/sandbox-proto`):
+
+| Limit | Value | Enforced by |
+|-------|-------|-------------|
+| Request or response message | 16 MiB (`MAX_MESSAGE_BYTES`) | Host check before sending, and tonic decoding limits on both sides |
+| Script size | 16 MiB | Host check (`ResourceExhausted`) |
+| Call deadline | 60 s (`RPC_DEADLINE`) | Host sets the deadline on each call |
+| Length-prefixed guest frame | 16 MiB (`framing::MAX_FRAME_BYTES`) | Checked before allocation (no caller yet; VM tier) |

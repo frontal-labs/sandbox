@@ -41,6 +41,11 @@ which the server does not route yet, so those calls will return 404.
 
 Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 
+## Contract files
+
+- REST: `openapi/v1/openapi.json` and `openapi/v1/openapi.yaml`, generated from `crates/sandbox-server/src/api.rs`. Every route and its responses are listed there.
+- Internal and gRPC: `proto/sandbox/v1/`, compiled into `crates/sandbox-proto`. The worker service is live. The `api` services are schema only.
+
 ## Planned, not routed
 
 These appear in PLAN.md section 4.15 but have no route in `api.rs`:
@@ -49,8 +54,9 @@ These appear in PLAN.md section 4.15 but have no route in `api.rs`:
 - `GET /v1/sessions/{id}/fs?list=...`: directory listing
 - `GET /v1/sessions/{id}/trace`: trace event stream
 - `GET /v1/usage`: metering
-- `GET /v1/openapi.json`: OpenAPI spec (planned via `utoipa`; `utoipa` is a
-  workspace dependency but no spec is generated yet)
+- Served now: `GET /v1/openapi.json` returns the generated spec (no auth). The
+  committed copies are in `openapi/v1/`, and `openapi/README.md` covers
+  regeneration and the drift check.
 
 ## Authentication
 

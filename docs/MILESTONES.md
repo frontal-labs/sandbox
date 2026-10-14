@@ -91,7 +91,7 @@ Last reviewed against the source tree on 2026-10-13.
 - [ ] **Partial.** `sandbox-policy`: capability, limits, and network modules
       exist; no tests
 - [ ] **Partial.** `sandbox-snapshot`: early (single module)
-- [x] `sandbox-worker`: one child process per session over a JSON-lines protocol, with
+- [x] `sandbox-worker`: one child process per session, gRPC over a private Unix socket, with
       crash isolation. Seccomp, cgroups, namespaces, and gRPC are not implemented.
 - [ ] **Partial.** `sandbox-server`: routes wired at `/v1` with placeholder
       handlers; API keys not implemented (`auth.rs` TODO); no OpenAPI

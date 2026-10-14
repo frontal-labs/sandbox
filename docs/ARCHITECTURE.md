@@ -24,7 +24,8 @@ Rust workspace with TypeScript and Python SDKs.
 | `sandbox-runtime` | `execute_script` runs JS in a fresh V8 isolate with a timeout, a heap cap, and captured `console.log`. No modules |
 | `sandbox-wasm` | Runs WASI preview1 command modules. Files are the VFS directory mounted as the preopen. Stdio is in memory. Tool registry at `/etc/tools.toml`. Compiled modules cached per process |
 | `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot`, `sleep` return `Unsupported` |
-| `sandbox-worker` | One child process per session over stdin and stdout, with crash isolation. No seccomp or cgroups |
+| `sandbox-worker` | One child process per session, served as gRPC over a private Unix socket (mode 0700), with crash isolation. No seccomp, cgroups, or namespaces |
+| `sandbox-proto` | Generated protobuf and gRPC bindings from `proto/`, with conversions to and from `sandbox-types` |
 | `sandbox-promote` | Stub. Needs a Linux host with KVM |
 | `sandbox-server` | Routes wired behind API-key auth; handlers return 501 placeholders |
 | `sdks/rust` | Client methods return `Unsupported`; embedded mode is not wired |
