@@ -12,7 +12,7 @@ Re-exported from `src/lib.rs`: `IsolateBackend`, `Session`.
 - `trait SessionFs`: `open`, `read`, `write`, `stat`, `readdir`, `mkdir`, `rm`, `rename`, `symlink`, `readlink`, `truncate`, `commit`. Handles are `u64`.
 - `ExecHandle` (`src/session.rs`): buffered `stdout`, `stderr`, and `stdin` as `Vec<u8>`, plus `wait()`. This is not the streaming shape in the PLAN.
 - `IsolateBackend` (`src/backend.rs`): `new(SessionConfig) -> Result<Self>`. Its `fs()` panics.
-- `restore(SnapshotId)` (`src/backend.rs`): returns `unsupported`.
+- `restore(SnapshotId)` (`src/backend.rs`): starts a session whose filesystem is the snapshot's committed root. Blobs live in a process-wide store, which is never freed.
 
 ## Planned design
 

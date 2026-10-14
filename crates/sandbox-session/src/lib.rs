@@ -3,5 +3,5 @@
 pub mod backend;
 pub mod session;
 
-pub use backend::IsolateBackend;
+pub use backend::{restore, IsolateBackend};
 pub use session::Session;

@@ -7,14 +7,31 @@ use sandbox_types::{
     ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, SnapshotId, Tier,
 };
 use sandbox_vfs::Vfs;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Instant;
 use tokio::sync::Mutex;
+
+/// Blob store shared by every backend in the process. Blobs are content
+/// addressed and never change, so a restored session can read the blobs of
+/// the snapshot it came from. Nothing is freed yet: a process-wide store only
+/// grows.
+fn shared_store() -> Arc<dyn BlobStore> {
+    static STORE: OnceLock<Arc<dyn BlobStore>> = OnceLock::new();
+    STORE.get_or_init(|| Arc::new(MemStore::new())).clone()
+}
+
+/// Committed filesystem root of each snapshot taken in this process.
+fn snapshots() -> &'static StdMutex<HashMap<SnapshotId, ContentHash>> {
+    static SNAPSHOTS: OnceLock<StdMutex<HashMap<SnapshotId, ContentHash>>> = OnceLock::new();
+    SNAPSHOTS.get_or_init(|| StdMutex::new(HashMap::new()))
+}
 
 /// Tier 1 session. Owns its VFS, which is the source of truth for files, and
 /// a shell that runs against that VFS.
 ///
-/// Snapshot and sleep are not implemented yet and return `Unsupported`.
+/// A snapshot records the committed filesystem root. Sleep is not implemented
+/// yet and returns `Unsupported`.
 pub struct IsolateBackend {
     id: SessionId,
     tier: Tier,
@@ -26,15 +43,19 @@ pub struct IsolateBackend {
 
 impl IsolateBackend {
     pub async fn new(_config: SessionConfig) -> Result<Self, SandboxError> {
-        let store: Arc<dyn BlobStore> = Arc::new(MemStore::new());
-        let fs = Arc::new(Vfs::new(ContentHash::nil(), store));
+        Ok(Self::with_root(ContentHash::nil()))
+    }
+
+    /// A session whose filesystem starts at `root`, a committed snapshot root.
+    fn with_root(root: ContentHash) -> Self {
+        let fs = Arc::new(Vfs::new(root, shared_store()));
         let shell = Shell::new(fs.clone(), ShellConfig::default());
-        Ok(Self {
+        Self {
             id: SessionId::new(),
             tier: Tier::Isolate,
             fs,
             shell: Mutex::new(shell),
-        })
+        }
     }
 }
 
@@ -103,7 +124,17 @@ impl Session for IsolateBackend {
     }
 
     async fn snapshot(&self) -> Result<SnapshotId, SandboxError> {
-        Err(SandboxError::unsupported("snapshot is not implemented yet"))
+        let root = self
+            .fs
+            .checkpoint()
+            .await
+            .map_err(|e| SandboxError::new(ErrorCode::VfsError, e.to_string()))?;
+        let id = SnapshotId::new();
+        snapshots()
+            .lock()
+            .map_err(|_| SandboxError::internal("snapshot registry poisoned"))?
+            .insert(id, root);
+        Ok(id)
     }
 
     async fn sleep(&self) -> Result<SnapshotId, SandboxError> {
@@ -115,8 +146,15 @@ impl Session for IsolateBackend {
     }
 }
 
-pub async fn restore(_snapshot_id: SnapshotId) -> Result<Box<dyn Session>, SandboxError> {
-    Err(SandboxError::unsupported("restore not implemented"))
+/// Starts a new session whose filesystem is the snapshot's committed root.
+pub async fn restore(snapshot_id: SnapshotId) -> Result<Box<dyn Session>, SandboxError> {
+    let root = snapshots()
+        .lock()
+        .map_err(|_| SandboxError::internal("snapshot registry poisoned"))?
+        .get(&snapshot_id)
+        .copied()
+        .ok_or_else(|| SandboxError::not_found(format!("snapshot {snapshot_id} not found")))?;
+    Ok(Box::new(IsolateBackend::with_root(root)))
 }
 
 #[cfg(test)]
@@ -235,16 +273,65 @@ mod tests {
         );
     }
 
+    async fn write_text(fs: &dyn SessionFs, path: &str, text: &str) {
+        let handle = fs
+            .open(
+                Path::new(path),
+                OpenFlags {
+                    read: false,
+                    write: true,
+                    append: false,
+                    create: true,
+                    truncate: true,
+                    exclusive: false,
+                },
+            )
+            .await
+            .unwrap();
+        fs.write(&handle, 0, text.as_bytes()).await.unwrap();
+        fs.close(&handle);
+    }
+
+    async fn read_text(fs: &dyn SessionFs, path: &str) -> String {
+        let handle = fs
+            .open(Path::new(path), OpenFlags::default())
+            .await
+            .unwrap();
+        let bytes = fs.read(&handle, 0, 1024).await.unwrap();
+        fs.close(&handle);
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
     #[tokio::test]
-    async fn snapshot_and_sleep_report_unsupported() {
+    async fn sleep_reports_unsupported() {
         let backend = new_backend().await;
-        assert_eq!(
-            backend.snapshot().await.err().unwrap().code,
-            ErrorCode::Unsupported
-        );
         assert_eq!(
             backend.sleep().await.err().unwrap().code,
             ErrorCode::Unsupported
         );
+    }
+
+    #[tokio::test]
+    async fn restored_session_sees_the_snapshot_not_later_writes() {
+        let backend = new_backend().await;
+        write_text(backend.fs(), "/a.txt", "one").await;
+        let snapshot = backend.snapshot().await.unwrap();
+
+        // Changes after the snapshot must not reach the restored session.
+        write_text(backend.fs(), "/a.txt", "two").await;
+        write_text(backend.fs(), "/later.txt", "new").await;
+
+        let restored = restore(snapshot).await.unwrap();
+        assert_eq!(read_text(restored.fs(), "/a.txt").await, "one");
+        assert!(restored.fs().stat(Path::new("/later.txt")).await.is_err());
+
+        // The original keeps its own later state.
+        assert_eq!(read_text(backend.fs(), "/a.txt").await, "two");
+    }
+
+    #[tokio::test]
+    async fn restore_unknown_snapshot_is_not_found() {
+        let err = restore(SnapshotId::new()).await.err().unwrap();
+        assert_eq!(err.code, ErrorCode::NotFound);
     }
 }
