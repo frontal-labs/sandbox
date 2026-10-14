@@ -1,6 +1,6 @@
-use sandbox_types::hash::ContentHash;
 use async_trait::async_trait;
 use bytes::Bytes;
+use sandbox_types::hash::ContentHash;
 use sandbox_types::SandboxError;
 use std::fmt;
 
@@ -60,10 +60,18 @@ pub enum BlobStoreError {
 impl From<BlobStoreError> for SandboxError {
     fn from(err: BlobStoreError) -> Self {
         match err {
-            BlobStoreError::NotFound(hash) => SandboxError::not_found(format!("Blob not found: {}", hash)),
-            BlobStoreError::Io(e) => SandboxError::with_source(sandbox_types::ErrorCode::CasError, "I/O error", e),
-            BlobStoreError::Compression(e) => SandboxError::cas_error(format!("Compression error: {}", e)),
-            BlobStoreError::Chunking(e) => SandboxError::cas_error(format!("Chunking error: {}", e)),
+            BlobStoreError::NotFound(hash) => {
+                SandboxError::not_found(format!("Blob not found: {}", hash))
+            }
+            BlobStoreError::Io(e) => {
+                SandboxError::with_source(sandbox_types::ErrorCode::CasError, "I/O error", e)
+            }
+            BlobStoreError::Compression(e) => {
+                SandboxError::cas_error(format!("Compression error: {}", e))
+            }
+            BlobStoreError::Chunking(e) => {
+                SandboxError::cas_error(format!("Chunking error: {}", e))
+            }
             BlobStoreError::Storage(e) => SandboxError::cas_error(format!("Storage error: {}", e)),
             BlobStoreError::InvalidArgument(e) => SandboxError::invalid_argument(e),
         }

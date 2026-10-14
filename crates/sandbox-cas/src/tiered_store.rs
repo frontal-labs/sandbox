@@ -1,9 +1,9 @@
 use crate::blob_store::{BlobStore, BlobStoreError, BlobStoreResult, PutOptions};
-use sandbox_types::hash::ContentHash;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::StreamExt;
-use object_store::{ObjectStore, path::Path as ObjectPath, ObjectStoreExt};
+use object_store::{path::Path as ObjectPath, ObjectStore, ObjectStoreExt};
+use sandbox_types::hash::ContentHash;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, trace};
@@ -148,7 +148,7 @@ impl BlobStore for TieredStore {
 
         let path = Self::object_path(hash);
         match self.remote.delete(&path).await {
-            Ok(_) => Ok(local_deleted || true),
+            Ok(_) => Ok(true),
             Err(object_store::Error::NotFound { .. }) => Ok(local_deleted),
             Err(e) => Err(BlobStoreError::Storage(format!(
                 "Remote store error: {}",
@@ -163,9 +163,8 @@ impl BlobStore for TieredStore {
 
         let mut stream = self.remote.list(prefix_path.as_ref());
         while let Some(result) = stream.next().await {
-            let meta = result.map_err(|e| {
-                BlobStoreError::Storage(format!("Remote list error: {}", e))
-            })?;
+            let meta =
+                result.map_err(|e| BlobStoreError::Storage(format!("Remote list error: {}", e)))?;
             if let Some(filename) = meta.location.filename() {
                 if let Ok(hash) = ContentHash::from_hex(filename) {
                     results.push(hash);
@@ -184,8 +183,8 @@ impl BlobStore for TieredStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mem_store::MemStore;
     use crate::blob_store::PutOptions;
+    use crate::mem_store::MemStore;
     use object_store::memory::InMemory;
 
     #[tokio::test]
@@ -197,7 +196,11 @@ mod tests {
         let data = b"tiered test";
         let hash = ContentHash::new(data);
 
-        remote.put(&TieredStore::object_path(&hash), Bytes::from_static(data).into())
+        remote
+            .put(
+                &TieredStore::object_path(&hash),
+                Bytes::from_static(data).into(),
+            )
             .await
             .unwrap();
 

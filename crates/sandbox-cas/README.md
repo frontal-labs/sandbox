@@ -1,4 +1,4 @@
-# sandbox-cas
+# Sandbox CAS
 
 Content-addressed blob store for the sandbox system. Blobs are keyed by the BLAKE3 hash of their uncompressed content.
 

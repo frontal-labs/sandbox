@@ -1,7 +1,7 @@
 use crate::blob_store::{BlobStore, BlobStoreError, BlobStoreResult, PutOptions};
-use sandbox_types::hash::ContentHash;
 use async_trait::async_trait;
 use bytes::Bytes;
+use sandbox_types::hash::ContentHash;
 use serde_json;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -68,27 +68,51 @@ impl DiskStore {
 
     fn chunk_dir(&self, hash: &ContentHash) -> PathBuf {
         let idx = self.shard_index(hash);
-        self.root.join(format!("{:02x}", idx)).join("chunks").join(&hash.to_hex()[..2])
+        self.root
+            .join(format!("{:02x}", idx))
+            .join("chunks")
+            .join(&hash.to_hex()[..2])
     }
 
     async fn write_file(&self, path: &Path, data: &[u8]) -> BlobStoreResult<()> {
         if let Some(parent) = path.parent() {
-            tokio_fs::create_dir_all(parent).await.map_err(BlobStoreError::Io)?;
+            tokio_fs::create_dir_all(parent)
+                .await
+                .map_err(BlobStoreError::Io)?;
         }
-        tokio_fs::write(path, data).await.map_err(BlobStoreError::Io)?;
+        tokio_fs::write(path, data)
+            .await
+            .map_err(BlobStoreError::Io)?;
         Ok(())
     }
 
     async fn read_file(&self, path: &Path) -> BlobStoreResult<Bytes> {
-        let mut file = tokio_fs::File::open(path).await.map_err(BlobStoreError::Io)?;
+        let mut file = tokio_fs::File::open(path)
+            .await
+            .map_err(BlobStoreError::Io)?;
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf).await.map_err(BlobStoreError::Io)?;
+        file.read_to_end(&mut buf)
+            .await
+            .map_err(BlobStoreError::Io)?;
         Ok(Bytes::from(buf))
+    }
+
+    /// Existence check without taking the shard lock. The caller must hold
+    /// the lock for this hash's shard (read or write).
+    async fn has_unlocked(&self, hash: &ContentHash) -> BlobStoreResult<bool> {
+        let path = self.shard_path(hash);
+        if path.exists() {
+            return Ok(true);
+        }
+        let manifest_path = path.with_extension("manifest");
+        Ok(manifest_path.exists())
     }
 
     async fn put_chunked(&self, hash: &ContentHash, data: &[u8]) -> BlobStoreResult<()> {
         let chunk_dir = self.chunk_dir(hash);
-        tokio_fs::create_dir_all(&chunk_dir).await.map_err(BlobStoreError::Io)?;
+        tokio_fs::create_dir_all(&chunk_dir)
+            .await
+            .map_err(BlobStoreError::Io)?;
 
         let mut chunk_hashes = Vec::new();
         let mut offset = 0;
@@ -123,9 +147,10 @@ impl DiskStore {
         }
 
         let manifest_data = self.read_file(&manifest_path).await?;
-        let chunk_hashes: Vec<ContentHash> = serde_json::from_slice(&manifest_data).map_err(
-            |e| BlobStoreError::Storage(format!("Failed to parse chunk manifest: {}", e)),
-        )?;
+        let chunk_hashes: Vec<ContentHash> =
+            serde_json::from_slice(&manifest_data).map_err(|e| {
+                BlobStoreError::Storage(format!("Failed to parse chunk manifest: {}", e))
+            })?;
 
         let mut result = Vec::with_capacity(chunk_hashes.len() * CHUNK_THRESHOLD);
         for chunk_hash in chunk_hashes {
@@ -138,6 +163,40 @@ impl DiskStore {
     }
 }
 
+/// Leading byte of every single-file blob: says whether the payload is zstd.
+const FRAME_RAW: u8 = 0x00;
+const FRAME_ZSTD: u8 = 0x01;
+
+/// Frames a blob for disk. The flag byte lets `get` decode without guessing
+/// from the content, which could itself look like a zstd header.
+fn encode_blob(data: &[u8], compress: bool) -> BlobStoreResult<Vec<u8>> {
+    if compress {
+        let payload = zstd::encode_all(data, 3)
+            .map_err(|e| BlobStoreError::Compression(format!("zstd compression failed: {}", e)))?;
+        let mut framed = Vec::with_capacity(payload.len() + 1);
+        framed.push(FRAME_ZSTD);
+        framed.extend_from_slice(&payload);
+        Ok(framed)
+    } else {
+        let mut framed = Vec::with_capacity(data.len() + 1);
+        framed.push(FRAME_RAW);
+        framed.extend_from_slice(data);
+        Ok(framed)
+    }
+}
+
+fn decode_blob(framed: &[u8]) -> BlobStoreResult<Bytes> {
+    match framed.split_first() {
+        Some((&FRAME_RAW, payload)) => Ok(Bytes::copy_from_slice(payload)),
+        Some((&FRAME_ZSTD, payload)) => zstd::decode_all(payload)
+            .map(Bytes::from)
+            .map_err(|e| BlobStoreError::Compression(format!("zstd decompression failed: {}", e))),
+        _ => Err(BlobStoreError::Storage(
+            "blob has an unknown frame header".to_string(),
+        )),
+    }
+}
+
 #[async_trait]
 impl BlobStore for DiskStore {
     async fn get(&self, hash: &ContentHash) -> BlobStoreResult<Option<Bytes>> {
@@ -146,8 +205,8 @@ impl BlobStore for DiskStore {
 
         let path = self.shard_path(hash);
         if path.exists() {
-            let data = self.read_file(&path).await?;
-            return Ok(Some(data));
+            let framed = self.read_file(&path).await?;
+            return Ok(Some(decode_blob(&framed)?));
         }
 
         self.get_chunked(hash).await
@@ -157,7 +216,9 @@ impl BlobStore for DiskStore {
         let hash = ContentHash::new(data);
         let _guard = self.shards[self.shard_index(&hash)].write().await;
 
-        if self.has(&hash).await? {
+        // Use the unlocked check: `has` takes a read lock on this same shard,
+        // and tokio's RwLock is not reentrant, so calling it here deadlocks.
+        if self.has_unlocked(&hash).await? {
             return Ok(hash);
         }
 
@@ -166,12 +227,7 @@ impl BlobStore for DiskStore {
         if should_chunk {
             self.put_chunked(&hash, data).await?;
         } else {
-            let mut final_data = data.to_vec();
-            if options.compress {
-                final_data = zstd::encode_all(&final_data[..], 3).map_err(|e| {
-                    BlobStoreError::Compression(format!("zstd compression failed: {}", e))
-                })?;
-            }
+            let final_data = encode_blob(data, options.compress)?;
             let path = self.shard_path(&hash);
             self.write_file(&path, &final_data).await?;
         }
@@ -182,12 +238,7 @@ impl BlobStore for DiskStore {
 
     async fn has(&self, hash: &ContentHash) -> BlobStoreResult<bool> {
         let _guard = self.shards[self.shard_index(hash)].read().await;
-        let path = self.shard_path(hash);
-        if path.exists() {
-            return Ok(true);
-        }
-        let manifest_path = path.with_extension("manifest");
-        Ok(manifest_path.exists())
+        self.has_unlocked(hash).await
     }
 
     async fn delete(&self, hash: &ContentHash) -> BlobStoreResult<bool> {
@@ -197,11 +248,15 @@ impl BlobStore for DiskStore {
 
         let mut deleted = false;
         if path.exists() {
-            tokio_fs::remove_file(&path).await.map_err(BlobStoreError::Io)?;
+            tokio_fs::remove_file(&path)
+                .await
+                .map_err(BlobStoreError::Io)?;
             deleted = true;
         }
         if manifest_path.exists() {
-            tokio_fs::remove_file(&manifest_path).await.map_err(BlobStoreError::Io)?;
+            tokio_fs::remove_file(&manifest_path)
+                .await
+                .map_err(BlobStoreError::Io)?;
             deleted = true;
         }
 
@@ -218,7 +273,9 @@ impl BlobStore for DiskStore {
                 continue;
             }
 
-            let mut entries = tokio_fs::read_dir(&shard_dir).await.map_err(BlobStoreError::Io)?;
+            let mut entries = tokio_fs::read_dir(&shard_dir)
+                .await
+                .map_err(BlobStoreError::Io)?;
             while let Some(entry) = entries.next_entry().await.map_err(BlobStoreError::Io)? {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.ends_with(".manifest") {
@@ -262,6 +319,31 @@ mod tests {
         let deleted = store.delete(&hash).await.unwrap();
         assert!(deleted);
         assert!(!store.has(&hash).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_disk_store_put_does_not_deadlock() {
+        // Regression: put() used to re-acquire its own shard lock via has().
+        // The timeout turns a reintroduced deadlock into a failure.
+        let dir = tempdir().unwrap();
+        let store = DiskStore::new(dir.path()).unwrap();
+
+        let first = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            store.put(b"dedupe me", PutOptions::default()),
+        )
+        .await
+        .expect("put deadlocked on first write")
+        .unwrap();
+        let second = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            store.put(b"dedupe me", PutOptions::default()),
+        )
+        .await
+        .expect("put deadlocked on duplicate write")
+        .unwrap();
+
+        assert_eq!(first, second);
     }
 
     #[tokio::test]
