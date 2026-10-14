@@ -59,7 +59,7 @@ benchmarks/                 Criterion benches and load tests
 docs/                       Architecture, security model, API, and limits
 ```
 
-Most crates are early scaffolds or stubs. The server runs session, exec, and filesystem routes against in-memory sessions; snapshot and fork return 501. `sandbox run` and `sandbox shell` are not yet implemented. See [PLAN.md](PLAN.md) for the milestone status,
+Most crates are early scaffolds or stubs. The server runs session, exec, filesystem, snapshot, and fork routes against in-memory sessions; snapshot and fork also run against in-memory sessions. `sandbox run` and `sandbox shell` are not yet implemented. See [PLAN.md](PLAN.md) for the milestone status,
 the complete design specification, and target behavior.
 
 ## Development

@@ -23,11 +23,11 @@ Rust workspace with TypeScript and Python SDKs.
 | `sandbox-snapshot`, `sandbox-trace`, `sandbox-vmm`, `sandbox-guest` | Early or partial scaffolding |
 | `sandbox-runtime` | `execute_script` runs JS in a fresh V8 isolate with a timeout, a heap cap, and captured `console.log`. No modules |
 | `sandbox-wasm` | Runs WASI preview1 command modules. Files are the VFS directory mounted as the preopen. Stdio is in memory. Tool registry at `/etc/tools.toml`. Compiled modules cached per process |
-| `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot`, `sleep` return `Unsupported` |
+| `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot` and `restore` work; `sleep` returns `Unsupported` |
 | `sandbox-worker` | One child process per session, served as gRPC over a private Unix socket (mode 0700), with crash isolation. No seccomp, cgroups, or namespaces |
 | `sandbox-proto` | Generated protobuf and gRPC bindings from `proto/`, with conversions to and from `sandbox-types` |
 | `sandbox-promote` | Stub. Needs a Linux host with KVM |
-| `sandbox-server` | Session, exec, and filesystem routes run against in-memory sessions behind API-key auth; snapshot and fork return 501 |
+| `sandbox-server` | Session, exec, filesystem, snapshot, and fork routes run against in-memory sessions behind API-key auth |
 | `sdks/rust` | Client methods return `Unsupported`; embedded mode is not wired |
 | `cli` | `run` and `shell` execute; other subcommands return `Unsupported` |
 | `sdks/typescript`, `sdks/python` | Client code and types. Not run end to end against the server |
@@ -176,5 +176,5 @@ implement any of them.
 
 ## Security Assumptions
 
-- The server has API-key auth, but no key provisioning, TLS, or rate limiting, and snapshot and fork are not implemented. Do not expose it.
+- The server has API-key auth, but no key provisioning, TLS, or rate limiting, and sessions live in process memory. Do not expose it.
 - See [SECURITY_MODEL.md](SECURITY_MODEL.md) for the model under design.

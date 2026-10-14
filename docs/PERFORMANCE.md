@@ -9,7 +9,7 @@ Source: PLAN.md section 6. Milestone acceptance criteria are in PLAN.md section 
 | Metric | Target | Benchmark that would measure it | Status |
 |--------|--------|---------------------------------|--------|
 | Isolate session from warm pool | < 5 ms p50, < 15 ms p99 | `runtime_bench`: `cold_isolate_console_log` | Bench measures a cold isolate per run. No pool exists, so the warm-pool target is not measured. |
-| Restore from snapshot (Tier 1) | < 25 ms p50 | none | Snapshot and restore are not implemented. |
+| Restore from snapshot (Tier 1) | < 25 ms p50 | none | Restore works in memory. Latency is not measured. |
 | `echo hi` end-to-end (local) | < 10 ms | `session_bench`: `session_exec/echo_argv` | Bench exists and runs real code. Not measured in this repo. |
 | VFS read 4 KiB (cached) | < 5 µs | `vfs_bench`: `read_4kb_cached` | Bench exists. Not measured. |
 | Fork a snapshot | < 5 ms | `session_bench` | Commented out. Not measured. |

@@ -103,7 +103,7 @@ Planned (PLAN.md section 4.7): an in-process HTTP client that is the only egress
 - `crates/sandbox-server/src/api.rs`: `require_api_key` is a `route_layer` on every `/v1` route. It returns 401 unless the bearer key validates.
 - Still planned (PLAN.md section 4.15): per-key scopes, quotas, key provisioning, and OIDC.
 - `crates/sandbox-server/src/middleware.rs` adds a request ID and logs requests. It does not authenticate them.
-- Snapshot and fork routes return 501. The crate has no server binary yet.
+- Settings the backend does not enforce are refused, not ignored. The crate has no server binary yet.
 
 ## Trace and audit
 
