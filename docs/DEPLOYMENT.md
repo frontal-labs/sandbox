@@ -25,7 +25,7 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 
 ### Server
 
-`crates/sandbox-server` defines routes in `src/api.rs`, and every `/v1` route requires a valid API key. The handlers are placeholders that answer `501 Not Implemented`. There is no server `main` in the repository, no key-provisioning path, no config file loader, no health endpoint, and no metrics endpoint. Do not expose a server built from this code.
+`crates/sandbox-server` defines routes in `src/api.rs`, and every `/v1` route requires a valid API key. Session, exec, and filesystem handlers run against in-memory sessions. Snapshot and fork answer `501 Not Implemented`. There is no server `main` in the repository, no key-provisioning path, no config file loader, no health endpoint, and no metrics endpoint. Do not expose a server built from this code.
 
 ### Continuous integration and releases
 

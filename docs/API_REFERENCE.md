@@ -1,10 +1,9 @@
 # API Reference
 
-> **Status: scaffold.** The HTTP routes below are wired in
-> `crates/sandbox-server/src/api.rs` and every `/v1` route requires a valid API
-> key. Each handler currently answers `501 Not Implemented`: no request body is
-> parsed, no session is created, and no response is JSON. The JSON shapes in
-> this document are the intended contract, not current behavior. The full target API is specified in
+> **Status: early.** Session, exec, and filesystem routes work against in-memory
+> sessions, and every `/v1` route requires a valid API key. Snapshot and fork
+> return `501 Not Implemented`, because the session backend cannot capture or
+> restore state yet. The full target API is specified in
 > [PLAN.md section 4.15](../PLAN.md#415-sandbox-server).
 
 ## Base URL
@@ -27,7 +26,7 @@ which the server does not route yet, so those calls will return 404.
 
 ## Routed endpoints
 
-| Method | Path | Handler (placeholder) | Notes |
+| Method | Path | Handler | Behavior |
 |--------|------|-----------------------|-------|
 | POST | `/v1/sessions` | `create_session` | Create a session |
 | GET | `/v1/sessions/{id}` | `get_session` | Status, tier |
@@ -36,8 +35,8 @@ which the server does not route yet, so those calls will return 404.
 | GET | `/v1/sessions/{id}/fs/{path}` | `read_file` | Read a file |
 | PUT | `/v1/sessions/{id}/fs/{path}` | `write_file` | Write a file |
 | DELETE | `/v1/sessions/{id}/fs/{path}` | `delete_file` | Delete a file |
-| POST | `/v1/sessions/{id}/snapshot` | `take_snapshot` | Snapshot a session |
-| POST | `/v1/snapshots/{id}/fork` | `fork_snapshot` | Fork a snapshot |
+| POST | `/v1/sessions/{id}/snapshot` | `take_snapshot` | `501` until the backend can snapshot |
+| POST | `/v1/snapshots/{id}/fork` | `fork_snapshot` | `501` until snapshots can be restored |
 
 Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 

@@ -6,7 +6,7 @@
 - **Partial**: code exists, but it is not enforced or not reachable from the public API.
 - **Planned**: no code, or only a placeholder.
 
-Do not run untrusted code on this codebase, and do not expose the server to untrusted clients. The API handlers are placeholders. Requests need a valid API key, but key provisioning, TLS, and rate limiting are not implemented (see Authentication).
+Do not run untrusted code on this codebase, and do not expose the server to untrusted clients. Session, exec, and filesystem handlers run against in-memory sessions. Snapshot and fork are not implemented. Requests need a valid API key, but key provisioning, TLS, and rate limiting are not implemented (see Authentication).
 
 ## Assumptions
 
@@ -103,7 +103,7 @@ Planned (PLAN.md section 4.7): an in-process HTTP client that is the only egress
 - `crates/sandbox-server/src/api.rs`: `require_api_key` is a `route_layer` on every `/v1` route. It returns 401 unless the bearer key validates.
 - Still planned (PLAN.md section 4.15): per-key scopes, quotas, key provisioning, and OIDC.
 - `crates/sandbox-server/src/middleware.rs` adds a request ID and logs requests. It does not authenticate them.
-- The routes are placeholders that return 501, and the crate has no server binary yet.
+- Snapshot and fork routes return 501. The crate has no server binary yet.
 
 ## Trace and audit
 

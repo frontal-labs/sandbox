@@ -93,7 +93,7 @@ Last reviewed against the source tree on 2026-10-13.
 - [ ] **Partial.** `sandbox-snapshot`: early (single module)
 - [x] `sandbox-worker`: one child process per session, gRPC over a private Unix socket, with
       crash isolation. Seccomp, cgroups, namespaces, and gRPC are not implemented.
-- [ ] **Partial.** `sandbox-server`: routes wired at `/v1` with placeholder
+- [ ] **Partial.** `sandbox-server`: session, exec, and filesystem routes at `/v1` run on in-memory sessions; snapshot and fork return 501
       handlers; API keys not implemented (`auth.rs` TODO); no OpenAPI
 - [ ] **Partial.** `sandbox-scheduler`: placement, pools, and scheduler modules
       exist; no tests; sleep/wake and metering not verified
@@ -187,7 +187,7 @@ Last reviewed against the source tree on 2026-10-13.
 | M0 | 1 | In progress | CI depends on removed Nix flake; no `deny.toml`; no proptest suite |
 | M1 | 2-5 | Partial | Shell subset and isolate `exec` work over the VFS; runtime (V8) script execution is a TODO |
 | M2 | 6-9 | Partial | WASI command modules run over a VFS preopen, with a tool registry; no persistent AOT cache, no preview2 |
-| M3 | 10-13 | Partial | Server handlers are placeholders; API-key auth exists; worker runs one child process per session |
+| M3 | 10-13 | Partial | Snapshot and fork are not implemented; session, exec, and fs routes run; API-key auth exists; worker runs one child process per session |
 | M4 | 14-19 | Not started | Promotion stub; VMM and guest scaffolding only |
 | M5 | 20-24 | Not started | - |
 | M6 | Ongoing | Not started | - |

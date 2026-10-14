@@ -27,7 +27,7 @@ Rust workspace with TypeScript and Python SDKs.
 | `sandbox-worker` | One child process per session, served as gRPC over a private Unix socket (mode 0700), with crash isolation. No seccomp, cgroups, or namespaces |
 | `sandbox-proto` | Generated protobuf and gRPC bindings from `proto/`, with conversions to and from `sandbox-types` |
 | `sandbox-promote` | Stub. Needs a Linux host with KVM |
-| `sandbox-server` | Routes wired behind API-key auth; handlers return 501 placeholders |
+| `sandbox-server` | Session, exec, and filesystem routes run against in-memory sessions behind API-key auth; snapshot and fork return 501 |
 | `sdks/rust` | Client methods return `Unsupported`; embedded mode is not wired |
 | `cli` | `run` and `shell` execute; other subcommands return `Unsupported` |
 | `sdks/typescript`, `sdks/python` | Client code and types. Not run end to end against the server |
@@ -176,5 +176,5 @@ implement any of them.
 
 ## Security Assumptions
 
-- The server has API-key auth, but no key provisioning, TLS, or rate limiting, and its handlers are placeholders. Do not expose it.
+- The server has API-key auth, but no key provisioning, TLS, or rate limiting, and snapshot and fork are not implemented. Do not expose it.
 - See [SECURITY_MODEL.md](SECURITY_MODEL.md) for the model under design.
