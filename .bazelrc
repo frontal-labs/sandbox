@@ -30,11 +30,6 @@ build:debug --strip=never
 build --define=lint=1
 
 # Common flags for all languages
-# Cargo fetches the frontal-labs git patches (see Cargo.toml) with the git CLI.
-# The patch repos are public, so repository rules ignore the user git config
-# (which rewrites https to ssh) and fetch anonymously over https.
-common --repo_env=CARGO_NET_GIT_FETCH_WITH_CLI=true
-common --repo_env=GIT_CONFIG_GLOBAL=/dev/null
 common --noshow_loading_progress
 common --show_timestamps
 common --announce_rc
