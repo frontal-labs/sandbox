@@ -37,19 +37,22 @@ Last reviewed against the source tree on 2026-10-13.
 **Goal**: Tier 1 execution with shell, VFS, V8 runtime
 
 ### Deliverables
-- [ ] **Partial.** `sandbox-vfs`: layer, node, quota, and ops modules exist.
-      Overlay and commit are not verified; ext4 export is not present; no tests
-- [ ] **Partial.** `sandbox-runtime`: `deno_core` host set up. Script execution
-      is a TODO that returns an error
-- [ ] **Partial.** `sandbox-shell`: parser is a stub around `brush-parser`;
-      interpreter and builtins are minimal
-- [ ] **Not started.** `sandbox-session`: `IsolateBackend` is `unimplemented!()`
-- [ ] **Partial.** `sandbox-sdk` (Rust): embedded module exists, but client
-      methods are stubs and no isolate backend backs it
-- [ ] **Partial.** `cli` (`sandbox run`): prints a message; execution is a TODO
+- [x] `sandbox-vfs`: copy-on-write overlay, Merkle commit, symlinks, quotas,
+      proptest model checks. ext4 export is not implemented.
+- [x] `sandbox-runtime`: `execute_script` runs JavaScript in a fresh V8 isolate with
+      `console.log` captured, a wall-clock timeout, an output cap, and a heap cap.
+      Module loading is not implemented.
+- [x] `sandbox-shell`: parser (quotes, `|`, `&&`, `||`, `;`, `<`, `>`, `>>`),
+      interpreter, VFS-backed builtins, variables, globs, and `/bin` WASI tools.
+      `case`, arithmetic, and host binaries are not implemented.
+- [x] `sandbox-session`: `IsolateBackend` owns a VFS and runs commands through
+      the shell. Snapshot and sleep are not implemented.
+- [ ] **Partial.** `sandbox-sdk` (Rust): embedded `exec` and `create_session`
+      return `Unsupported`; the in-process path is `sandbox-session` directly
+- [x] `cli` (`sandbox run`, `sandbox shell`): execute in an isolate session
 
 ### Acceptance Criteria
-- [ ] `sandbox run "echo hi | cat > /a && cat /a"` works
+- [x] `sandbox run "echo hi | cat > /a && cat /a"` works
 - [ ] `node -e` and `.ts` script run against VFS
 - [ ] Cold start < 5 ms from warm pool in `bench/`
 - [ ] 200+ shell conformance cases pass
@@ -63,7 +66,8 @@ Last reviewed against the source tree on 2026-10-13.
 **Goal**: WASM tooling, Node.js compatibility, tracing
 
 ### Deliverables
-- [ ] **Partial.** `sandbox-wasm`: crate present; WASI execution is a TODO
+- [x] `sandbox-wasm`: WASI preview1 command modules run with in-memory stdio, argv,
+      fuel, a memory cap, a VFS-backed preopen, and a tool registry.
 - [ ] Tools: `jq`, `ripgrep`, `sqlite3`, `git`, `python`
 - [ ] Coreutils to 40 commands
 - [ ] `node:` shim (`fs`, `path`, `os`, `child_process`, `events`, `stream`, `util`, `buffer`, `url`, `crypto`)
@@ -87,7 +91,8 @@ Last reviewed against the source tree on 2026-10-13.
 - [ ] **Partial.** `sandbox-policy`: capability, limits, and network modules
       exist; no tests
 - [ ] **Partial.** `sandbox-snapshot`: early (single module)
-- [ ] `sandbox-worker`: stub (seccomp, cgroups, gRPC not implemented)
+- [x] `sandbox-worker`: one child process per session over a JSON-lines protocol, with
+      crash isolation. Seccomp, cgroups, namespaces, and gRPC are not implemented.
 - [ ] **Partial.** `sandbox-server`: routes wired at `/v1` with placeholder
       handlers; API keys not implemented (`auth.rs` TODO); no OpenAPI
 - [ ] **Partial.** `sandbox-scheduler`: placement, pools, and scheduler modules
@@ -113,7 +118,7 @@ Last reviewed against the source tree on 2026-10-13.
 - [ ] **Partial.** `sandbox-guest`: agent and protocol scaffolding
 - [ ] Base + browser rootfs images
 - [ ] `export_ext4` for promotion
-- [ ] **Partial.** `sandbox-promote`: stub
+- [ ] `sandbox-promote`: stub. Needs a Linux host with KVM (see PLAN.md M4).
 - [ ] VM warm pool, Firecracker snapshots
 
 ### Acceptance Criteria
@@ -180,9 +185,9 @@ Last reviewed against the source tree on 2026-10-13.
 | Milestone | Target Week | Status | Blockers |
 |-----------|-------------|--------|----------|
 | M0 | 1 | In progress | CI depends on removed Nix flake; no `deny.toml`; no proptest suite |
-| M1 | 2-5 | Partial (scaffolding) | `IsolateBackend` unimplemented; shell parser stub; runtime script execution TODO |
-| M2 | 6-9 | Not started | WASI execution TODO |
-| M3 | 10-13 | Not started | Server handlers are placeholders; auth TODO; worker stub |
+| M1 | 2-5 | Partial | Shell subset and isolate `exec` work over the VFS; runtime (V8) script execution is a TODO |
+| M2 | 6-9 | Partial | WASI command modules run over a VFS preopen, with a tool registry; no persistent AOT cache, no preview2 |
+| M3 | 10-13 | Partial | Server handlers are placeholders; API-key auth exists; worker runs one child process per session |
 | M4 | 14-19 | Not started | Promotion stub; VMM and guest scaffolding only |
 | M5 | 20-24 | Not started | - |
 | M6 | Ongoing | Not started | - |

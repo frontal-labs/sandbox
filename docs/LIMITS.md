@@ -7,7 +7,7 @@ This page lists the resource limits defined in code today, where they live, and 
 | Area | Defined in code | Enforced in code |
 |------|-----------------|------------------|
 | Session resource limits (`ResourceLimits`) | Yes | No. The `check_*` helpers in `crates/sandbox-policy/src/limits.rs` have no callers in the repo. |
-| VFS quotas (`Quotas`) | Yes | No. `Vfs` stores `quotas` and an unused `_usage` field; `crates/sandbox-vfs/src/quota.rs` is not called from `vfs.rs`. |
+| VFS quotas (`Quotas`) | Yes | Yes, on create and write: `total_bytes`, `max_file_size`, `max_path_depth`, and `inode_count`. Checks are not reserved, so concurrent writers can overshoot. |
 | Network policy defaults | Yes | Partly. Policy helpers exist in `crates/sandbox-policy/src/network.rs`; nothing on the exec or fetch path calls them yet. See [SECURITY_MODEL.md](SECURITY_MODEL.md). |
 | API key quotas and tiers | No | No |
 | Process, network, and hard limits from earlier drafts | No | No |
@@ -45,7 +45,7 @@ Source: `Quotas::default()` in `crates/sandbox-vfs/src/quota.rs`.
 | `max_file_size` | 100 MiB |
 | `max_path_depth` | 256 |
 
-These duplicate the session defaults above. They are not yet enforced (see status summary). Keep the two sets in sync until one source is used.
+These duplicate the session defaults above. All four fields are enforced (see status summary). Keep the two sets in sync until one source is used.
 
 ## Network defaults
 

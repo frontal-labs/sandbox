@@ -17,15 +17,15 @@ The TypeScript SDK (`sdks/typescript`, npm package `sandbox-sdk`) and the Python
 
 ### CLI
 
-The `sandbox` binary is built from the `cli` crate (`cli/src/main.rs`). Its subcommands are parsed, but only print placeholder output. `run`, `shell`, `snapshot`, `fork`, `replay`, `serve`, and `bench` do not execute anything yet (`cli/src/commands.rs`).
+The `sandbox` binary is built from the `cli` crate (`cli/src/main.rs`). `run` and `shell` execute builtin commands in an in-process isolate session. `snapshot`, `fork`, `replay`, `serve`, and `bench` return "not implemented" errors (`cli/src/commands.rs`).
 
 ```bash
-cargo run -p cli -- run "echo hi"   # prints a placeholder; no execution
+cargo run -p cli -- run "echo hi"   # prints "hi"
 ```
 
 ### Server
 
-`crates/sandbox-server` defines routes in `src/api.rs`, but every handler returns a fixed placeholder string. There is no server `main` in the repository, no config file loader, no health endpoint, and no metrics endpoint. `AuthManager::validate_api_key` accepts any key (`src/auth.rs`). Do not expose a server built from this code.
+`crates/sandbox-server` defines routes in `src/api.rs`, and every `/v1` route requires a valid API key. The handlers are placeholders that answer `501 Not Implemented`. There is no server `main` in the repository, no key-provisioning path, no config file loader, no health endpoint, and no metrics endpoint. Do not expose a server built from this code.
 
 ### Continuous integration and releases
 
@@ -56,7 +56,7 @@ cargo run -p cli -- run "echo hi"   # prints a placeholder; no execution
 
 These are the targets from PLAN.md. Versions are not pinned in the repository.
 
-- **Tier 1 (isolate)**: no host requirements are defined yet. The isolate backend is not implemented. The VFS, CAS, and shared types crates have logic; the shell, runtime, and session crates are partial or stubs.
+- **Tier 1 (isolate)**: no host requirements are defined yet. The isolate backend runs builtin commands over the VFS (`sandbox-session`, `sandbox-shell`). The V8 runtime and WASM tools are not wired in, and there is no snapshot or sleep.
 - **Tier 2 (Firecracker)**: x86_64 or aarch64 Linux with `/dev/kvm`, cgroups v2, and user namespaces. Firecracker version is to be chosen in milestone M4. The previous "Firecracker 1.8+" note is not verified by this repository.
 - **Capacity**: PLAN.md section 6 targets 10,000+ idle sessions per 64 GB host. This is a target, not a measured result.
 
@@ -96,6 +96,6 @@ These are design notes, not current behavior.
 
 Deployment security depends on the worker and VMM layers, which are not implemented. Read [SECURITY_MODEL.md](SECURITY_MODEL.md) before any deployment. In particular:
 
-- Do not expose the API. Authentication is not implemented.
+- Do not expose the API. Authentication exists (API keys, see `auth.rs`), but there is no key provisioning, rate limiting, or TLS yet.
 - Do not put real credentials in session env or secrets. The secrets proxy is not implemented.
 - The worker is planned to need `/dev/kvm` access for Tier 2. Plan the privilege model with the security review in PLAN.md section 5.

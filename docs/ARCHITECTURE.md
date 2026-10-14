@@ -17,15 +17,18 @@ Rust workspace with TypeScript and Python SDKs.
 |------|-------|
 | `sandbox-types` | Real types: IDs, content hash (BLAKE3), errors, events, session and policy types |
 | `sandbox-cas` | `BlobStore` trait, `MemStore`, `DiskStore`, `TieredStore`, with inline unit tests |
-| `sandbox-vfs` | Layer, node, quota, and ops modules. No tests yet |
+| `sandbox-vfs` | Copy-on-write overlay, Merkle directory tree with incremental commit, symlink resolution, quotas, and ops. Unit and proptest coverage |
 | `sandbox-policy`, `sandbox-scheduler` | Types and logic. No tests yet |
-| `sandbox-shell`, `sandbox-snapshot`, `sandbox-trace`, `sandbox-vmm`, `sandbox-guest` | Early or partial scaffolding |
-| `sandbox-runtime` | `deno_core` host set up; script execution is a TODO that returns an error |
-| `sandbox-wasm` | WASI execution is a TODO |
-| `sandbox-session` | `IsolateBackend` is `unimplemented!()` |
-| `sandbox-promote`, `sandbox-worker` | Stubs |
-| `sandbox-server` | Routes wired; handlers return placeholder strings; auth is a TODO |
-| `sdks/rust`, `cli` | Stubs and print-only commands |
+| `sandbox-shell` | Parser, interpreter, VFS-backed builtins, variables, globs, control flow, functions, command substitution, and WASI tools from the registry or `/bin`. Subset of sh: no `case`, arithmetic, or host binaries |
+| `sandbox-snapshot`, `sandbox-trace`, `sandbox-vmm`, `sandbox-guest` | Early or partial scaffolding |
+| `sandbox-runtime` | `execute_script` runs JS in a fresh V8 isolate with a timeout, a heap cap, and captured `console.log`. No modules |
+| `sandbox-wasm` | Runs WASI preview1 command modules. Files are the VFS directory mounted as the preopen. Stdio is in memory. Tool registry at `/etc/tools.toml`. Compiled modules cached per process |
+| `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot`, `sleep` return `Unsupported` |
+| `sandbox-worker` | One child process per session over stdin and stdout, with crash isolation. No seccomp or cgroups |
+| `sandbox-promote` | Stub. Needs a Linux host with KVM |
+| `sandbox-server` | Routes wired behind API-key auth; handlers return 501 placeholders |
+| `sdks/rust` | Client methods return `Unsupported`; embedded mode is not wired |
+| `cli` | `run` and `shell` execute; other subcommands return `Unsupported` |
 | `sdks/typescript`, `sdks/python` | Client code and types. Not run end to end against the server |
 
 ## System Components (target)
@@ -60,7 +63,7 @@ changes must preserve them.
 
 ### Tier 1: Isolate Backend
 - V8 isolates via `deno_core` (`sandbox-runtime`)
-- POSIX-ish shell interpreter (`sandbox-shell`, built on `brush-parser`)
+- Shell subset interpreter (`sandbox-shell`): pipes, `&&`/`||`/`;`, redirects, and VFS builtins
 - WASM tools via `wasmtime` (`sandbox-wasm`)
 - Copy-on-write VFS (`sandbox-vfs`)
 - Target: sub-5 ms cold start from a warm pool (not measured)
@@ -172,5 +175,5 @@ implement any of them.
 
 ## Security Assumptions
 
-- Current code has no authentication, so the server must not be exposed.
+- The server has API-key auth, but no key provisioning, TLS, or rate limiting, and its handlers are placeholders. Do not expose it.
 - See [SECURITY_MODEL.md](SECURITY_MODEL.md) for the model under design.

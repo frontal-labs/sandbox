@@ -195,9 +195,9 @@ was deleted because the flake it updated no longer exists.
 ## Local Development Loop
 
 ```bash
-# Run the CLI (most subcommands are still placeholders)
+# Run the CLI (run and shell work; the other subcommands are not implemented)
 cargo run --bin sandbox -- --help
-cargo run --bin sandbox -- run "echo hello"   # prints a message; no execution yet
+cargo run --bin sandbox -- run "echo hello"
 ```
 
 There is no server binary yet. `crates/sandbox-server` is a library

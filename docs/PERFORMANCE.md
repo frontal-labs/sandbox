@@ -8,13 +8,13 @@ Source: PLAN.md section 6. Milestone acceptance criteria are in PLAN.md section 
 
 | Metric | Target | Benchmark that would measure it | Status |
 |--------|--------|---------------------------------|--------|
-| Isolate session from warm pool | < 5 ms p50, < 15 ms p99 | `runtime_bench`: `isolate_warm_pool` | Bench exists. `Runtime::execute_script` is unimplemented, and no pool exists. |
-| Restore from snapshot (Tier 1) | < 25 ms p50 | `session_bench` | Commented out. Not measured. |
-| `echo hi` end-to-end (local) | < 10 ms | none | No end-to-end bench. `shell_bench` has builtin-only cases. |
+| Isolate session from warm pool | < 5 ms p50, < 15 ms p99 | `runtime_bench`: `cold_isolate_console_log` | Bench measures a cold isolate per run. No pool exists, so the warm-pool target is not measured. |
+| Restore from snapshot (Tier 1) | < 25 ms p50 | none | Snapshot and restore are not implemented. |
+| `echo hi` end-to-end (local) | < 10 ms | `session_bench`: `session_exec/echo_argv` | Bench exists and runs real code. Not measured in this repo. |
 | VFS read 4 KiB (cached) | < 5 µs | `vfs_bench`: `read_4kb_cached` | Bench exists. Not measured. |
 | Fork a snapshot | < 5 ms | `session_bench` | Commented out. Not measured. |
-| Tier 2 resume from snapshot | < 150 ms p50 | `promotion_bench`: `vm_resume/resume_from_snapshot` | Tier 2 is not implemented. |
-| Promotion (Tier 1 to Tier 2) | < 400 ms (M4 acceptance) | `promotion_bench`: `promotion/tier1_to_tier2` | Promotion is not implemented. |
+| Tier 2 resume from snapshot | < 150 ms p50 | none | Tier 2 is not implemented. |
+| Promotion (Tier 1 to Tier 2) | < 400 ms (M4 acceptance) | none | Promotion is not implemented. |
 | Idle sessions per 64 GB host | 10,000+ | `load` scenario `concurrent_sessions` | Scenario uses sleeps and is not a capacity test. |
 | Idle memory per sleeping session | 0 (on disk only) | none | Sleep is not implemented. |
 
@@ -26,9 +26,9 @@ The benchmark code lives in `benchmarks/`. The layout is described in [benchmark
 
 ### Micro-benchmarks (Criterion)
 
-Seven Criterion suites are in `benchmarks/benches/`: `vfs_bench`, `cas_bench`, `shell_bench`, `runtime_bench`, `wasm_bench`, `session_bench` (all cases commented out), and `promotion_bench`.
+Six Criterion suites are in `benchmarks/benches/`: `vfs_bench`, `cas_bench`, `shell_bench`, `session_bench`, `runtime_bench`, and `wasm_bench`. All six run real code. `promotion_bench` was removed because it measured no-ops, so there is no promotion benchmark until promotion exists.
 
-`benchmarks/Cargo.toml` is not a member of the root workspace (`/Cargo.toml` lists 18 members and no `benchmarks` entry). `cargo bench --workspace` therefore does not run these suites, and the earlier commands that used `-p sandbox-vfs --bench vfs_read` refer to bench targets that do not exist. The commands below are not verified in this refresh:
+`benchmarks` is a root workspace member, so `cargo bench --workspace --no-run` compiles these suites, as CI does. The commands below are not verified in this refresh:
 
 ```bash
 # Intended invocation, run from the benchmarks directory (not verified)

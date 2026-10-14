@@ -1,11 +1,10 @@
 # API Reference
 
 > **Status: scaffold.** The HTTP routes below are wired in
-> `crates/sandbox-server/src/api.rs`, but every handler currently returns a
-> fixed placeholder string (for example `"create_session"`). No request body is
-> parsed, no response is JSON, no session is created, and no auth is enforced.
-> The JSON shapes in this document are the intended contract, not current
-> behavior. The full target API is specified in
+> `crates/sandbox-server/src/api.rs` and every `/v1` route requires a valid API
+> key. Each handler currently answers `501 Not Implemented`: no request body is
+> parsed, no session is created, and no response is JSON. The JSON shapes in
+> this document are the intended contract, not current behavior. The full target API is specified in
 > [PLAN.md section 4.15](../PLAN.md#415-sandbox-server).
 
 ## Base URL
@@ -55,10 +54,13 @@ These appear in PLAN.md section 4.15 but have no route in `api.rs`:
 
 ## Authentication
 
-Planned: API keys, hashed at rest and prefix-identified, with per-key scopes
-and quotas (PLAN.md section 4.15). `crates/sandbox-server/src/auth.rs` contains
-a `// TODO: Implement API key validation`, and `create_router` does not apply
-any auth layer. Requests are currently unauthenticated.
+Every `/v1` route requires `Authorization: Bearer <key>`. Missing or invalid
+keys get `401 Unauthorized`.
+
+Keys have the form `sbx_<key-id>_<secret>`. `AuthManager::create_key` returns
+the plaintext once. The store keeps only a BLAKE3 digest of the secret, and
+`revoke` removes a key by id. Per-key scopes and quotas are still planned
+(PLAN.md section 4.15).
 
 ## Error format
 
@@ -212,20 +214,22 @@ yet. The `middleware.rs` module only adds a request ID.
 
 ## CLI
 
-The `sandbox` binary (crate `cli`, source `cli/src/`) defines these
-subcommands. In the current code none of them calls the server or runs a
-command; each prints a message, and `run` and `shell` are marked `TODO` in
-`cli/src/commands.rs`.
+The `sandbox` binary (crate `cli`, source `cli/src/`) runs commands in an
+in-process isolate session. It does not call the server.
 
 ```bash
-sandbox run "npm test"            # prints a message; execution TODO
-sandbox shell                     # prints a message; shell TODO
-sandbox snapshot <session-id>     # prints a message
-sandbox fork <snapshot-id> 3      # prints a message
-sandbox replay <trace-file>       # prints a message
-sandbox serve --addr 0.0.0.0:8080 # prints "Starting server"; does not start one
-sandbox bench [name]              # prints a message
+sandbox run "echo hi | cat > /a && cat /a"  # args are joined and run as one script
+sandbox shell                               # one script per stdin line; state persists
+sandbox snapshot <session-id>     # returns an error; not implemented yet
+sandbox fork <snapshot-id> 3      # returns an error; not implemented yet
+sandbox replay <trace-file>       # returns an error; not implemented yet
+sandbox serve --addr 0.0.0.0:8080 # returns an error; not implemented yet
+sandbox bench [name]              # returns an error; not implemented yet
 ```
+
+`run` exits with the script's exit code. Command output goes to stdout and
+stderr. Only builtins run. Other commands exit 127 with a message. See
+`crates/sandbox-shell/src/lib.rs` for the supported shell syntax.
 
 `sandbox-server` has no binary target (`crates/sandbox-server/src` has only
 `lib.rs`, `api.rs`, `auth.rs`, `middleware.rs`), so there is currently no way to
@@ -235,11 +239,11 @@ run the HTTP routes.
 
 Status of each client:
 
-- **Rust** (`sdks/rust`, crate `sandbox-sdk`): `client.rs` methods
-  (`create_session`, `exec`, `snapshot`, `destroy_session`) are stubs that
-  ignore their arguments. `embedded.rs` exposes `EmbeddedSandbox::new`, `exec`,
-  `snapshot`, and `destroy`, but these are not backed by a working isolate
-  backend (`sandbox-session` `IsolateBackend` is `unimplemented!()`).
+- **Rust** (`sdks/rust`, crate `sandbox-sdk`): the HTTP client methods
+  (`create_session`, `exec`, `snapshot`, `destroy_session`) return `Unsupported`.
+  In embedded mode, `create_session` and `exec` also return `Unsupported`. The
+  working in-process path is `sandbox-session`'s `IsolateBackend`, which the
+  CLI uses directly.
 - **TypeScript** (`sdks/typescript`, npm `sandbox-sdk`): has a fetch-based
   client, zod-validated types, and an embedded wrapper that spawns
   `sandbox-server`. Its paths do not match the server (see the known mismatch
