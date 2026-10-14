@@ -68,16 +68,12 @@ fn every_reference_resolves_to_a_component() {
 }
 
 #[test]
-fn every_documented_operation_has_its_auth_and_placeholder_responses() {
+fn every_documented_operation_requires_auth_and_documents_401() {
     let doc: Value = serde_json::from_str(&openapi::json().unwrap()).unwrap();
     for (path, methods) in doc["paths"].as_object().unwrap() {
         for (method, op) in methods.as_object().unwrap() {
             let responses = op["responses"].as_object().unwrap();
             assert!(responses.contains_key("401"), "{method} {path} lacks 401");
-            assert!(
-                responses.contains_key("501"),
-                "{method} {path} lacks the 501 placeholder"
-            );
             assert!(
                 op["security"].is_array(),
                 "{method} {path} lacks the bearer requirement"
@@ -102,6 +98,28 @@ async fn send(app: axum::Router, method: &str, uri: &str, auth: Option<&str>) ->
         .status()
 }
 
+async fn send_full(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    auth: Option<&str>,
+) -> (StatusCode, Vec<u8>) {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(key) = auth {
+        builder = builder.header(header::AUTHORIZATION, format!("Bearer {key}"));
+    }
+    let response = app
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, body)
+}
+
 fn app(auth: Arc<AuthManager>) -> axum::Router {
     create_router(Arc::new(Scheduler::new()), auth)
 }
@@ -117,12 +135,17 @@ async fn router_and_spec_describe_the_same_routes() {
             let uri = concrete(path);
             let upper = method.to_uppercase();
 
-            // Routed and authenticated: the placeholder answers 501, never 404.
-            let status = send(app(auth.clone()), &upper, &uri, Some(&key)).await;
-            assert_eq!(
-                status,
-                StatusCode::NOT_IMPLEMENTED,
+            // Routed and authenticated: a real handler answers. Axum's route miss is
+            // an empty 404, while handler errors carry a JSON body.
+            let (status, body) = send_full(app(auth.clone()), &upper, &uri, Some(&key)).await;
+            assert!(
+                status != StatusCode::NOT_FOUND || !body.is_empty(),
                 "{upper} {path} is not routed as documented"
+            );
+            assert_ne!(
+                status,
+                StatusCode::UNAUTHORIZED,
+                "{upper} {path} rejected the key"
             );
 
             // Routed but unauthenticated: refused by the auth layer.

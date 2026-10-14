@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Frontal Sandbox API
-  description: 'REST API for sandboxes: sessions, commands, files, and snapshots. Routes marked 501 are placeholders that do not do the work yet.'
+  description: 'REST API for sandboxes: sessions, commands, files, and snapshots. Snapshot and fork return 501 until the session backend can capture and restore state.'
   contact:
     name: Frontal Labs
   license:
@@ -12,7 +12,7 @@ paths:
     post:
       tags:
       - sessions
-      summary: Create a session from a config.
+      summary: Create a session from a config. The session is owned by the calling key.
       operationId: create_session
       requestBody:
         content:
@@ -27,14 +27,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreateSessionResponse'
-        '401':
-          description: Missing or invalid API key
+        '400':
+          description: Invalid session config
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Not implemented yet (placeholder)
+        '401':
+          description: Missing or invalid API key
           content:
             application/json:
               schema:
@@ -54,7 +54,6 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       responses:
         '200':
           description: Session state
@@ -68,8 +67,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Not implemented yet (placeholder)
+        '404':
+          description: No such session for this key
           content:
             application/json:
               schema:
@@ -88,7 +87,6 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       responses:
         '204':
           description: Session destroyed
@@ -98,8 +96,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Not implemented yet (placeholder)
+        '404':
+          description: No such session for this key
           content:
             application/json:
               schema:
@@ -119,7 +117,6 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       requestBody:
         content:
           application/json:
@@ -139,8 +136,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Not implemented yet (placeholder)
+        '404':
+          description: No such session for this key
           content:
             application/json:
               schema:
@@ -160,24 +157,29 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       - name: path
         in: path
-        description: Absolute path inside the session
+        description: Absolute path inside the session, without the leading slash
         required: true
         schema:
           type: string
       responses:
         '200':
           description: File contents
+        '400':
+          description: Path is a directory or contains '..'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '401':
           description: Missing or invalid API key
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Not implemented yet (placeholder)
+        '404':
+          description: No such session, or no such file
           content:
             application/json:
               schema:
@@ -187,7 +189,7 @@ paths:
     put:
       tags:
       - fs
-      summary: Write a file in a session's filesystem.
+      summary: Write a file in a session's filesystem, creating or replacing it.
       operationId: write_file
       parameters:
       - name: id
@@ -196,10 +198,9 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       - name: path
         in: path
-        description: Absolute path inside the session
+        description: Absolute path inside the session, without the leading slash
         required: true
         schema:
           type: string
@@ -213,14 +214,20 @@ paths:
       responses:
         '204':
           description: File written
+        '400':
+          description: Path is a directory or contains '..'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '401':
           description: Missing or invalid API key
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Not implemented yet (placeholder)
+        '404':
+          description: No such session
           content:
             application/json:
               schema:
@@ -230,7 +237,7 @@ paths:
     delete:
       tags:
       - fs
-      summary: Delete a file or directory in a session's filesystem.
+      summary: Delete a file or an empty directory in a session's filesystem.
       operationId: delete_file
       parameters:
       - name: id
@@ -239,24 +246,29 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       - name: path
         in: path
-        description: Absolute path inside the session
+        description: Absolute path inside the session, without the leading slash
         required: true
         schema:
           type: string
       responses:
         '204':
           description: Deleted
+        '400':
+          description: Path contains '..', or a non-empty directory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '401':
           description: Missing or invalid API key
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '501':
-          description: Not implemented yet (placeholder)
+        '404':
+          description: No such session, or no such path
           content:
             application/json:
               schema:
@@ -267,7 +279,8 @@ paths:
     post:
       tags:
       - snapshots
-      summary: Take a snapshot of a session.
+      summary: Take a snapshot of a session. Returns `501` when the session's backend
+      description: cannot snapshot, which the isolate backend does not yet do.
       operationId: take_snapshot
       parameters:
       - name: id
@@ -276,7 +289,6 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       responses:
         '201':
           description: Snapshot taken
@@ -290,8 +302,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '501':
-          description: Not implemented yet (placeholder)
+          description: The backend cannot snapshot yet
           content:
             application/json:
               schema:
@@ -302,7 +320,8 @@ paths:
     post:
       tags:
       - snapshots
-      summary: Fork a snapshot into new sessions.
+      summary: Fork a snapshot into new sessions. Returns `501` until the backend can
+      description: restore snapshots, because restoring needs captured filesystem state.
       operationId: fork_snapshot
       parameters:
       - name: id
@@ -311,7 +330,6 @@ paths:
         required: true
         schema:
           type: string
-          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
       requestBody:
         content:
           application/json:
@@ -332,7 +350,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
         '501':
-          description: Not implemented yet (placeholder)
+          description: Restoring snapshots is not implemented yet
           content:
             application/json:
               schema:

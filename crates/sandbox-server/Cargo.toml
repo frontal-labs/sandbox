@@ -11,6 +11,8 @@ description = "API server for the sandbox system"
 [dependencies]
 sandbox-types = { path = "../sandbox-types", features = ["openapi"] }
 sandbox-scheduler = { path = "../sandbox-scheduler" }
+sandbox-session = { path = "../sandbox-session" }
+sandbox-vfs = { path = "../sandbox-vfs" }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
