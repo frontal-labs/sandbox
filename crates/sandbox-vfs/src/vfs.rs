@@ -21,7 +21,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 
 #[cfg(test)]
 mod tests;
@@ -32,11 +31,11 @@ const MAX_SYMLINK_HOPS: usize = 40;
 pub struct Vfs {
     /// Root directory node of the last commit. `ContentHash::nil()` is an
     /// empty tree and is never read from the store.
-    root: ContentHash,
+    root: RwLock<ContentHash>,
     store: Arc<dyn BlobStore>,
     /// (bytes, inodes) of the committed tree, walked once and then kept
-    /// current by `commit`.
-    committed_totals: OnceCell<(u64, u64)>,
+    /// current by `checkpoint`.
+    committed_totals: RwLock<Option<(u64, u64)>>,
     overlay: RwLock<Overlay>,
     handles: RwLock<HashMap<u64, OpenFile>>,
     next_handle: AtomicU64,
@@ -85,9 +84,9 @@ fn kind_of_stored(stored: &Stored) -> Kind {
 impl Vfs {
     pub fn new(root: ContentHash, store: Arc<dyn BlobStore>) -> Self {
         Self {
-            root,
+            root: RwLock::new(root),
             store,
-            committed_totals: OnceCell::new(),
+            committed_totals: RwLock::new(None),
             overlay: RwLock::new(Overlay::default()),
             handles: RwLock::new(HashMap::new()),
             next_handle: AtomicU64::new(1),
@@ -217,12 +216,13 @@ impl Vfs {
 
     /// The committed root directory node.
     async fn root_node(&self) -> VfsResult<Stored> {
-        if self.root == ContentHash::nil() {
+        let root = *self.root.read();
+        if root == ContentHash::nil() {
             return Ok(Stored::Directory {
                 entries: BTreeMap::new(),
             });
         }
-        self.load_stored(&self.root).await
+        self.load_stored(&root).await
     }
 
     /// The committed node at `path`, ignoring the overlay.
@@ -332,11 +332,12 @@ impl Vfs {
 
     /// Committed (bytes, inodes), walked once. Later commits keep it current.
     async fn committed_totals(&self) -> VfsResult<(u64, u64)> {
-        let totals = self
-            .committed_totals
-            .get_or_try_init(|| self.walk_totals())
-            .await?;
-        Ok(*totals)
+        if let Some(totals) = *self.committed_totals.read() {
+            return Ok(totals);
+        }
+        let totals = self.walk_totals().await?;
+        *self.committed_totals.write() = Some(totals);
+        Ok(totals)
     }
 
     async fn walk_totals(&self) -> VfsResult<(u64, u64)> {
@@ -846,6 +847,25 @@ impl SessionFs for Vfs {
     /// its hash. Visible content is unchanged by a commit, so the cached
     /// totals stay correct.
     async fn commit(&mut self) -> VfsResult<ContentHash> {
+        self.checkpoint().await
+    }
+}
+
+/// The name of `key` if it is a direct child of the directory `prefix`.
+fn direct_child<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = key.strip_prefix(prefix)?;
+    if rest.is_empty() || rest.contains('/') {
+        None
+    } else {
+        Some(rest)
+    }
+}
+
+impl Vfs {
+    /// Writes the visible tree to the store and returns its root hash. The
+    /// session keeps working afterwards. Writes made while this runs may not be
+    /// in the returned root, so take snapshots while the session is idle.
+    pub async fn checkpoint(&self) -> VfsResult<ContentHash> {
         let visible = self.usage().await?;
         let (overlay_nodes, whiteouts) = {
             let overlay = self.overlay.read();
@@ -947,21 +967,11 @@ impl SessionFs for Vfs {
             .flatten()
             .ok_or_else(|| VfsError::Internal("root directory was not rebuilt".to_string()))?;
 
-        self.root = root;
-        self.committed_totals = OnceCell::new_with(Some(visible));
+        *self.root.write() = root;
+        *self.committed_totals.write() = Some(visible);
         let mut overlay = self.overlay.write();
         overlay.nodes.clear();
         overlay.whiteouts.clear();
         Ok(root)
-    }
-}
-
-/// The name of `key` if it is a direct child of the directory `prefix`.
-fn direct_child<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
-    let rest = key.strip_prefix(prefix)?;
-    if rest.is_empty() || rest.contains('/') {
-        None
-    } else {
-        Some(rest)
     }
 }
