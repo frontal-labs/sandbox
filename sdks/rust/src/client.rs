@@ -1,4 +1,4 @@
-use sandbox_types::{SessionConfig, SessionId, SnapshotId, SandboxError};
+use sandbox_types::{SandboxError, SessionConfig, SessionId, SnapshotId};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -22,32 +22,39 @@ impl Client {
 
     pub fn from_env() -> Result<Self, SandboxError> {
         let _api_key = std::env::var("SANDBOX_API_KEY").ok();
-        let base_url = std::env::var("SANDBOX_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
-        
+        let base_url = std::env::var("SANDBOX_BASE_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+
         Ok(Self {
-            inner: Arc::new(ClientInner {
-                base_url,
-            }),
+            inner: Arc::new(ClientInner { base_url }),
         })
     }
 
     pub async fn create_session(&self, _config: SessionConfig) -> Result<SessionId, SandboxError> {
+        // Embedded mode used to return a random id for a session that did not
+        // exist. Until it is backed by IsolateBackend, report that instead.
         if self.inner.base_url == "embedded://" {
-            return Ok(SessionId::new());
+            return Err(SandboxError::unsupported(
+                "embedded sessions are not implemented yet",
+            ));
         }
-        
+
         Err(SandboxError::unsupported("HTTP client not implemented"))
     }
 
-    pub async fn exec(&self, _session_id: SessionId, _command: &str) -> Result<ExecResult, SandboxError> {
+    pub async fn exec(
+        &self,
+        _session_id: SessionId,
+        _command: &str,
+    ) -> Result<ExecResult, SandboxError> {
+        // Previously returned a fabricated exit-0 result. Exec is not wired in
+        // either mode yet, so report that instead.
         if self.inner.base_url == "embedded://" {
-            return Ok(ExecResult {
-                exit_code: 0,
-                stdout: String::new(),
-                stderr: String::new(),
-            });
+            return Err(SandboxError::unsupported(
+                "embedded exec is not implemented yet",
+            ));
         }
-        
+
         Err(SandboxError::unsupported("HTTP client not implemented"))
     }
 
