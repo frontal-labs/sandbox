@@ -18,6 +18,11 @@ rust_library(
         "@crates//:prost",
         "@crates//:rustix",
         "@crates//:nix",
+        "//crates/sandbox-proto:sandbox_proto",
+        "@crates//:tokio-stream",
+        "@crates//:hyper-util",
+        "@crates//:tower",
+        "@crates//:ulid",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",

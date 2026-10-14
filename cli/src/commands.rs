@@ -47,9 +47,13 @@ pub enum Commands {
         trace_file: PathBuf,
     },
 
-    /// Internal: serve one session over stdin and stdout for a worker host.
+    /// Internal: serve one session as gRPC on a Unix socket, for a worker host.
     #[command(hide = true)]
-    Worker,
+    Worker {
+        /// Socket path to listen on. The host creates its directory with mode 0700.
+        #[arg(long)]
+        socket: PathBuf,
+    },
 
     /// Start the sandbox server (not implemented yet)
     Serve {
@@ -84,8 +88,9 @@ impl Cli {
         match &self.command {
             Commands::Run { command } => run_script_once(&command.join(" ")),
             Commands::Shell => interactive_shell(),
-            Commands::Worker => {
-                sandbox_worker::run_stdio_worker()?;
+            Commands::Worker { socket } => {
+                let rt = runtime()?;
+                rt.block_on(sandbox_worker::serve(socket))?;
                 Ok(0)
             }
             other => Err(SandboxError::unsupported(format!(
@@ -100,7 +105,7 @@ fn subcommand_name(command: &Commands) -> &'static str {
     match command {
         Commands::Run { .. } => "run",
         Commands::Shell => "shell",
-        Commands::Worker => "worker",
+        Commands::Worker { .. } => "worker",
         Commands::Snapshot { .. } => "snapshot",
         Commands::Fork { .. } => "fork",
         Commands::Replay { .. } => "replay",

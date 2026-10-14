@@ -1,6 +1,6 @@
-//! Worker processes for the sandbox system. Each worker runs its session in a
-//! child process. See [`worker`] for the protocol and what is isolated.
+//! Worker processes for the sandbox system. Each worker runs one session in a
+//! child process, served as gRPC over a private Unix socket. See [`worker`].
 
 pub mod worker;
 
-pub use worker::{run_stdio_worker, serve, Request, Response, Worker};
+pub use worker::{serve, Worker, MAX_MESSAGE_BYTES};

@@ -1,160 +1,193 @@
 //! Worker processes: one child process per session.
 //!
-//! The host spawns a child that runs `serve` over stdin and stdout. A crash
-//! or a hang in the child affects only that worker: the host gets an
-//! `Unavailable` error and never panics or loses other sessions. This is
-//! process isolation only. Seccomp, cgroups, and namespaces (PLAN.md section
-//! 4.13) are Linux-only and not implemented.
+//! The child serves `sandbox.v1.worker.WorkerService` (gRPC) on a private Unix
+//! socket. The socket lives in a directory the host creates with mode `0700`,
+//! so only the same user can reach it. Guest output never shares a channel
+//! with the protocol: scripts write to their own captured buffers, not to the
+//! worker's stdout.
 //!
-//! Protocol: one JSON object per line in each direction. A request is
-//! answered by exactly one response line, except `shutdown`, which gets none.
+//! This is process isolation only. Seccomp, cgroups, namespaces, and
+//! `PR_SET_NO_NEW_PRIVS` are not implemented; see PLAN.md section 4.13.
 
+use sandbox_proto::status::{from_status, to_status};
+use sandbox_proto::v1::types as pb;
+use sandbox_proto::v1::worker::worker_service_client::WorkerServiceClient;
+use sandbox_proto::v1::worker::worker_service_server::{WorkerService, WorkerServiceServer};
+use sandbox_proto::v1::worker::{HealthResponse, RunScriptRequest};
 use sandbox_session::{IsolateBackend, Session};
-use sandbox_types::{ErrorCode, ExecResult, SandboxError, SessionConfig};
-use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use sandbox_types::{ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::net::UnixStream;
+use tokio::process::{Child, Command};
+use tokio::sync::{oneshot, Mutex};
+use tonic::transport::{Channel, Endpoint, Server, Uri};
+use tonic::{Request, Response, Status};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum Request {
-    RunScript { script: String },
-    Shutdown,
+/// Largest request or response message accepted on the worker channel (16 MiB).
+pub const MAX_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+/// How long the host waits for a freshly spawned worker to answer `Health`.
+const READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Deadline for one script or command. Enforced by the host and sent to the worker.
+const RPC_DEADLINE: Duration = Duration::from_secs(60);
+
+// --- Child side -------------------------------------------------------------
+
+struct WorkerImpl {
+    session: Arc<dyn Session>,
+    shutdown: Mutex<Option<oneshot::Sender<()>>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum Response {
-    Ok { result: ExecResult },
-    Error { code: ErrorCode, message: String },
-}
-
-/// Child side: answers requests from `input` on `output` until `shutdown` or
-/// end of input. Returns an I/O error only if the pipes fail.
-pub fn serve(
-    session: &dyn Session,
-    input: impl BufRead,
-    mut output: impl Write,
-) -> std::io::Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-
-    for line in input.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let request: Request = match serde_json::from_str(&line) {
-            Ok(request) => request,
-            Err(e) => {
-                let response = Response::Error {
-                    code: ErrorCode::InvalidArgument,
-                    message: format!("malformed request: {e}"),
-                };
-                write_line(&mut output, &response)?;
-                continue;
-            }
-        };
-        let response = match request {
-            Request::Shutdown => break,
-            Request::RunScript { script } => match rt.block_on(session.run_script(&script)) {
-                Ok(result) => Response::Ok { result },
-                Err(e) => Response::Error {
-                    code: e.code,
-                    message: e.message,
-                },
-            },
-        };
-        write_line(&mut output, &response)?;
+#[tonic::async_trait]
+impl WorkerService for WorkerImpl {
+    async fn run_script(
+        &self,
+        request: Request<RunScriptRequest>,
+    ) -> Result<Response<pb::ExecResult>, Status> {
+        let script = request.into_inner().script;
+        let result = self
+            .session
+            .run_script(&script)
+            .await
+            .map_err(|e| to_status(&e))?;
+        Ok(Response::new(result.into()))
     }
+
+    async fn exec(
+        &self,
+        request: Request<pb::ExecRequest>,
+    ) -> Result<Response<pb::ExecResult>, Status> {
+        let req = ExecRequest::try_from(request.into_inner()).map_err(|e| to_status(&e))?;
+        let result = self.session.exec(req).await.map_err(|e| to_status(&e))?;
+        Ok(Response::new(result.into()))
+    }
+
+    async fn health(&self, _: Request<()>) -> Result<Response<HealthResponse>, Status> {
+        Ok(Response::new(HealthResponse {
+            ready: true,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }))
+    }
+
+    async fn shutdown(&self, _: Request<()>) -> Result<Response<()>, Status> {
+        if let Some(tx) = self.shutdown.lock().await.take() {
+            let _ = tx.send(());
+        }
+        Ok(Response::new(()))
+    }
+}
+
+/// Serves one fresh session on `socket` until a `Shutdown` RPC arrives.
+pub async fn serve(socket: &Path) -> Result<(), SandboxError> {
+    let _ = std::fs::remove_file(socket);
+    let listener = tokio::net::UnixListener::bind(socket)
+        .map_err(|e| SandboxError::unavailable(format!("binding worker socket: {e}")))?;
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| SandboxError::internal(format!("restricting worker socket: {e}")))?;
+
+    let session: Arc<dyn Session> = Arc::new(IsolateBackend::new(SessionConfig::default()).await?);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let service = WorkerServiceServer::new(WorkerImpl {
+        session,
+        shutdown: Mutex::new(Some(shutdown_tx)),
+    })
+    .max_decoding_message_size(MAX_MESSAGE_BYTES)
+    .max_encoding_message_size(MAX_MESSAGE_BYTES);
+
+    Server::builder()
+        .add_service(service)
+        .serve_with_incoming_shutdown(
+            tokio_stream::wrappers::UnixListenerStream::new(listener),
+            async {
+                let _ = shutdown_rx.await;
+            },
+        )
+        .await
+        .map_err(|e| SandboxError::unavailable(format!("worker server failed: {e}")))?;
+    let _ = std::fs::remove_file(socket);
     Ok(())
 }
 
-fn write_line(output: &mut impl Write, response: &Response) -> std::io::Result<()> {
-    let encoded = serde_json::to_string(response).map_err(std::io::Error::other)?;
-    output.write_all(encoded.as_bytes())?;
-    output.write_all(b"\n")?;
-    output.flush()
-}
+// --- Host side --------------------------------------------------------------
 
-/// Child entry point for the `sandbox worker` subcommand: a fresh isolate
-/// session served over stdin and stdout.
-pub fn run_stdio_worker() -> Result<(), SandboxError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| SandboxError::internal(format!("failed to start runtime: {e}")))?;
-    let session = rt.block_on(IsolateBackend::new(SessionConfig::default()))?;
-    let stdin = std::io::stdin().lock();
-    let stdout = std::io::stdout().lock();
-    serve(&session, stdin, stdout)
-        .map_err(|e| SandboxError::internal(format!("worker I/O failed: {e}")))
-}
-
-/// Host side: a handle to one worker process.
+/// Host handle for one worker process. Dropping it kills the child and removes
+/// its socket directory.
 pub struct Worker {
     child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    client: WorkerServiceClient<Channel>,
+    dir: PathBuf,
 }
 
 impl Worker {
-    /// Starts `program` with `args`. Its stdin and stdout carry the protocol.
-    pub fn spawn(
-        program: impl AsRef<std::ffi::OsStr>,
-        args: &[&str],
-    ) -> Result<Self, SandboxError> {
+    /// Starts `program worker --socket <path>` and waits until it answers `Health`.
+    pub async fn spawn(program: impl AsRef<std::ffi::OsStr>) -> Result<Self, SandboxError> {
+        let dir = private_dir()?;
+        let socket = dir.join("worker.sock");
         let mut child = Command::new(program)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+            .arg("worker")
+            .arg("--socket")
+            .arg(&socket)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
             .stderr(Stdio::inherit())
+            .kill_on_drop(true)
             .spawn()
             .map_err(|e| SandboxError::unavailable(format!("failed to start worker: {e}")))?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| SandboxError::internal("worker stdin missing"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| SandboxError::internal("worker stdout missing"))?;
-        Ok(Self {
-            child,
-            stdin,
-            stdout: BufReader::new(stdout),
-        })
+
+        let channel = match connect_when_ready(&mut child, &socket).await {
+            Ok(channel) => channel,
+            Err(e) => {
+                let _ = child.kill().await;
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(e);
+            }
+        };
+        let client = WorkerServiceClient::new(channel)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES);
+        Ok(Self { child, client, dir })
     }
 
-    /// Runs a script in the worker. A dead or unreachable worker returns
-    /// `Unavailable`.
-    pub fn run_script(&mut self, script: &str) -> Result<ExecResult, SandboxError> {
-        let request = serde_json::to_string(&Request::RunScript {
+    /// Runs a script in the worker. A script error comes back as its own
+    /// `ErrorCode`. A dead or unreachable worker returns `Unavailable`.
+    pub async fn run_script(&mut self, script: &str) -> Result<ExecResult, SandboxError> {
+        // Checked here too, so the caller gets a clear code instead of a reset stream.
+        if script.len() > MAX_MESSAGE_BYTES {
+            return Err(SandboxError::new(
+                ErrorCode::ResourceExhausted,
+                format!(
+                    "script of {} bytes exceeds the {MAX_MESSAGE_BYTES} byte limit",
+                    script.len()
+                ),
+            ));
+        }
+        let mut request = Request::new(RunScriptRequest {
             script: script.to_string(),
-        })
-        .map_err(|e| SandboxError::internal(format!("failed to encode request: {e}")))?;
+        });
+        request.set_timeout(RPC_DEADLINE);
+        let response = self.client.run_script(request).await.map_err(map_status)?;
+        ExecResult::try_from(response.into_inner())
+    }
 
-        self.stdin
-            .write_all(request.as_bytes())
-            .and_then(|()| self.stdin.write_all(b"\n"))
-            .and_then(|()| self.stdin.flush())
-            .map_err(|e| SandboxError::unavailable(format!("worker is not reachable: {e}")))?;
+    /// Runs one command in the worker's session.
+    pub async fn exec(&mut self, req: ExecRequest) -> Result<ExecResult, SandboxError> {
+        let mut request = Request::new(pb::ExecRequest::from(req));
+        request.set_timeout(RPC_DEADLINE);
+        let response = self.client.exec(request).await.map_err(map_status)?;
+        ExecResult::try_from(response.into_inner())
+    }
 
-        let mut line = String::new();
-        let read = self
-            .stdout
-            .read_line(&mut line)
-            .map_err(|e| SandboxError::unavailable(format!("worker read failed: {e}")))?;
-        if read == 0 {
-            return Err(SandboxError::unavailable("worker process exited"));
-        }
-        match serde_json::from_str::<Response>(&line)
-            .map_err(|e| SandboxError::internal(format!("malformed worker response: {e}")))?
-        {
-            Response::Ok { result } => Ok(result),
-            Response::Error { code, message } => Err(SandboxError::new(code, message)),
-        }
+    /// The child's process id, if it is still known.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    /// The private directory holding the worker's socket. Removed on drop.
+    pub fn socket_dir(&self) -> &Path {
+        &self.dir
     }
 
     /// Whether the child is still running.
@@ -162,88 +195,119 @@ impl Worker {
         matches!(self.child.try_wait(), Ok(None))
     }
 
-    /// Asks the worker to exit, then waits for it.
-    pub fn shutdown(mut self) {
-        let _ = writeln!(
-            self.stdin,
-            "{}",
-            serde_json::to_string(&Request::Shutdown).unwrap_or_default()
-        );
-        let _ = self.stdin.flush();
-        let _ = self.child.wait();
+    /// Asks the worker to stop, then waits for the child to exit.
+    pub async fn shutdown(mut self) {
+        let mut request = Request::new(());
+        request.set_timeout(Duration::from_secs(5));
+        let _ = self.client.shutdown(request).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await;
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        // Reap the child so it does not linger as a zombie.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = self.child.start_kill();
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+fn map_status(status: Status) -> SandboxError {
+    if status.code() == tonic::Code::Unavailable {
+        return SandboxError::unavailable(format!("worker is not reachable: {}", status.message()));
+    }
+    from_status(&status)
+}
+
+/// Creates a fresh directory with mode `0700`. Its name is short, so the socket
+/// path stays under the platform's Unix socket path limit.
+fn private_dir() -> Result<PathBuf, SandboxError> {
+    let name = format!("sbx-{}", &ulid::Ulid::new().to_string()[..12]);
+    let dir = std::env::temp_dir().join(name);
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&dir)
+        .map_err(|e| SandboxError::internal(format!("creating worker directory: {e}")))?;
+    Ok(dir)
+}
+
+/// Connects to the worker's socket, retrying until it is up, the child exits, or
+/// `READY_TIMEOUT` passes. Ends with a successful `Health` call.
+async fn connect_when_ready(child: &mut Child, socket: &Path) -> Result<Channel, SandboxError> {
+    let deadline = Instant::now() + READY_TIMEOUT;
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(SandboxError::unavailable(format!(
+                "worker exited before ready: {status}"
+            )));
+        }
+        match connect(socket).await {
+            Ok(channel) => {
+                let mut client = WorkerServiceClient::new(channel.clone());
+                let mut request = Request::new(());
+                request.set_timeout(Duration::from_secs(2));
+                if client.health(request).await.is_ok() {
+                    return Ok(channel);
+                }
+            }
+            Err(_) if Instant::now() < deadline => {}
+            Err(e) => return Err(e),
+        }
+        if Instant::now() >= deadline {
+            return Err(SandboxError::new(
+                ErrorCode::Timeout,
+                "worker did not become ready",
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+async fn connect(socket: &Path) -> Result<Channel, SandboxError> {
+    let socket = socket.to_path_buf();
+    Endpoint::try_from("http://sandbox-worker.local")
+        .map_err(|e| SandboxError::internal(format!("bad endpoint: {e}")))?
+        .connect_with_connector(tower::service_fn(move |_: Uri| {
+            let socket = socket.clone();
+            async move {
+                let stream = UnixStream::connect(socket).await?;
+                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(stream))
+            }
+        }))
+        .await
+        .map_err(|e| SandboxError::unavailable(format!("connecting to worker: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sandbox_session::IsolateBackend;
-    use std::io::Cursor;
 
-    fn session() -> IsolateBackend {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(IsolateBackend::new(SessionConfig::default()))
-            .unwrap()
-    }
-
-    #[test]
-    fn serve_answers_each_request_with_one_line() {
-        let input = concat!(
-            r#"{"op":"run_script","script":"echo hi"}"#,
-            "\n",
-            r#"{"op":"run_script","script":"false"}"#,
-            "\n",
-            r#"{"op":"shutdown"}"#,
-            "\n",
-            r#"{"op":"run_script","script":"echo never"}"#,
-            "\n",
-        );
-        let mut output = Vec::new();
-        serve(&session(), Cursor::new(input), &mut output).unwrap();
-
-        let lines: Vec<&str> = std::str::from_utf8(&output).unwrap().lines().collect();
-        assert_eq!(lines.len(), 2, "shutdown must stop the loop");
-        let first: Response = serde_json::from_str(lines[0]).unwrap();
-        match first {
-            Response::Ok { result } => assert_eq!(result.stdout, b"hi\n"),
-            other => panic!("unexpected {other:?}"),
-        }
-        let second: Response = serde_json::from_str(lines[1]).unwrap();
-        match second {
-            Response::Ok { result } => assert_eq!(result.exit_code, 1),
-            other => panic!("unexpected {other:?}"),
-        }
-    }
-
-    #[test]
-    fn malformed_requests_get_an_error_response() {
-        let mut output = Vec::new();
-        serve(&session(), Cursor::new("not json\n"), &mut output).unwrap();
-        let response: Response = serde_json::from_slice(&output).unwrap();
-        assert!(matches!(
-            response,
-            Response::Error {
-                code: ErrorCode::InvalidArgument,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn a_dead_worker_is_an_error_not_a_panic() {
-        // `true` exits at once, so the first read hits end of file.
-        let mut worker = Worker::spawn("true", &[]).unwrap();
-        let err = worker.run_script("echo hi").unwrap_err();
+    #[tokio::test]
+    async fn a_child_that_exits_at_once_is_unavailable_not_a_panic() {
+        // `true` ignores its arguments and exits, so the worker never becomes ready.
+        let err = match Worker::spawn("true").await {
+            Ok(_) => panic!("a non-worker process must not become ready"),
+            Err(err) => err,
+        };
         assert_eq!(err.code, ErrorCode::Unavailable);
-        assert!(!worker.is_alive());
+    }
+
+    #[test]
+    fn oversize_scripts_are_refused_before_sending() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // A channel that never connects: the size check must fail first.
+            let endpoint = Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+            let mut worker = Worker {
+                child: Command::new("sleep").arg("30").spawn().unwrap(),
+                client: WorkerServiceClient::new(endpoint),
+                dir: std::env::temp_dir(),
+            };
+            let big = "x".repeat(MAX_MESSAGE_BYTES + 1);
+            let err = worker.run_script(&big).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::ResourceExhausted);
+            let _ = worker.child.kill().await;
+            // Do not run Drop: it would remove the shared temp directory.
+            std::mem::forget(worker);
+        });
     }
 }

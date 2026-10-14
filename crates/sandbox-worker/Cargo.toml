@@ -11,6 +11,11 @@ description = "Worker process for the sandbox system"
 [dependencies]
 sandbox-types = { path = "../sandbox-types" }
 sandbox-session = { path = "../sandbox-session" }
+sandbox-proto = { path = "../sandbox-proto" }
+ulid = { workspace = true }
+hyper-util = { workspace = true, features = ["tokio"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tower = { workspace = true, features = ["util"] }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
