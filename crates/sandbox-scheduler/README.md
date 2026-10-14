@@ -1,4 +1,4 @@
-# sandbox-scheduler
+# Sandbox Scheduler
 
 Scheduler for the sandbox system: session bookkeeping, worker placement, and a warm-isolate pool stub.
 

@@ -1,4 +1,4 @@
-use sandbox_types::{SessionId, SessionConfig, TenantId};
+use sandbox_types::{SessionConfig, SessionId, TenantId};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -19,8 +19,13 @@ impl PlacementStrategy {
         }
     }
 
-    pub fn place(&mut self, _config: &SessionConfig, workers: &[WorkerInfo]) -> Option<PlacementDecision> {
-        workers.iter()
+    pub fn place(
+        &mut self,
+        _config: &SessionConfig,
+        workers: &[WorkerInfo],
+    ) -> Option<PlacementDecision> {
+        workers
+            .iter()
             .min_by_key(|w| self.worker_loads.get(&w.id).copied().unwrap_or(0))
             .map(|w| {
                 *self.worker_loads.entry(w.id.clone()).or_insert(0) += 1;

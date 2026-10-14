@@ -1,6 +1,6 @@
 use crate::placement::{PlacementStrategy, WorkerInfo};
 use crate::pools::{IsolatePool, PoolConfig, PoolStats};
-use sandbox_types::{SessionConfig, SessionId, SessionState, Tier, SessionStatus};
+use sandbox_types::{SessionConfig, SessionId, SessionState, SessionStatus, Tier};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -23,11 +23,14 @@ impl Scheduler {
         }
     }
 
-    pub async fn create_session(&self, config: SessionConfig) -> Result<SessionId, sandbox_types::SandboxError> {
+    pub async fn create_session(
+        &self,
+        config: SessionConfig,
+    ) -> Result<SessionId, sandbox_types::SandboxError> {
         let session_id = SessionId::new();
-        
+
         let labels = config.labels.clone();
-        
+
         let state = SessionState {
             id: session_id,
             tenant_id: config.tenant_id,
@@ -41,14 +44,14 @@ impl Scheduler {
         };
 
         self.sessions.write().await.insert(session_id, state);
-        
+
         if let Some(isolate) = self.isolate_pool.acquire(&config).await {
             // Use the pooled isolate
             let mut placement = self.placement.write().await;
             let workers = self.workers.read().await;
             let worker_infos: Vec<WorkerInfo> = workers.values().cloned().collect();
             drop(workers);
-            
+
             if let Some(decision) = placement.place(&config, &worker_infos) {
                 self.isolate_pool.release(isolate).await;
                 return Ok(decision.session_id);
@@ -59,7 +62,10 @@ impl Scheduler {
         Ok(session_id)
     }
 
-    pub async fn destroy_session(&self, session_id: SessionId) -> Result<(), sandbox_types::SandboxError> {
+    pub async fn destroy_session(
+        &self,
+        session_id: SessionId,
+    ) -> Result<(), sandbox_types::SandboxError> {
         self.sessions.write().await.remove(&session_id);
         Ok(())
     }
