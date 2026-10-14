@@ -1,5 +1,5 @@
-use thiserror::Error;
 use sandbox_cas::blob_store::BlobStoreError;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VfsError {
@@ -26,6 +26,12 @@ pub enum VfsError {
 
     #[error("Serialization error: {0}")]
     Serialization(String),
+
+    #[error("Unsupported: {0}")]
+    Unsupported(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 pub type VfsResult<T> = Result<T, VfsError>;

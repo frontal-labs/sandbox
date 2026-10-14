@@ -1,6 +1,6 @@
-use sandbox_types::hash::ContentHash;
 use async_trait::async_trait;
 use bytes::Bytes;
+use sandbox_types::hash::ContentHash;
 use std::path::Path;
 
 #[async_trait]
@@ -17,6 +17,8 @@ pub trait SessionFs: Send + Sync {
     async fn readlink(&self, path: &Path) -> VfsResult<String>;
     async fn truncate(&self, path: &Path, size: u64) -> VfsResult<()>;
     async fn watch(&self, path: &Path) -> VfsResult<WatchHandle>;
+    /// Releases a handle. Using it afterwards fails with `InvalidPath`.
+    fn close(&self, handle: &FileHandle);
     async fn commit(&mut self) -> VfsResult<ContentHash>;
 }
 

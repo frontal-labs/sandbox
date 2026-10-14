@@ -1,7 +1,6 @@
 //! Virtual filesystem for the sandbox system
 
 pub mod error;
-pub mod layer;
 pub mod node;
 pub mod ops;
 pub mod quota;

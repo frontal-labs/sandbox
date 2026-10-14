@@ -1,61 +1,103 @@
+//! Copy-on-write virtual filesystem.
+//!
+//! Writes go to an in-memory overlay. `commit` persists the overlay to the
+//! blob store as a Merkle tree and returns the new root hash. A `Vfs` built
+//! from that root sees the committed tree.
+//!
+//! Commit is incremental. Only directories on a changed path are rewritten,
+//! and every other subtree keeps its hash. Known limits are listed in
+//! `README.md`.
+
 use crate::error::{VfsError, VfsResult};
-use crate::layer::Layer;
-use crate::node::{Directory, FileNode, Node};
+use crate::node::{Node, Stored};
 use crate::ops::{DirEntry, FileHandle, FileStat, OpenFlags, SessionFs, WatchHandle};
-use crate::quota::{Quotas, Usage};
-use sandbox_cas::BlobStore;
-use sandbox_types::hash::ContentHash;
+use crate::quota::Quotas;
 use async_trait::async_trait;
 use bytes::Bytes;
 use parking_lot::RwLock;
-use serde_json;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use sandbox_cas::{BlobStore, PutOptions};
+use sandbox_types::hash::ContentHash;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::OnceCell;
+
+#[cfg(test)]
+mod tests;
+
+/// Maximum symlink expansions while resolving one path (as in Linux, ELOOP).
+const MAX_SYMLINK_HOPS: usize = 40;
 
 pub struct Vfs {
-    base: Layer,
-    overlay: RwLock<Overlay>,
-    quotas: Quotas,
-    _usage: RwLock<Usage>,
+    /// Root directory node of the last commit. `ContentHash::nil()` is an
+    /// empty tree and is never read from the store.
+    root: ContentHash,
     store: Arc<dyn BlobStore>,
-    next_handle: std::sync::atomic::AtomicU64,
-    next_watch: std::sync::atomic::AtomicU64,
-    watchers: RwLock<HashMap<u64, mpsc::Sender<WatchEvent>>>,
+    /// (bytes, inodes) of the committed tree, walked once and then kept
+    /// current by `commit`.
+    committed_totals: OnceCell<(u64, u64)>,
+    overlay: RwLock<Overlay>,
+    handles: RwLock<HashMap<u64, OpenFile>>,
+    next_handle: AtomicU64,
+    quotas: Quotas,
 }
 
+#[derive(Default)]
 struct Overlay {
-    nodes: HashMap<String, Node>,
-    whiteouts: HashMap<String, ()>,
-    dirty_paths: Vec<String>,
+    /// Paths created or changed since the last commit.
+    nodes: BTreeMap<String, Node>,
+    /// Committed paths hidden since the last commit. A path can be here and
+    /// also in `nodes` after it is deleted and recreated. The overlay node
+    /// wins, but the committed subtree beneath it stays hidden.
+    whiteouts: BTreeSet<String>,
 }
 
-#[derive(Debug, Clone)]
-pub enum WatchEvent {
-    Created(PathBuf),
-    Modified(PathBuf),
-    Deleted(PathBuf),
-    Renamed(PathBuf, PathBuf),
+#[derive(Clone)]
+struct OpenFile {
+    path: String,
+    flags: OpenFlags,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Kind {
+    Dir,
+    File(u64),
+    Symlink(String),
+}
+
+fn kind_of_node(node: &Node) -> Kind {
+    match node {
+        Node::Directory => Kind::Dir,
+        Node::File(data) => Kind::File(data.len() as u64),
+        Node::Symlink(target) => Kind::Symlink(target.clone()),
+    }
+}
+
+fn kind_of_stored(stored: &Stored) -> Kind {
+    match stored {
+        Stored::Directory { .. } => Kind::Dir,
+        Stored::File { size, .. } => Kind::File(*size),
+        Stored::Symlink(target) => Kind::Symlink(target.clone()),
+    }
 }
 
 impl Vfs {
     pub fn new(root: ContentHash, store: Arc<dyn BlobStore>) -> Self {
-        let base = Layer::new(root, store.clone());
         Self {
-            base,
-            overlay: RwLock::new(Overlay {
-                nodes: HashMap::new(),
-                whiteouts: HashMap::new(),
-                dirty_paths: Vec::new(),
-            }),
-            quotas: Quotas::default(),
-            _usage: RwLock::new(Usage::default()),
+            root,
             store,
-            next_handle: std::sync::atomic::AtomicU64::new(1),
-            next_watch: std::sync::atomic::AtomicU64::new(1),
-            watchers: RwLock::new(HashMap::new()),
+            committed_totals: OnceCell::new(),
+            overlay: RwLock::new(Overlay::default()),
+            handles: RwLock::new(HashMap::new()),
+            next_handle: AtomicU64::new(1),
+            quotas: Quotas::default(),
         }
+    }
+
+    /// Handles that are open and not yet closed. Useful for leak checks.
+    pub fn open_handle_count(&self) -> usize {
+        self.handles.read().len()
     }
 
     pub fn with_quotas(mut self, quotas: Quotas) -> Self {
@@ -63,245 +105,863 @@ impl Vfs {
         self
     }
 
+    /// Normalizes a path to `/a/b` form. `.` and empty segments are dropped.
+    /// `..` is rejected rather than resolved, so no path can escape the root.
     fn normalize_path(&self, path: &Path) -> VfsResult<String> {
-        let path_str = path.to_string_lossy().to_string();
-        if path_str.contains('\0') {
+        let s = path
+            .to_str()
+            .ok_or_else(|| VfsError::InvalidPath("path is not valid UTF-8".to_string()))?;
+        if s.contains('\0') {
             return Err(VfsError::InvalidPath("NUL byte in path".to_string()));
         }
-        let normalized = path_str.trim_start_matches('/');
-        if normalized.is_empty() {
+
+        let mut parts = Vec::new();
+        for part in s.split('/') {
+            match part {
+                "" | "." => continue,
+                ".." => return Err(VfsError::InvalidPath(format!("'..' is not allowed: {s}"))),
+                other => parts.push(other),
+            }
+        }
+
+        if parts.len() > self.quotas.max_path_depth as usize {
+            return Err(VfsError::QuotaExceeded(format!(
+                "path depth exceeds {}",
+                self.quotas.max_path_depth
+            )));
+        }
+
+        if parts.is_empty() {
             Ok("/".to_string())
         } else {
-            Ok(format!("/{}", normalized))
+            Ok(format!("/{}", parts.join("/")))
         }
     }
 
-    async fn resolve(&self, path: &str) -> Option<Node> {
-        let hash = {
+    /// Lexically normalizes `path`, then follows symlinks in its components.
+    /// The final component is followed only when `follow_final` is set, so
+    /// `readlink`, `rm`, and `rename` act on the link itself.
+    async fn resolve_path(&self, path: &Path, follow_final: bool) -> VfsResult<String> {
+        let mut current = self.normalize_path(path)?;
+        let mut hops = 0usize;
+
+        'restart: loop {
+            let components: Vec<&str> = components(&current).collect();
+            let mut resolved = String::from("/");
+
+            for (i, name) in components.iter().enumerate() {
+                let candidate = join(&resolved, name);
+                let is_final = i + 1 == components.len();
+                if is_final && !follow_final {
+                    return Ok(candidate);
+                }
+
+                match self.kind(&candidate).await? {
+                    Some(Kind::Symlink(target)) => {
+                        hops += 1;
+                        if hops > MAX_SYMLINK_HOPS {
+                            return Err(VfsError::InvalidPath(format!(
+                                "too many levels of symbolic links: {current}"
+                            )));
+                        }
+                        // Relative targets resolve against the link's parent.
+                        let base = if target.starts_with('/') {
+                            target
+                        } else {
+                            format!("{resolved}/{target}")
+                        };
+                        let rest: String = components[i + 1..]
+                            .iter()
+                            .map(|c| format!("/{c}"))
+                            .collect();
+                        current = self.normalize_path(Path::new(&format!("{base}{rest}")))?;
+                        continue 'restart;
+                    }
+                    // Missing or non-link: keep walking. A missing component
+                    // makes the caller's own lookup fail with NotFound.
+                    _ => resolved = candidate,
+                }
+            }
+
+            return Ok(resolved);
+        }
+    }
+
+    fn overlay_node(&self, path: &str) -> Option<Node> {
+        self.overlay.read().nodes.get(path).cloned()
+    }
+
+    fn is_whiteout(&self, path: &str) -> bool {
+        self.overlay.read().whiteouts.contains(path)
+    }
+
+    fn is_shadowed(&self, path: &str) -> bool {
+        let overlay = self.overlay.read();
+        overlay.nodes.contains_key(path) || overlay.whiteouts.contains(path)
+    }
+
+    async fn load_stored(&self, hash: &ContentHash) -> VfsResult<Stored> {
+        let data = self
+            .store
+            .get(hash)
+            .await?
+            .ok_or_else(|| VfsError::NotFound(format!("node {hash}")))?;
+        serde_json::from_slice(&data).map_err(|e| VfsError::Serialization(e.to_string()))
+    }
+
+    async fn put_node(&self, stored: &Stored) -> VfsResult<ContentHash> {
+        let encoded =
+            serde_json::to_vec(stored).map_err(|e| VfsError::Serialization(e.to_string()))?;
+        Ok(self.store.put(&encoded, PutOptions::default()).await?)
+    }
+
+    /// The committed root directory node.
+    async fn root_node(&self) -> VfsResult<Stored> {
+        if self.root == ContentHash::nil() {
+            return Ok(Stored::Directory {
+                entries: BTreeMap::new(),
+            });
+        }
+        self.load_stored(&self.root).await
+    }
+
+    /// The committed node at `path`, ignoring the overlay.
+    async fn committed(&self, path: &str) -> VfsResult<Option<Stored>> {
+        let mut current = self.root_node().await?;
+        for name in components(path) {
+            let next = match &current {
+                Stored::Directory { entries } => match entries.get(name) {
+                    Some(hash) => *hash,
+                    None => return Ok(None),
+                },
+                _ => return Ok(None),
+            };
+            current = self.load_stored(&next).await?;
+        }
+        Ok(Some(current))
+    }
+
+    /// Child name to hash for the committed directory at `path`. Empty if the
+    /// path is absent or not a committed directory.
+    async fn committed_entries(&self, path: &str) -> VfsResult<BTreeMap<String, ContentHash>> {
+        match self.committed(path).await? {
+            Some(Stored::Directory { entries }) => Ok(entries),
+            _ => Ok(BTreeMap::new()),
+        }
+    }
+
+    /// Visible kind of `path`: overlay first, then whiteouts, then committed.
+    async fn kind(&self, path: &str) -> VfsResult<Option<Kind>> {
+        if path == "/" {
+            return Ok(Some(Kind::Dir));
+        }
+        if let Some(node) = self.overlay_node(path) {
+            return Ok(Some(kind_of_node(&node)));
+        }
+        if self.is_whiteout(path) {
+            return Ok(None);
+        }
+        Ok(self.committed(path).await?.as_ref().map(kind_of_stored))
+    }
+
+    /// Full contents of a file, from the overlay or the blob store.
+    /// `None` if the path is not a visible file.
+    async fn file_bytes(&self, path: &str) -> VfsResult<Option<Vec<u8>>> {
+        if let Some(node) = self.overlay_node(path) {
+            return Ok(match node {
+                Node::File(data) => Some(data),
+                _ => None,
+            });
+        }
+        if self.is_whiteout(path) {
+            return Ok(None);
+        }
+        match self.committed(path).await? {
+            Some(Stored::File { content, .. }) => {
+                let data = self
+                    .store
+                    .get(&content)
+                    .await?
+                    .ok_or_else(|| VfsError::NotFound(format!("blob {content}")))?;
+                Ok(Some(data.to_vec()))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    async fn require_parent_dir(&self, path: &str) -> VfsResult<()> {
+        let parent = parent_of(path);
+        match self.kind(parent).await? {
+            Some(Kind::Dir) => Ok(()),
+            Some(_) => Err(VfsError::InvalidPath(format!(
+                "parent is not a directory: {parent}"
+            ))),
+            None => Err(VfsError::NotFound(parent.to_string())),
+        }
+    }
+
+    /// Every visible path strictly under `path`, not including `path`.
+    async fn descendants(&self, path: &str) -> VfsResult<BTreeSet<String>> {
+        let prefix = child_prefix(path);
+        let mut out = BTreeSet::new();
+        {
             let overlay = self.overlay.read();
-
-            if overlay.whiteouts.contains_key(path) {
-                return None;
+            for key in overlay.nodes.range(prefix.clone()..).map(|(k, _)| k) {
+                if !key.starts_with(&prefix) {
+                    break;
+                }
+                out.insert(key.clone());
             }
+        }
 
-            if let Some(node) = overlay.nodes.get(path) {
-                return Some(node.clone());
+        // Committed descendants. A whiteout hides its whole subtree, so the
+        // walk does not descend into one.
+        let mut stack = vec![path.to_string()];
+        while let Some(dir) = stack.pop() {
+            for name in self.committed_entries(&dir).await?.keys() {
+                let child = join(&dir, name);
+                if self.is_whiteout(&child) {
+                    continue;
+                }
+                out.insert(child.clone());
+                stack.push(child);
             }
+        }
+        Ok(out)
+    }
 
-            self.base.get(path).cloned()
+    /// Committed (bytes, inodes), walked once. Later commits keep it current.
+    async fn committed_totals(&self) -> VfsResult<(u64, u64)> {
+        let totals = self
+            .committed_totals
+            .get_or_try_init(|| self.walk_totals())
+            .await?;
+        Ok(*totals)
+    }
+
+    async fn walk_totals(&self) -> VfsResult<(u64, u64)> {
+        let mut bytes = 0u64;
+        let mut inodes = 0u64;
+        let mut stack = vec![self.root_node().await?];
+        while let Some(node) = stack.pop() {
+            if let Stored::Directory { entries } = node {
+                for hash in entries.values() {
+                    let child = self.load_stored(hash).await?;
+                    inodes += 1;
+                    if let Stored::File { size, .. } = &child {
+                        bytes += size;
+                    }
+                    stack.push(child);
+                }
+            }
+        }
+        Ok((bytes, inodes))
+    }
+
+    /// Total bytes and inode count of the visible tree.
+    ///
+    /// Committed totals minus every committed path that is shadowed (in the
+    /// overlay or whited out), plus the overlay's own nodes. Each shadowed
+    /// path is one lookup, so the cost is proportional to the changes, not
+    /// the tree.
+    async fn usage(&self) -> VfsResult<(u64, u64)> {
+        let (mut bytes, mut inodes) = self.committed_totals().await?;
+
+        let (shadowed, overlay_nodes): (BTreeSet<String>, Vec<(String, Node)>) = {
+            let overlay = self.overlay.read();
+            let shadowed = overlay
+                .nodes
+                .keys()
+                .chain(overlay.whiteouts.iter())
+                .cloned()
+                .collect();
+            let overlay_nodes = overlay
+                .nodes
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            (shadowed, overlay_nodes)
         };
 
-        if let Some(hash) = hash {
-            return self.load_node(&hash).await;
+        for path in &shadowed {
+            if let Some(stored) = self.committed(path).await? {
+                inodes = inodes.saturating_sub(1);
+                if let Stored::File { size, .. } = stored {
+                    bytes = bytes.saturating_sub(size);
+                }
+            }
         }
-
-        None
-    }
-
-    async fn load_node(&self, hash: &ContentHash) -> Option<Node> {
-        let data = self.store.get(hash).await.ok()??;
-        serde_json::from_slice(&data).ok()
-    }
-
-    fn mark_dirty(&self, path: &str) {
-        self.overlay.write().dirty_paths.push(path.to_string());
-    }
-
-    fn allocate_handle(&self) -> FileHandle {
-        FileHandle(self.next_handle.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-
-    fn allocate_watch(&self) -> WatchHandle {
-        WatchHandle(self.next_watch.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-
-    fn emit_watch(&self, event: WatchEvent) {
-        let watchers = self.watchers.read();
-        for tx in watchers.values() {
-            let _ = tx.try_send(event.clone());
+        for (_, node) in &overlay_nodes {
+            inodes += 1;
+            if let Node::File(data) = node {
+                bytes += data.len() as u64;
+            }
         }
+        Ok((bytes, inodes))
+    }
+
+    fn check_file_size(&self, size: u64) -> VfsResult<()> {
+        if size > self.quotas.max_file_size {
+            return Err(VfsError::QuotaExceeded(format!(
+                "file size {size} exceeds max_file_size {}",
+                self.quotas.max_file_size
+            )));
+        }
+        Ok(())
+    }
+
+    /// Checks that one more inode fits within `inode_count`. Call before
+    /// creating a file, directory, or symlink.
+    async fn check_new_inode(&self) -> VfsResult<()> {
+        let (_, inodes) = self.usage().await?;
+        if inodes + 1 > self.quotas.inode_count {
+            return Err(VfsError::QuotaExceeded(format!(
+                "inode count {} would exceed {}",
+                inodes + 1,
+                self.quotas.inode_count
+            )));
+        }
+        Ok(())
+    }
+
+    /// Checks that replacing a file of `old_len` bytes with `new_len` bytes
+    /// keeps the tree within quota.
+    async fn check_write_quota(&self, old_len: u64, new_len: u64) -> VfsResult<()> {
+        self.check_file_size(new_len)?;
+        let (bytes, _) = self.usage().await?;
+        let after = bytes.saturating_sub(old_len).saturating_add(new_len);
+        if after > self.quotas.total_bytes {
+            return Err(VfsError::QuotaExceeded(format!(
+                "total bytes {after} exceeds {}",
+                self.quotas.total_bytes
+            )));
+        }
+        Ok(())
+    }
+
+    fn handle(&self, handle: &FileHandle) -> VfsResult<OpenFile> {
+        self.handles
+            .read()
+            .get(&handle.0)
+            .cloned()
+            .ok_or_else(|| VfsError::InvalidPath(format!("unknown file handle {}", handle.0)))
+    }
+
+    /// Stores file contents in the overlay, replacing whatever was there.
+    fn put_file(&self, path: &str, data: Vec<u8>) {
+        self.overlay
+            .write()
+            .nodes
+            .insert(path.to_string(), Node::File(data));
+    }
+}
+
+/// The non-empty segments of a normalized path.
+fn components(path: &str) -> impl Iterator<Item = &str> {
+    path.split('/').filter(|c| !c.is_empty())
+}
+
+/// `parent/name`, with the root handled.
+fn join(parent: &str, name: &str) -> String {
+    if parent == "/" {
+        format!("/{name}")
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
+fn parent_of(path: &str) -> &str {
+    match path.rsplit_once('/') {
+        Some(("", _)) | None => "/",
+        Some((parent, _)) => parent,
+    }
+}
+
+fn child_prefix(path: &str) -> String {
+    if path == "/" {
+        "/".to_string()
+    } else {
+        format!("{path}/")
+    }
+}
+
+/// Strict ancestors of a normalized path, from `/` down.
+fn ancestors(path: &str) -> Vec<String> {
+    let mut out = vec!["/".to_string()];
+    let mut acc = String::new();
+    let parts: Vec<&str> = components(path).collect();
+    for part in parts.iter().take(parts.len().saturating_sub(1)) {
+        acc.push('/');
+        acc.push_str(part);
+        out.push(acc.clone());
+    }
+    if path == "/" {
+        out.clear();
+    }
+    out
+}
+
+fn depth(path: &str) -> usize {
+    components(path).count()
+}
+
+fn kind_stat(path: &str, kind: &Kind) -> FileStat {
+    FileStat {
+        path: path.to_string(),
+        is_dir: *kind == Kind::Dir,
+        is_file: matches!(kind, Kind::File(_)),
+        is_symlink: matches!(kind, Kind::Symlink(_)),
+        size: match kind {
+            Kind::File(size) => *size,
+            _ => 0,
+        },
+        mode: if *kind == Kind::Dir { 0o755 } else { 0o644 },
+        modified: 0,
     }
 }
 
 #[async_trait]
 impl SessionFs for Vfs {
     async fn open(&self, path: &Path, flags: OpenFlags) -> VfsResult<FileHandle> {
-        let path = self.normalize_path(path)?;
-
-        if flags.create && flags.exclusive && self.resolve(&path).await.is_some() {
-            return Err(VfsError::AlreadyExists(path));
+        let path = self.resolve_path(path, true).await?;
+        if !flags.read && !flags.write {
+            return Err(VfsError::InvalidPath(
+                "open needs read or write access".to_string(),
+            ));
         }
 
-        if flags.create && self.resolve(&path).await.is_none() {
-            let node = Node::File(FileNode::new(Vec::new(), 0));
-            self.overlay.write().nodes.insert(path.clone(), node);
-            self.mark_dirty(&path);
-            self.emit_watch(WatchEvent::Created(PathBuf::from(&path)));
+        match self.kind(&path).await? {
+            Some(Kind::Dir) => {
+                return Err(VfsError::InvalidPath(format!("is a directory: {path}")))
+            }
+            // resolve_path follows symlinks, so a link can only be here if
+            // resolution was skipped, which is a bug.
+            Some(Kind::Symlink(_)) => {
+                return Err(VfsError::Internal(format!("unresolved symlink at {path}")))
+            }
+            Some(Kind::File(_)) => {
+                if flags.create && flags.exclusive {
+                    return Err(VfsError::AlreadyExists(path));
+                }
+                if flags.truncate && flags.write {
+                    let old_len = self.file_bytes(&path).await?.map_or(0, |d| d.len() as u64);
+                    self.check_write_quota(old_len, 0).await?;
+                    self.put_file(&path, Vec::new());
+                }
+            }
+            None => {
+                if !flags.create {
+                    return Err(VfsError::NotFound(path));
+                }
+                self.require_parent_dir(&path).await?;
+                self.check_new_inode().await?;
+                self.put_file(&path, Vec::new());
+            }
         }
 
-        let handle = self.allocate_handle();
-        Ok(handle)
+        let id = self.next_handle.fetch_add(1, Ordering::Relaxed);
+        self.handles.write().insert(id, OpenFile { path, flags });
+        Ok(FileHandle(id))
     }
 
-    async fn read(&self, _handle: &FileHandle, _offset: u64, _len: usize) -> VfsResult<Bytes> {
-        Ok(Bytes::new())
+    async fn read(&self, handle: &FileHandle, offset: u64, len: usize) -> VfsResult<Bytes> {
+        let open = self.handle(handle)?;
+        if !open.flags.read {
+            return Err(VfsError::PermissionDenied(format!(
+                "handle not open for reading: {}",
+                open.path
+            )));
+        }
+        let data = self
+            .file_bytes(&open.path)
+            .await?
+            .ok_or_else(|| VfsError::NotFound(open.path.clone()))?;
+
+        let start = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(data.len());
+        let end = start.saturating_add(len).min(data.len());
+        Ok(Bytes::copy_from_slice(&data[start..end]))
     }
 
-    async fn write(&self, _handle: &FileHandle, _offset: u64, _data: &[u8]) -> VfsResult<usize> {
-        Ok(0)
+    async fn write(&self, handle: &FileHandle, offset: u64, data: &[u8]) -> VfsResult<usize> {
+        let open = self.handle(handle)?;
+        if !open.flags.write {
+            return Err(VfsError::PermissionDenied(format!(
+                "handle not open for writing: {}",
+                open.path
+            )));
+        }
+        let mut contents = self
+            .file_bytes(&open.path)
+            .await?
+            .ok_or_else(|| VfsError::NotFound(open.path.clone()))?;
+
+        let start = if open.flags.append {
+            contents.len()
+        } else {
+            usize::try_from(offset)
+                .map_err(|_| VfsError::InvalidPath("offset does not fit in memory".to_string()))?
+        };
+        let end = start
+            .checked_add(data.len())
+            .ok_or_else(|| VfsError::InvalidPath("write range overflows".to_string()))?;
+
+        let old_len = contents.len() as u64;
+        let new_len = old_len.max(end as u64);
+        self.check_write_quota(old_len, new_len).await?;
+
+        if contents.len() < end {
+            // Writes past the end zero-fill the gap, like POSIX.
+            contents.resize(end, 0);
+        }
+        contents[start..end].copy_from_slice(data);
+        self.put_file(&open.path, contents);
+        Ok(data.len())
     }
 
     async fn stat(&self, path: &Path) -> VfsResult<FileStat> {
-        let path = self.normalize_path(path)?;
-        let node = self.resolve(&path).await.ok_or(VfsError::NotFound(path.clone()))?;
-
-        Ok(FileStat {
-            path: path.clone(),
-            is_dir: node.is_dir(),
-            is_file: node.is_file(),
-            is_symlink: node.is_symlink(),
-            size: match &node {
-                Node::File(f) => f.size,
-                _ => 0,
-            },
-            mode: 0o644,
-            modified: 0,
-        })
+        let path = self.resolve_path(path, true).await?;
+        let kind = self
+            .kind(&path)
+            .await?
+            .ok_or_else(|| VfsError::NotFound(path.clone()))?;
+        Ok(kind_stat(&path, &kind))
     }
 
     async fn readdir(&self, path: &Path) -> VfsResult<Vec<DirEntry>> {
-        let path = self.normalize_path(path)?;
-        let node = self.resolve(&path).await.ok_or(VfsError::NotFound(path))?;
-
-        let dir = match node {
-            Node::Directory(dir) => dir,
-            _ => return Err(VfsError::InvalidPath("Not a directory".to_string())),
-        };
-
-        let mut entries = Vec::new();
-        for entry in dir.iter() {
-            entries.push(DirEntry {
-                name: entry.name.clone(),
-                is_dir: false,
-                is_file: true,
-                is_symlink: false,
-                size: 0,
-                mode: entry.mode,
-            });
+        let path = self.resolve_path(path, true).await?;
+        match self.kind(&path).await? {
+            Some(Kind::Dir) => {}
+            Some(_) => return Err(VfsError::InvalidPath(format!("not a directory: {path}"))),
+            None => return Err(VfsError::NotFound(path)),
         }
-        Ok(entries)
+
+        let prefix = child_prefix(&path);
+        let mut children: BTreeMap<String, Kind> = BTreeMap::new();
+
+        // Overlay children. Writes require the parent to exist, so a path's
+        // direct children are always explicit entries.
+        {
+            let overlay = self.overlay.read();
+            for (key, node) in overlay.nodes.range(prefix.clone()..) {
+                if !key.starts_with(&prefix) {
+                    break;
+                }
+                if let Some(name) = direct_child(key, &prefix) {
+                    children.insert(name.to_string(), kind_of_node(node));
+                }
+            }
+        }
+
+        // Committed children that the overlay has not shadowed.
+        for (name, hash) in self.committed_entries(&path).await? {
+            let child = join(&path, &name);
+            if self.is_shadowed(&child) {
+                continue;
+            }
+            let stored = self.load_stored(&hash).await?;
+            children
+                .entry(name)
+                .or_insert_with(|| kind_of_stored(&stored));
+        }
+
+        Ok(children
+            .into_iter()
+            .map(|(name, kind)| {
+                let stat = kind_stat(&name, &kind);
+                DirEntry {
+                    name,
+                    is_dir: stat.is_dir,
+                    is_file: stat.is_file,
+                    is_symlink: stat.is_symlink,
+                    size: stat.size,
+                    mode: stat.mode,
+                }
+            })
+            .collect())
     }
 
     async fn mkdir(&self, path: &Path, _mode: u32) -> VfsResult<()> {
-        let path = self.normalize_path(path)?;
-        if self.resolve(&path).await.is_some() {
+        let path = self.resolve_path(path, false).await?;
+        if path == "/" || self.kind(&path).await?.is_some() {
             return Err(VfsError::AlreadyExists(path));
         }
+        self.require_parent_dir(&path).await?;
+        self.check_new_inode().await?;
 
-        let node = Node::Directory(Directory::new());
-        self.overlay.write().nodes.insert(path.clone(), node);
-        self.mark_dirty(&path);
-        self.emit_watch(WatchEvent::Created(PathBuf::from(&path)));
+        self.overlay.write().nodes.insert(path, Node::Directory);
         Ok(())
     }
 
-    async fn rm(&self, path: &Path, _recursive: bool) -> VfsResult<()> {
-        let path = self.normalize_path(path)?;
-        self.overlay.write().whiteouts.insert(path.clone(), ());
-        self.overlay.write().nodes.remove(&path);
-        self.mark_dirty(&path);
-        self.emit_watch(WatchEvent::Deleted(PathBuf::from(&path)));
+    async fn rm(&self, path: &Path, recursive: bool) -> VfsResult<()> {
+        let path = self.resolve_path(path, false).await?;
+        if path == "/" {
+            return Err(VfsError::InvalidPath("cannot remove the root".to_string()));
+        }
+        let kind = self
+            .kind(&path)
+            .await?
+            .ok_or_else(|| VfsError::NotFound(path.clone()))?;
+
+        // A file has no descendants, so this is empty unless `path` is a directory.
+        let mut doomed = if kind == Kind::Dir {
+            self.descendants(&path).await?
+        } else {
+            BTreeSet::new()
+        };
+        if !doomed.is_empty() && !recursive {
+            return Err(VfsError::InvalidPath(format!(
+                "directory not empty: {path}"
+            )));
+        }
+        doomed.insert(path);
+
+        let mut overlay = self.overlay.write();
+        for key in doomed {
+            overlay.nodes.remove(&key);
+            overlay.whiteouts.insert(key);
+        }
         Ok(())
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
-        let from = self.normalize_path(from)?;
-        let to = self.normalize_path(to)?;
+        let from = self.resolve_path(from, false).await?;
+        let to = self.resolve_path(to, false).await?;
+        if from == to {
+            return Ok(());
+        }
+        if from == "/" || to == "/" {
+            return Err(VfsError::InvalidPath("cannot rename the root".to_string()));
+        }
+        if to.starts_with(&child_prefix(&from)) {
+            return Err(VfsError::InvalidPath(format!(
+                "cannot move {from} into itself"
+            )));
+        }
+        if self.kind(&from).await?.is_none() {
+            return Err(VfsError::NotFound(from));
+        }
+        if self.kind(&to).await?.is_some() {
+            return Err(VfsError::AlreadyExists(to));
+        }
+        self.require_parent_dir(&to).await?;
 
-        let node = self.resolve(&from).await.ok_or(VfsError::NotFound(from.clone()))?;
-        self.overlay.write().nodes.remove(&from);
-        self.overlay.write().whiteouts.insert(from.clone(), ());
-        self.overlay.write().nodes.insert(to.clone(), node);
-        self.mark_dirty(&from);
-        self.mark_dirty(&to);
-        self.emit_watch(WatchEvent::Renamed(PathBuf::from(&from), PathBuf::from(&to)));
+        // Build every moved node before changing anything, so a failure
+        // partway through cannot leave the tree half-moved.
+        let mut sources = self.descendants(&from).await?;
+        sources.insert(from.clone());
+        let mut moved = Vec::with_capacity(sources.len());
+        for old in &sources {
+            let new = format!("{to}{}", &old[from.len()..]);
+            let kind = self
+                .kind(old)
+                .await?
+                .ok_or_else(|| VfsError::NotFound(old.clone()))?;
+            let node = match kind {
+                Kind::Dir => Node::Directory,
+                Kind::File(_) => Node::File(
+                    self.file_bytes(old)
+                        .await?
+                        .ok_or_else(|| VfsError::NotFound(old.clone()))?,
+                ),
+                Kind::Symlink(target) => Node::Symlink(target),
+            };
+            moved.push((old.clone(), new, node));
+        }
+
+        let mut overlay = self.overlay.write();
+        for (old, _, _) in &moved {
+            overlay.nodes.remove(old);
+            overlay.whiteouts.insert(old.clone());
+        }
+        for (_, new, node) in moved {
+            overlay.nodes.insert(new, node);
+        }
         Ok(())
     }
 
     async fn symlink(&self, target: &Path, link: &Path) -> VfsResult<()> {
-        let link = self.normalize_path(link)?;
-        let target = target.to_string_lossy().to_string();
-
-        if self.resolve(&link).await.is_some() {
+        let link = self.resolve_path(link, false).await?;
+        let target = target
+            .to_str()
+            .ok_or_else(|| VfsError::InvalidPath("symlink target is not valid UTF-8".to_string()))?
+            .to_string();
+        if self.kind(&link).await?.is_some() {
             return Err(VfsError::AlreadyExists(link));
         }
+        self.require_parent_dir(&link).await?;
+        self.check_new_inode().await?;
 
-        let node = Node::Symlink(target);
-        self.overlay.write().nodes.insert(link.clone(), node);
-        self.mark_dirty(&link);
-        self.emit_watch(WatchEvent::Created(PathBuf::from(&link)));
+        self.overlay
+            .write()
+            .nodes
+            .insert(link, Node::Symlink(target));
         Ok(())
     }
 
     async fn readlink(&self, path: &Path) -> VfsResult<String> {
-        let path = self.normalize_path(path)?;
-        let node = self.resolve(&path).await.ok_or(VfsError::NotFound(path))?;
-
-        match node {
-            Node::Symlink(target) => Ok(target),
-            _ => Err(VfsError::InvalidPath("Not a symlink".to_string())),
+        let path = self.resolve_path(path, false).await?;
+        match self.kind(&path).await? {
+            Some(Kind::Symlink(target)) => Ok(target),
+            Some(_) => Err(VfsError::InvalidPath(format!("not a symlink: {path}"))),
+            None => Err(VfsError::NotFound(path)),
         }
     }
 
     async fn truncate(&self, path: &Path, size: u64) -> VfsResult<()> {
-        let path = self.normalize_path(path)?;
-        let mut overlay = self.overlay.write();
+        let path = self.resolve_path(path, true).await?;
+        let old = match self.kind(&path).await? {
+            Some(Kind::File(len)) => len,
+            Some(_) => return Err(VfsError::InvalidPath(format!("not a regular file: {path}"))),
+            None => return Err(VfsError::NotFound(path)),
+        };
+        self.check_write_quota(old, size).await?;
 
-        if let Some(Node::File(file)) = overlay.nodes.get_mut(&path) {
-            file.size = size;
-            self.mark_dirty(&path);
-            Ok(())
-        } else if self.base.get(&path).is_some() {
-            let file = FileNode::new(Vec::new(), size);
-            overlay.nodes.insert(path.clone(), Node::File(file));
-            self.mark_dirty(&path);
-            Ok(())
-        } else {
-            Err(VfsError::NotFound(path))
-        }
+        let mut contents = self
+            .file_bytes(&path)
+            .await?
+            .ok_or_else(|| VfsError::NotFound(path.clone()))?;
+        let size = usize::try_from(size)
+            .map_err(|_| VfsError::InvalidPath("size does not fit in memory".to_string()))?;
+        contents.resize(size, 0);
+        self.put_file(&path, contents);
+        Ok(())
+    }
+
+    fn close(&self, handle: &FileHandle) {
+        self.handles.write().remove(&handle.0);
     }
 
     async fn watch(&self, _path: &Path) -> VfsResult<WatchHandle> {
-        let handle = self.allocate_watch();
-        let (tx, _) = mpsc::channel(100);
-        self.watchers.write().insert(handle.0, tx);
-        Ok(handle)
+        Err(VfsError::Unsupported(
+            "watch is not implemented yet".to_string(),
+        ))
     }
 
+    /// Persists the overlay and returns the new root.
+    ///
+    /// Only directories on a changed path are rewritten, bottom-up, so the
+    /// cost scales with the changes, not the tree. Every other subtree keeps
+    /// its hash. Visible content is unchanged by a commit, so the cached
+    /// totals stay correct.
     async fn commit(&mut self) -> VfsResult<ContentHash> {
-        let dirty_paths = {
-            let mut overlay = self.overlay.write();
-            std::mem::take(&mut overlay.dirty_paths)
+        let visible = self.usage().await?;
+        let (overlay_nodes, whiteouts) = {
+            let overlay = self.overlay.read();
+            (overlay.nodes.clone(), overlay.whiteouts.clone())
         };
 
-        for path in dirty_paths {
-            let node = {
-                let overlay = self.overlay.read();
-                overlay.nodes.get(&path).cloned()
-            };
-            if let Some(node) = node {
-                let data = serde_json::to_vec(&node).map_err(|e| {
-                    VfsError::Serialization(e.to_string())
-                })?;
-                let hash = self.store.put(&data, Default::default()).await?;
-                self.base.insert(path.clone(), hash);
+        // Directories whose entries change: ancestors of every changed path,
+        // plus every overlay directory.
+        let mut dirty: BTreeSet<String> = BTreeSet::from(["/".to_string()]);
+        let mut changed_children: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for path in overlay_nodes.keys().chain(whiteouts.iter()) {
+            for ancestor in ancestors(path) {
+                dirty.insert(ancestor);
+            }
+        }
+        for (path, node) in &overlay_nodes {
+            if matches!(node, Node::Directory) {
+                dirty.insert(path.clone());
+            }
+        }
+        for path in overlay_nodes
+            .keys()
+            .chain(whiteouts.iter())
+            .chain(dirty.iter())
+        {
+            if path != "/" {
+                let name = components(path).last().unwrap_or_default().to_string();
+                changed_children
+                    .entry(parent_of(path).to_string())
+                    .or_default()
+                    .insert(name);
             }
         }
 
-        let root_data = serde_json::to_vec(&self.base.nodes).map_err(|e| {
-            VfsError::Serialization(e.to_string())
-        })?;
-        let root_hash = self.store.put(&root_data, Default::default()).await?;
-        Ok(root_hash)
+        // Leaves first: file contents and symlink nodes from the overlay.
+        let mut leaf: HashMap<String, ContentHash> = HashMap::new();
+        for (path, node) in &overlay_nodes {
+            let stored = match node {
+                Node::File(data) => {
+                    let content = self.store.put(data, PutOptions::default()).await?;
+                    Stored::File {
+                        content,
+                        size: data.len() as u64,
+                    }
+                }
+                Node::Symlink(target) => Stored::Symlink(target.clone()),
+                Node::Directory => continue,
+            };
+            leaf.insert(path.clone(), self.put_node(&stored).await?);
+        }
+
+        // Directories deepest first, so each child's hash is known before its parent.
+        let mut order: Vec<String> = dirty.iter().cloned().collect();
+        order.sort_by_key(|p| std::cmp::Reverse(depth(p)));
+        let mut dir_hash: HashMap<String, Option<ContentHash>> = HashMap::new();
+
+        for dir in &order {
+            let replaced_or_removed = whiteouts.contains(dir);
+            let overlay_dir = matches!(overlay_nodes.get(dir), Some(Node::Directory));
+            if replaced_or_removed && !overlay_dir {
+                dir_hash.insert(dir.clone(), None);
+                continue;
+            }
+
+            // A deleted-then-recreated directory hides its committed children.
+            let mut entries = if replaced_or_removed {
+                BTreeMap::new()
+            } else {
+                self.committed_entries(dir).await?
+            };
+
+            for name in changed_children.get(dir).into_iter().flatten() {
+                let child = join(dir, name);
+                let new_hash = if let Some(Node::Directory) = overlay_nodes.get(&child) {
+                    dir_hash.get(&child).copied().flatten()
+                } else if overlay_nodes.contains_key(&child) {
+                    leaf.get(&child).copied()
+                } else if dirty.contains(&child) {
+                    dir_hash.get(&child).copied().flatten()
+                } else if whiteouts.contains(&child) {
+                    None
+                } else {
+                    // Untouched committed child: keep its entry.
+                    continue;
+                };
+                match new_hash {
+                    Some(hash) => entries.insert(name.clone(), hash),
+                    None => entries.remove(name),
+                };
+            }
+
+            let hash = self.put_node(&Stored::Directory { entries }).await?;
+            dir_hash.insert(dir.clone(), Some(hash));
+        }
+
+        let root = dir_hash
+            .get("/")
+            .copied()
+            .flatten()
+            .ok_or_else(|| VfsError::Internal("root directory was not rebuilt".to_string()))?;
+
+        self.root = root;
+        self.committed_totals = OnceCell::new_with(Some(visible));
+        let mut overlay = self.overlay.write();
+        overlay.nodes.clear();
+        overlay.whiteouts.clear();
+        Ok(root)
+    }
+}
+
+/// The name of `key` if it is a direct child of the directory `prefix`.
+fn direct_child<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = key.strip_prefix(prefix)?;
+    if rest.is_empty() || rest.contains('/') {
+        None
+    } else {
+        Some(rest)
     }
 }
