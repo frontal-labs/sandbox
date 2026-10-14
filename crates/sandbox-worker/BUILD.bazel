@@ -13,6 +13,7 @@ rust_library(
         "@crates//:thiserror",
         "@crates//:schemars",
         "@crates//:serde",
+        "@crates//:serde_json",
         "@crates//:tonic",
         "@crates//:prost",
         "@crates//:rustix",

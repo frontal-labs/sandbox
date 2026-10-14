@@ -1,27 +1,18 @@
-# sandbox-worker
+# Sandbox Worker
 
-Per-tenant worker process for the sandbox system.
+Worker process for the sandbox. Each worker runs one session in a child process.
 
 ## Status
 
-Stub. `Worker::new(SessionConfig)` returns an empty handle, `spawn_session` returns `SandboxError::unsupported`, and `shutdown` returns `Ok(())`. There is no sandboxing setup (seccomp, cgroups, namespaces, `PR_SET_NO_NEW_PRIVS`), no Unix socket listener, and no gRPC service. `tonic` and `prost` are declared as dependencies but no service is defined. The crate also depends on `sandbox-session`, whose `IsolateBackend` is `unimplemented!()`. No tests exist.
+Working for process isolation only. Covered by unit tests in `src/worker.rs` and by `cli/tests/worker_process.rs`, which runs the real binary.
 
-## Overview
+- `Worker::spawn(program, args)` starts a child that speaks a JSON-lines protocol on stdin and stdout.
+- `Worker::run_script(script)` returns the script's `ExecResult`. A script error comes back as an error response, and the worker keeps running.
+- A crashed or exited child returns `Unavailable` to the host. The host never panics.
+- `serve(session, input, output)` is the child-side loop. `run_stdio_worker` backs the hidden `sandbox worker` subcommand.
 
-Intended design: one OS process per tenant that hosts many of that tenant's sessions, sandboxes itself at startup, and serves scheduler RPCs over a Unix socket. Source: `crates/sandbox-worker/src/`.
+Not implemented: seccomp, cgroups, namespaces, `PR_SET_NO_NEW_PRIVS`, and the Linux-only hardening in PLAN.md section 4.13. The worker is not a security boundary against hostile code. No Unix-socket listener and no gRPC service exist. The `tonic`, `prost`, `rustix`, and `nix` dependencies are declared but unused.
 
-## Public API (from `src/lib.rs`)
+## Protocol
 
-- `Worker` (`worker.rs`): `new(SessionConfig).await`, `spawn_session(SessionConfig).await -> SessionId` (stub), `shutdown().await`, `Default`.
-
-## Invariants and security assumptions
-
-- Target: a worker never holds credentials for another tenant, and a worker crash must not affect other tenants. Not enforced yet.
-- Target startup hardening (not implemented): `PR_SET_NO_NEW_PRIVS`, seccomp-bpf allowlist, cgroup v2 limits, optional user/mount/pid/net namespaces, no host mounts.
-- Crash recovery is a scheduler responsibility (restore from last snapshot or report failure).
-
-## Example
-
-Omitted: the worker does not serve requests yet.
-
-See `PLAN.md` section 4.13 for the target spec.
+One JSON object per line. Requests are `{"op":"run_script","script":"..."}` and `{"op":"shutdown"}`. Each run_script request gets exactly one response line: `{"status":"ok","result":{...}}` or `{"status":"error","code":"...","message":"..."}`.
