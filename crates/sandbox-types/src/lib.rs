@@ -14,3 +14,6 @@ pub use session::{
     ExecRequest, ExecResult, SessionConfig, SessionState, SessionStatus, Snapshot, Tier,
     TierPreference,
 };
+
+#[cfg(feature = "openapi")]
+pub mod openapi;

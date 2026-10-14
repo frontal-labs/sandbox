@@ -44,6 +44,7 @@ impl Capability {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NetworkPolicy {
     pub default_deny: bool,
     pub rules: Vec<NetworkPolicyRule>,
@@ -90,6 +91,7 @@ impl NetworkPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NetworkPolicyRule {
     pub action: PolicyAction,
     pub host_pattern: String,
@@ -98,6 +100,7 @@ pub struct NetworkPolicyRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum PolicyAction {
     Allow,
     Deny,
@@ -148,6 +151,7 @@ impl NetworkPolicyRule {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResourceLimits {
     pub memory_bytes: Option<u64>,
     pub cpu_ms_per_sec: Option<u64>,
@@ -177,11 +181,13 @@ impl Default for ResourceLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SecretsConfig {
     pub secrets: HashMap<String, SecretEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SecretEntry {
     pub value: String,
     pub hosts: Vec<String>,

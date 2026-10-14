@@ -18,6 +18,9 @@ ulid = { workspace = true }
 blake3 = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
+utoipa = { workspace = true, optional = true }
 
 [features]
 default = []
+# Derives OpenAPI schemas for the REST-facing types (used by sandbox-server).
+openapi = ["dep:utoipa"]

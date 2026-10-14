@@ -4,6 +4,8 @@ rust_library(
     name = "sandbox_types",
     edition = "2021",
     srcs = glob(["src/**/*.rs"]),
+    # Matches Cargo: the server enables the openapi feature for ToSchema derives.
+    crate_features = ["openapi"],
     deps = [
         "@crates//:serde",
         "@crates//:serde_json",
@@ -12,6 +14,7 @@ rust_library(
         "@crates//:ulid",
         "@crates//:blake3",
         "@crates//:bytes",
+        "@crates//:utoipa",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
