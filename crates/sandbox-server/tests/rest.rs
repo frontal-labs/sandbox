@@ -389,3 +389,46 @@ async fn settings_the_backend_does_not_enforce_are_refused_not_ignored() {
     let (status, _) = call(&app, "POST", "/v1/sessions", &key, json_body(&with_limits)).await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
 }
+
+#[tokio::test]
+async fn session_limit_is_per_key() {
+    use sandbox_server::api::MAX_SESSIONS_PER_KEY;
+    let (app, owner, other) = router();
+    for _ in 0..MAX_SESSIONS_PER_KEY {
+        create(&app, &owner).await;
+    }
+    let (status, body) = call(&app, "POST", "/v1/sessions", &owner, json_body(&config())).await;
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let error: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["code"], "RESOURCE_EXHAUSTED");
+
+    // One key's sessions must not stop another key from creating its own.
+    create(&app, &other).await;
+}
+
+#[tokio::test]
+async fn snapshot_limit_is_per_key() {
+    use sandbox_server::api::MAX_SNAPSHOTS_PER_KEY;
+    let (app, owner, other) = router();
+    let id = create(&app, &owner).await;
+    for _ in 0..MAX_SNAPSHOTS_PER_KEY {
+        snapshot(&app, &owner, &id).await;
+    }
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/snapshot"),
+        &owner,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+
+    let other_id = create(&app, &other).await;
+    snapshot(&app, &other, &other_id).await;
+}

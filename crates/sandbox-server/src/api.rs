@@ -39,10 +39,42 @@ pub struct AppState {
 
 /// The key that took each snapshot. Snapshots are visible only to that key.
 #[derive(Clone, Default)]
-pub struct SnapshotOwners(Arc<RwLock<HashMap<SnapshotId, KeyId>>>);
+pub struct SnapshotOwners {
+    owners: Arc<RwLock<HashMap<SnapshotId, KeyId>>>,
+    /// Serializes snapshot admission, so the per-key count cannot be raced past.
+    admit: Arc<tokio::sync::Mutex<()>>,
+}
 
 /// Most sessions one fork call may create.
 const MAX_FORK_COUNT: u32 = 64;
+/// Live sessions one key may hold. Sessions use process memory, so this bounds
+/// what a single key can take from the server.
+pub const MAX_SESSIONS_PER_KEY: usize = 64;
+/// Live sessions the server holds across all keys.
+pub const MAX_SESSIONS_TOTAL: usize = 4096;
+/// Snapshots one key may hold. Snapshots pin blobs in the shared store, and
+/// the process-wide snapshot registry is capped separately.
+pub const MAX_SNAPSHOTS_PER_KEY: usize = 32;
+
+/// Stores a new session if the caller and the server are under their limits.
+/// The check and the insert happen under one lock, so concurrent creates
+/// cannot both pass a limit that only one of them should reach.
+async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<(), ApiError> {
+    let id = entry.state.id;
+    let mut table = state.sessions.0.write().await;
+    if table.len() >= MAX_SESSIONS_TOTAL {
+        return Err(SandboxError::resource_exhausted("the server is at its session limit").into());
+    }
+    let held = table.values().filter(|e| e.owner == *owner).count();
+    if held >= MAX_SESSIONS_PER_KEY {
+        return Err(SandboxError::resource_exhausted(format!(
+            "this key already holds {MAX_SESSIONS_PER_KEY} sessions"
+        ))
+        .into());
+    }
+    table.insert(id, entry);
+    Ok(())
+}
 
 /// Live sessions, keyed by ID, each with the key that owns it.
 #[derive(Clone, Default)]
@@ -313,8 +345,8 @@ pub async fn create_session(
         None => Arc::new(IsolateBackend::new(config).await?),
     };
     let id = session.id();
-    let entry = entry(owner, session, tenant_id, labels);
-    state.sessions.0.write().await.insert(id, entry);
+    let entry = entry(owner.clone(), session, tenant_id, labels);
+    admit_session(&state, &owner, entry).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateSessionResponse { session_id: id }),
@@ -542,8 +574,28 @@ pub async fn take_snapshot(
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
     let session = own.session;
+    let _admit = state.snapshots.admit.lock().await;
+    let taken = state
+        .snapshots
+        .owners
+        .read()
+        .await
+        .values()
+        .filter(|k| **k == owner)
+        .count();
+    if taken >= MAX_SNAPSHOTS_PER_KEY {
+        return Err(SandboxError::resource_exhausted(format!(
+            "this key already holds {MAX_SNAPSHOTS_PER_KEY} snapshots"
+        ))
+        .into());
+    }
     let snapshot_id = session.snapshot().await?;
-    state.snapshots.0.write().await.insert(snapshot_id, owner);
+    state
+        .snapshots
+        .owners
+        .write()
+        .await
+        .insert(snapshot_id, owner);
     Ok((
         StatusCode::CREATED,
         Json(TakeSnapshotResponse { snapshot_id }),
@@ -586,7 +638,7 @@ pub async fn fork_snapshot(
         let session: Arc<dyn Session> = sandbox_session::restore(snapshot_id).await?.into();
         let session_id = session.id();
         let entry = entry(owner.clone(), session, TenantId::nil(), HashMap::new());
-        state.sessions.0.write().await.insert(session_id, entry);
+        admit_session(&state, &owner, entry).await?;
         session_ids.push(session_id);
     }
     Ok(Json(ForkResponse { session_ids }))
@@ -603,7 +655,7 @@ async fn check_snapshot_owner(
     owner: &KeyId,
     snapshot_id: SnapshotId,
 ) -> Result<(), ApiError> {
-    let table = state.snapshots.0.read().await;
+    let table = state.snapshots.owners.read().await;
     match table.get(&snapshot_id) {
         Some(taken_by) if taken_by == owner => Ok(()),
         _ => Err(SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into()),

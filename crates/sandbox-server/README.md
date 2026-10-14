@@ -30,6 +30,17 @@ Every `/v1` route requires `Authorization: Bearer <key>`. `GET /v1/openapi.json`
 
 Errors use the `ErrorBody` shape (`code`, `message`). Status codes follow the error code: `NOT_FOUND` is 404, `INVALID_ARGUMENT` is 400, `UNSUPPORTED` is 501, and so on.
 
+## Limits
+
+| Limit | Value | Over the limit |
+|-------|-------|----------------|
+| Live sessions per key | 64 | `429`, `RESOURCE_EXHAUSTED` |
+| Live sessions across all keys | 4096 | `429`, `RESOURCE_EXHAUSTED` |
+| Snapshots per key | 32 | `429`, `RESOURCE_EXHAUSTED` |
+| Sessions per fork call | 1 to 64 | `400` |
+
+The process-wide snapshot registry in `sandbox-session` is separate, and caps at 1024 snapshots across all keys. A key that fills it blocks other keys' snapshots, so the registry should move into the server before the server is exposed to untrusted keys.
+
 ## Ownership and paths
 
 - A session belongs to the key that created it. Any other key gets `404`, the same as for a session that does not exist, so the response does not reveal that the session exists.
