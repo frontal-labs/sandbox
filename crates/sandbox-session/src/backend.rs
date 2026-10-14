@@ -21,10 +21,31 @@ fn shared_store() -> Arc<dyn BlobStore> {
     STORE.get_or_init(|| Arc::new(MemStore::new())).clone()
 }
 
+/// Most snapshots one process keeps. The registry and the blobs it points to
+/// are never freed, so this bounds what snapshots can grow to.
+pub const MAX_SNAPSHOTS: usize = 1024;
+
 /// Committed filesystem root of each snapshot taken in this process.
 fn snapshots() -> &'static StdMutex<HashMap<SnapshotId, ContentHash>> {
     static SNAPSHOTS: OnceLock<StdMutex<HashMap<SnapshotId, ContentHash>>> = OnceLock::new();
     SNAPSHOTS.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+/// Records `root` as a new snapshot in `registry`, refusing once `limit` is
+/// reached. Pulled out so the limit can be tested without the shared registry.
+fn register_snapshot(
+    registry: &mut HashMap<SnapshotId, ContentHash>,
+    root: ContentHash,
+    limit: usize,
+) -> Result<SnapshotId, SandboxError> {
+    if registry.len() >= limit {
+        return Err(SandboxError::resource_exhausted(format!(
+            "this process already holds {limit} snapshots"
+        )));
+    }
+    let id = SnapshotId::new();
+    registry.insert(id, root);
+    Ok(id)
 }
 
 /// Tier 1 session. Owns its VFS, which is the source of truth for files, and
@@ -129,12 +150,10 @@ impl Session for IsolateBackend {
             .checkpoint()
             .await
             .map_err(|e| SandboxError::new(ErrorCode::VfsError, e.to_string()))?;
-        let id = SnapshotId::new();
-        snapshots()
+        let mut registry = snapshots()
             .lock()
-            .map_err(|_| SandboxError::internal("snapshot registry poisoned"))?
-            .insert(id, root);
-        Ok(id)
+            .map_err(|_| SandboxError::internal("snapshot registry poisoned"))?;
+        register_snapshot(&mut registry, root, MAX_SNAPSHOTS)
     }
 
     async fn sleep(&self) -> Result<SnapshotId, SandboxError> {
@@ -327,6 +346,17 @@ mod tests {
 
         // The original keeps its own later state.
         assert_eq!(read_text(backend.fs(), "/a.txt").await, "two");
+    }
+
+    #[test]
+    fn registry_refuses_snapshots_past_its_limit() {
+        let mut registry = HashMap::new();
+        let root = ContentHash::nil();
+        assert!(register_snapshot(&mut registry, root, 2).is_ok());
+        assert!(register_snapshot(&mut registry, root, 2).is_ok());
+        let err = register_snapshot(&mut registry, root, 2).unwrap_err();
+        assert_eq!(err.code, ErrorCode::ResourceExhausted);
+        assert_eq!(registry.len(), 2);
     }
 
     #[tokio::test]
