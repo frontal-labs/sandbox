@@ -18,11 +18,12 @@ sandbox-session = { path = "../crates/sandbox-session" }
 sandbox-snapshot = { path = "../crates/sandbox-snapshot" }
 sandbox-promote = { path = "../crates/sandbox-promote" }
 sandbox-policy = { path = "../crates/sandbox-policy" }
+object_store = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-criterion = { workspace = true }
+criterion = { workspace = true, features = ["async_tokio"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
@@ -36,7 +37,7 @@ indicatif = "0.17"
 csv = "1"
 
 [dev-dependencies]
-criterion = { workspace = true }
+criterion = { workspace = true, features = ["async_tokio"] }
 
 [[bench]]
 name = "vfs_bench"
@@ -62,14 +63,3 @@ harness = false
 name = "session_bench"
 harness = false
 
-[[bench]]
-name = "promotion_bench"
-harness = false
-
-[profile.release]
-lto = "thin"
-codegen-units = 1
-
-[profile.bench]
-inherits = "release"
-debug = true

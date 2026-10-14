@@ -7,6 +7,11 @@ repository = "https://github.com/frontal-labs/sandbox"
 authors = ["Frontal Labs"]
 description = "CLI for the sandbox system"
 
+[lib]
+# Named cli_lib to match the Bazel target (cli/BUILD.bazel) and cli/src/main.rs.
+name = "cli_lib"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sandbox"
 path = "src/main.rs"
@@ -14,6 +19,8 @@ path = "src/main.rs"
 [dependencies]
 sandbox-sdk = { path = "../sdks/rust" }
 sandbox-types = { path = "../crates/sandbox-types" }
+sandbox-session = { path = "../crates/sandbox-session" }
+sandbox-worker = { path = "../crates/sandbox-worker" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -22,6 +29,8 @@ thiserror = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
 
 [features]
 default = []

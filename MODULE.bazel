@@ -23,7 +23,10 @@ crate.from_cargo(
     name = "crates",
     cargo_lockfile = "//:Cargo.lock",
     manifests = ["//:Cargo.toml"],
-    supported_platform_triples = ["x86_64-apple-darwin"],
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    ],
 )
 
 use_repo(rust, "rust_toolchains")

@@ -19,8 +19,13 @@ parking_lot = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 wasmtime = { workspace = true }
-wasmtime-wasi = { workspace = true }
+futures = { workspace = true }
+getrandom = "0.2"
+toml = "0.8"
 wizer = { workspace = true }
+
+[dev-dependencies]
+sandbox-cas = { path = "../sandbox-cas" }
 
 [features]
 default = []

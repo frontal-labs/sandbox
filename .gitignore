@@ -16,3 +16,11 @@ target/
 .envrc
 .direnv/
 result*
+
+# Bazel output symlinks
+bazel-*
+
+# Python caches
+__pycache__/
+.pytest_cache/
+.ruff_cache/

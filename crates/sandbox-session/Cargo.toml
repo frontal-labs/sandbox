@@ -10,6 +10,7 @@ description = "Session trait and isolate backend for the sandbox system"
 [dependencies]
 sandbox-types = { path = "../sandbox-types" }
 sandbox-vfs = { path = "../sandbox-vfs" }
+sandbox-cas = { path = "../sandbox-cas" }
 sandbox-runtime = { path = "../sandbox-runtime" }
 sandbox-wasm = { path = "../sandbox-wasm" }
 sandbox-shell = { path = "../sandbox-shell" }
