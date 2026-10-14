@@ -1,58 +1,34 @@
-//! Runtime operations (V8 custom ops)
+//! Ops exposed to scripts. Each op is a host capability, so adding one is a
+//! security decision. There is no filesystem, network, or environment access
+//! yet, so the only op is the one that writes script output.
 
 use deno_core::{op2, OpState};
 
+/// Output captured for one script run. Stored in `OpState` for the run.
+#[derive(Default)]
+pub struct ScriptOutput {
+    pub stdout: Vec<u8>,
+    /// Maximum bytes kept in `stdout`. Anything beyond it is dropped.
+    pub limit: usize,
+    pub truncated: bool,
+}
+
+impl ScriptOutput {
+    pub fn push(&mut self, text: &str) {
+        let room = self.limit.saturating_sub(self.stdout.len());
+        if text.len() <= room {
+            self.stdout.extend_from_slice(text.as_bytes());
+        } else {
+            self.stdout.extend_from_slice(&text.as_bytes()[..room]);
+            self.truncated = true;
+        }
+    }
+}
+
+/// Appends text to the captured stdout. Backs `console.log`.
 #[op2(fast)]
-#[bigint]
-pub fn op_now(_state: &mut OpState) -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
-
-#[op2]
-#[string]
-pub fn op_env_get(_state: &mut OpState, #[string] key: String) -> String {
-    std::env::var(&key).unwrap_or_default()
-}
-
-#[op2(fast)]
-pub fn op_env_set(_state: &mut OpState, #[string] key: String, #[string] value: String) {
-    std::env::set_var(key, value);
-}
-
-#[op2]
-#[string]
-pub fn op_fs_read(_state: &mut OpState, #[string] _path: String) -> String {
-    String::new()
-}
-
-#[op2(fast)]
-pub fn op_fs_write(_state: &mut OpState, #[string] _path: String, #[string] _data: String) {
-    // Placeholder
-}
-
-#[op2]
-#[string]
-pub fn op_fs_stat(_state: &mut OpState, #[string] _path: String) -> String {
-    String::new()
-}
-
-#[op2]
-#[string]
-pub fn op_fs_readdir(_state: &mut OpState, #[string] _path: String) -> String {
-    String::new()
-}
-
-#[op2(fast)]
-pub fn op_spawn(_state: &mut OpState, #[string] _command: String, #[string] _args: String) -> i32 {
-    0
-}
-
-#[op2]
-#[string]
-pub fn op_fetch(_state: &mut OpState, #[string] _url: String, #[string] _options: String) -> String {
-    String::new()
+pub fn op_sandbox_print(state: &mut OpState, #[string] text: String) {
+    if let Some(output) = state.try_borrow_mut::<ScriptOutput>() {
+        output.push(&text);
+    }
 }
