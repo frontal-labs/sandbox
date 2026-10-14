@@ -1,4 +1,4 @@
-# sandbox-promote
+# Sandbox Promote
 
 Tier 1 (isolate) to Tier 2 (VM) promotion for the sandbox system.
 

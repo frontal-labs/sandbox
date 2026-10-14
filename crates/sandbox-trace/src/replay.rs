@@ -16,15 +16,18 @@ impl Default for ReplayConfig {
     }
 }
 
-pub struct ReplayEngine {
-}
+pub struct ReplayEngine {}
 
 impl ReplayEngine {
     pub fn new(_config: ReplayConfig) -> Self {
         Self {}
     }
 
-    pub async fn replay(&self, _events: Vec<Event>, _from_snapshot: Option<String>) -> Result<ReplayResult, SandboxError> {
+    pub async fn replay(
+        &self,
+        _events: Vec<Event>,
+        _from_snapshot: Option<String>,
+    ) -> Result<ReplayResult, SandboxError> {
         Ok(ReplayResult {
             divergences: Vec::new(),
             completed: true,

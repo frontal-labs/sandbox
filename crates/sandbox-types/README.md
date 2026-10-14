@@ -1,4 +1,4 @@
-# sandbox-types
+# Sandbox Types
 
 Shared types for the sandbox system.
 

@@ -1,4 +1,4 @@
-use sandbox_types::{SessionConfig, SandboxError};
+use sandbox_types::{SandboxError, SessionConfig};
 use std::net::SocketAddr;
 
 pub struct VmmDriver;

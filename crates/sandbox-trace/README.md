@@ -1,4 +1,4 @@
-# sandbox-trace
+# Sandbox Trace
 
 Event log and replay for the sandbox system.
 

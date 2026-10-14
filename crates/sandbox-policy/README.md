@@ -1,4 +1,4 @@
-# sandbox-policy
+# Sandbox Policy
 
 Policy helpers for capability checks, network allowlists, and resource limits.
 

@@ -1,4 +1,4 @@
-# sandbox-vmm
+# Sandbox VMM
 
 Firecracker VMM driver for Tier 2 microVM execution.
 

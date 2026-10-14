@@ -1,4 +1,4 @@
-# sandbox-snapshot
+# Sandbox Snapshot
 
 Snapshot, fork, and restore for the sandbox system.
 

@@ -47,17 +47,18 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                 || ipv4.is_documentation()
         }
         IpAddr::V6(ipv6) => {
-            ipv6.is_loopback()
-                || ipv6.is_unicast_link_local()
-                || ipv6.is_unique_local()
+            ipv6.is_loopback() || ipv6.is_unicast_link_local() || ipv6.is_unique_local()
         }
     }
 }
 
-pub fn resolve_and_check_host(host: &str, policy: &NetworkPolicy) -> Result<IpAddr, sandbox_types::SandboxError> {
+pub fn resolve_and_check_host(
+    host: &str,
+    policy: &NetworkPolicy,
+) -> Result<IpAddr, sandbox_types::SandboxError> {
     let addrs: Vec<IpAddr> = std::net::ToSocketAddrs::to_socket_addrs(&format!("{}:80", host))
         .ok()
-        .map(|iter| iter.filter_map(|a| Some(a.ip())).collect())
+        .map(|iter| iter.map(|a| a.ip()).collect())
         .unwrap_or_default();
 
     for ip in &addrs {

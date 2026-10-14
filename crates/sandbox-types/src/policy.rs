@@ -133,8 +133,7 @@ impl NetworkPolicyRule {
     }
 
     pub fn matches_tcp(&self, host: &str, port: u16) -> bool {
-        self.matches_host(host)
-            && self.ports.as_ref().map_or(true, |p| p.contains(&port))
+        self.matches_host(host) && self.ports.as_ref().is_none_or(|p| p.contains(&port))
     }
 
     fn matches_host(&self, host: &str) -> bool {

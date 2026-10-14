@@ -3,6 +3,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::str::FromStr;
 
+#[derive(Clone, Copy)]
 pub struct ContentHash(pub Blake3Hash);
 
 impl ContentHash {
@@ -34,14 +35,6 @@ impl ContentHash {
         Self(Blake3Hash::from_bytes([0; 32]))
     }
 }
-
-impl Clone for ContentHash {
-    fn clone(&self) -> Self {
-        Self(self.0)
-    }
-}
-
-impl Copy for ContentHash {}
 
 impl PartialEq for ContentHash {
     fn eq(&self, other: &Self) -> bool {

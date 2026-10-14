@@ -1,5 +1,8 @@
-use sandbox_types::{Snapshot, SnapshotId, SessionState, SandboxError, ids::SessionId, ids::TenantId, session::SessionStatus};
 use sandbox_types::hash::ContentHash;
+use sandbox_types::{
+    ids::SessionId, ids::TenantId, session::SessionStatus, SandboxError, SessionState, Snapshot,
+    SnapshotId,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -37,7 +40,10 @@ impl SnapshotManager {
         Ok(snapshot_id)
     }
 
-    pub async fn restore_snapshot(&self, snapshot_id: SnapshotId) -> Result<Snapshot, SandboxError> {
+    pub async fn restore_snapshot(
+        &self,
+        snapshot_id: SnapshotId,
+    ) -> Result<Snapshot, SandboxError> {
         self.snapshots
             .read()
             .await
@@ -52,7 +58,7 @@ impl SnapshotManager {
         count: usize,
     ) -> Result<Vec<SessionState>, SandboxError> {
         let snapshot = self.restore_snapshot(snapshot_id).await?;
-        
+
         let mut sessions = Vec::new();
         for _ in 0..count {
             let session = SessionState {
@@ -68,7 +74,7 @@ impl SnapshotManager {
             };
             sessions.push(session);
         }
-        
+
         Ok(sessions)
     }
 }

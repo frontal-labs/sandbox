@@ -1,4 +1,4 @@
-use sandbox_types::{SessionConfig, SandboxError};
+use sandbox_types::{SandboxError, SessionConfig};
 
 pub struct Jailer;
 

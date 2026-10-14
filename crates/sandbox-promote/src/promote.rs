@@ -1,5 +1,5 @@
-use sandbox_types::{SandboxError, SessionConfig};
 use sandbox_session::Session;
+use sandbox_types::{SandboxError, SessionConfig};
 use std::sync::Arc;
 
 pub struct PromoteManager;

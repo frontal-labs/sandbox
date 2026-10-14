@@ -1,4 +1,4 @@
-# sandbox-guest
+# Sandbox Guest
 
 In-VM guest agent for Tier 2 microVMs. Planned as a static musl binary.
 

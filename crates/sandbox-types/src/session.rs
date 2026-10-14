@@ -21,18 +21,13 @@ impl Tier {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TierPreference {
+    #[default]
     Auto,
     Isolate,
     Vm,
-}
-
-impl Default for TierPreference {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -137,7 +132,7 @@ pub enum SessionStatus {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ExecRequest {
     pub argv: Vec<String>,
     pub env: HashMap<String, String>,
@@ -145,19 +140,6 @@ pub struct ExecRequest {
     pub stdin: Option<Vec<u8>>,
     pub timeout_ms: Option<u64>,
     pub stream: bool,
-}
-
-impl Default for ExecRequest {
-    fn default() -> Self {
-        Self {
-            argv: Vec::new(),
-            env: HashMap::new(),
-            cwd: None,
-            stdin: None,
-            timeout_ms: None,
-            stream: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

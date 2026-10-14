@@ -10,4 +10,7 @@ pub use event::Event;
 pub use hash::ContentHash;
 pub use ids::{SessionId, SnapshotId, TenantId};
 pub use policy::{NetworkPolicy, NetworkPolicyRule};
-pub use session::{SessionConfig, SessionState, SessionStatus, Tier, TierPreference, ExecRequest, ExecResult, Snapshot};
+pub use session::{
+    ExecRequest, ExecResult, SessionConfig, SessionState, SessionStatus, Snapshot, Tier,
+    TierPreference,
+};

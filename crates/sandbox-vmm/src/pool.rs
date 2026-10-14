@@ -1,4 +1,4 @@
-use sandbox_types::{SessionConfig, SandboxError};
+use sandbox_types::{SandboxError, SessionConfig};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;

@@ -13,7 +13,9 @@ pub fn create_github_policy() -> NetworkPolicy {
     policy.add_rule(NetworkPolicyRule::allow_http("github.com"));
     policy.add_rule(NetworkPolicyRule::allow_http("api.github.com"));
     policy.add_rule(NetworkPolicyRule::allow_http("raw.githubusercontent.com"));
-    policy.add_rule(NetworkPolicyRule::allow_http("objects.githubusercontent.com"));
+    policy.add_rule(NetworkPolicyRule::allow_http(
+        "objects.githubusercontent.com",
+    ));
     policy
 }
 
