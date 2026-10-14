@@ -46,15 +46,14 @@ fn main() {
         panic!("protoc is required to build sandbox-proto; install it or set PROTOC");
     }
 
-    // Bazel's protoc has no built-in well-known types. SANDBOX_PROTO_WKT lists the
+    // Bazel's protoc has no built-in well-known types. SANDBOX_PROTO_WKT lists
     // well-known .proto files; the root above google/protobuf is the include root.
+    // The list is colon-separated (std::env::split_paths), not whitespace-separated,
+    // because the workspace path can contain spaces.
     let mut includes = vec![proto_root.clone()];
     if let Some(value) = std::env::var_os("SANDBOX_PROTO_WKT") {
-        // The value is a list of paths. Find the empty.proto entry and take its root.
-        let value = value.to_string_lossy().into_owned();
-        for entry in value.split_whitespace() {
-            if entry.ends_with("google/protobuf/empty.proto") {
-                let file = PathBuf::from(entry);
+        for file in std::env::split_paths(&value) {
+            if file.ends_with("google/protobuf/empty.proto") {
                 if let Some(root) = file.parent().and_then(Path::parent).and_then(Path::parent) {
                     includes.push(root.to_path_buf());
                 }

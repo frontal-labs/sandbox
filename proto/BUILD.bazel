@@ -10,3 +10,25 @@ filegroup(
     srcs = ["buf.yaml"],
     visibility = ["//visibility:public"],
 )
+
+# The well-known types the protos import, copied into this package. protoc needs
+# them on an include path. The protobuf module keeps empty.proto private, so it
+# can't be referenced directly. Copying also keeps the include root a single
+# path, which avoids whitespace-splitting a list of paths.
+genrule(
+    name = "wkt",
+    srcs = ["@protobuf//:well_known_type_protos"],
+    outs = [
+        "wkt/google/protobuf/empty.proto",
+        "wkt/google/protobuf/timestamp.proto",
+    ],
+    cmd = """
+        for src in $(SRCS); do
+          case "$$src" in
+            */google/protobuf/empty.proto) cp "$$src" "$(location :wkt/google/protobuf/empty.proto)" ;;
+            */google/protobuf/timestamp.proto) cp "$$src" "$(location :wkt/google/protobuf/timestamp.proto)" ;;
+          esac
+        done
+    """,
+    visibility = ["//visibility:public"],
+)

@@ -9,13 +9,14 @@ cargo_build_script(
     build_script_env = {
         "PROTOC": "$(execpath @protobuf//:protoc)",
         "SANDBOX_PROTO_ROOT": "$(execpath //proto:buf_config)",
-        "SANDBOX_PROTO_WKT": "$(locations @protobuf//:well_known_type_protos)",
+        # One path, so no whitespace splitting: the workspace path can contain spaces.
+        "SANDBOX_PROTO_WKT": "$(location //proto:wkt/google/protobuf/empty.proto)",
     },
     data = [
         "@protobuf//:protoc",
         "//proto:buf_config",
         "//proto:protos",
-        "@protobuf//:well_known_type_protos",
+        "//proto:wkt",
     ],
     deps = [
         "@crates//:tonic-build",
