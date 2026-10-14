@@ -14,7 +14,6 @@ rust_library(
         "@crates//:serde",
         "@crates//:serde_json",
         "@crates//:object_store",
-        "@crates//:parquet",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",

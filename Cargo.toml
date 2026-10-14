@@ -86,7 +86,6 @@ tonic = { version = "0.12", features = ["tls", "transport"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4", features = ["limit", "timeout", "retry"] }
 utoipa = { version = "4", features = ["axum_extras", "chrono", "yaml"] }
-jsonwebtoken = "9"
 argon2 = "0.5"
 rustls = { version = "0.23", features = ["std"] }
 webpki = "0.22"
@@ -94,7 +93,6 @@ ipnet = "2"
 seccompiler = "0.5"
 rustix = { version = "0.38", features = ["process", "fs", "net", "mount"] }
 nix = { version = "0.28", features = ["fs"] }
-parquet = { version = "53", features = ["arrow", "async", "snap"] }
 brush-parser = "0.2"
 uutils_core = { version = "0.0.25", features = ["fs"] }
 glob = "0.3"
@@ -116,3 +114,15 @@ strip = true
 inherits = "release"
 strip = false
 debug = true
+
+# Patched Deno crates. Upstream releases pin vulnerable rustls, hickory and rand
+# versions, so the four crates are built from standalone repos in the
+# frontal-labs org. See docs/adr/0002-deno-dependency-patches.md.
+[patch.crates-io]
+deno_tls = { git = "https://github.com/frontal-labs/deno_tls", branch = "main" }
+deno_net = { git = "https://github.com/frontal-labs/deno_net", branch = "main" }
+deno_fetch = { git = "https://github.com/frontal-labs/deno_fetch", branch = "main" }
+deno_crypto = { git = "https://github.com/frontal-labs/deno_crypto", branch = "main" }
+deno_fs = { git = "https://github.com/frontal-labs/deno_fs", branch = "main" }
+deno_io = { git = "https://github.com/frontal-labs/deno_io", branch = "main" }
+deno_subprocess_windows = { git = "https://github.com/frontal-labs/deno_subprocess_windows", branch = "main" }

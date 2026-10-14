@@ -22,7 +22,6 @@ axum = { workspace = true }
 tower = { workspace = true }
 hyper = { workspace = true }
 utoipa = { workspace = true }
-jsonwebtoken = { workspace = true }
 argon2 = { workspace = true }
 blake3 = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
