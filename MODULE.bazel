@@ -30,5 +30,31 @@ crate.from_cargo(
     ],
 )
 
+# v8 finds its generated bindings through CARGO_MANIFEST_DIR, which is a Bazel
+# runfiles copy that does not carry gen/*.rs. Point it at the file in the crate
+# source instead. The path is relative to src/, where binding.rs calls include!.
+# The name matches the x86_64 target in .bazelrc.
+#
+# The prebuilt static V8 library comes from the same release as the crate
+# (v150.4.0, simdutf, release, x86_64-apple-darwin). See
+# third_party/rusty_v8/rusty_v8.bzl for why the build script's own download is
+# not enough under Bazel.
+rusty_v8_archive = use_repo_rule("//third_party/rusty_v8:rusty_v8.bzl", "rusty_v8_archive")
+
+rusty_v8_archive(
+    name = "rusty_v8_archive",
+    sha256 = "a750271fec6b211457ed0a5cf7d2eab1924b265621a82da86ab959d6ff0823e4",
+    url = "https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_simdutf_release_x86_64-apple-darwin.a.gz",
+)
+
+crate.annotation(
+    crate = "v8",
+    build_script_env = {
+        "RUSTY_V8_SRC_BINDING_PATH": "../gen/src_binding_simdutf_release_x86_64-apple-darwin.rs",
+    },
+    compile_data = ["@@//third_party/rusty_v8:librusty_v8"],
+    rustc_flags = ["-Lnative=external/+rusty_v8_archive+rusty_v8_archive"],
+)
+
 use_repo(rust, "rust_toolchains")
 use_repo(crate, "crates")

@@ -7,6 +7,7 @@ rust_library(
     deps = [
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-cas:sandbox_cas",
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-wasm:sandbox_wasm",
         "//crates/sandbox-shell:sandbox_shell",

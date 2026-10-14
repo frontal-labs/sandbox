@@ -17,6 +17,7 @@ cargo_build_script(
         "//proto:buf_config",
         "//proto:protos",
         "//proto:wkt",
+        "//proto:wkt/google/protobuf/empty.proto",
     ],
     deps = [
         "@crates//:tonic-build",

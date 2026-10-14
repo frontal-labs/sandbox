@@ -1,0 +1,10 @@
+# Exposes the prebuilt V8 static library to the `v8` crate. The crate's own repo
+# cannot see the `rusty_v8_archive` repo directly, so the crate annotation in
+# MODULE.bazel refers to this alias with an absolute label.
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "librusty_v8",
+    actual = "@rusty_v8_archive//:librusty_v8.a",
+)
