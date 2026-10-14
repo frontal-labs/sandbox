@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/sandbox-types",
+    "crates/sandbox-proto",
     "crates/sandbox-vfs",
     "crates/sandbox-cas",
     "crates/sandbox-shell",
@@ -72,15 +73,19 @@ predicates = "3"
 tempfile = "3"
 swc_core = { version = "82", features = ["ecma_ast", "ecma_parser"] }
 hyperlocal = "0.8"
-prost = "0.12"
-prost-types = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+prost-build = "0.13"
+tonic-build = "0.12"
+tokio-stream = "0.1"
+hyper-util = "0.1"
 vsock = "0.4"
 redb = "2"
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 tonic = { version = "0.12", features = ["tls", "transport"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4", features = ["limit", "timeout", "retry"] }
-utoipa = { version = "4", features = ["axum_extras", "chrono"] }
+utoipa = { version = "4", features = ["axum_extras", "chrono", "yaml"] }
 jsonwebtoken = "9"
 argon2 = "0.5"
 rustls = { version = "0.23", features = ["std"] }
