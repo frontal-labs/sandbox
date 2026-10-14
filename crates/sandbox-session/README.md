@@ -1,4 +1,4 @@
-# sandbox-session
+# Sandbox Session
 
 `Session` trait and the isolate (Tier 1) backend for the sandbox system.
 
