@@ -23,7 +23,37 @@ enum Token {
     Append,
 }
 
+/// Deepest allowed `$(...)` / backtick nesting. Each level recurses into
+/// `parse`, so an unbounded depth overflows the stack, which aborts the process
+/// and cannot be caught. 32 levels is far beyond real scripts.
+const MAX_NESTING: usize = 32;
+
+thread_local! {
+    static NESTING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Decrements the nesting depth when a `parse` call returns, including on error.
+struct NestingGuard;
+
+impl Drop for NestingGuard {
+    fn drop(&mut self) {
+        NESTING.with(|n| n.set(n.get() - 1));
+    }
+}
+
 pub fn parse(input: &str) -> Result<Script, SandboxError> {
+    let depth = NESTING.with(|n| {
+        let depth = n.get() + 1;
+        n.set(depth);
+        depth
+    });
+    let _guard = NestingGuard;
+    if depth > MAX_NESTING {
+        return Err(SandboxError::new(
+            ErrorCode::ResourceExhausted,
+            format!("command substitution nested deeper than {MAX_NESTING} levels"),
+        ));
+    }
     let tokens = tokenize(input)?;
     let mut parser = Parser { tokens, pos: 0 };
     let script = parser.list(&[])?;
