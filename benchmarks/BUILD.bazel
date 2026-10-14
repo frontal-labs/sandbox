@@ -105,16 +105,6 @@ rust_binary(
     testonly = True,
 )
 
-rust_binary(
-    name = "promotion_bench",
-    edition = "2021",
-    srcs = ["benches/promotion_bench.rs"],
-    deps = [
-        ":bench_common",
-        "@crates//:criterion",
-    ],
-    testonly = True,
-)
 
 # Alias to run all benchmarks
 alias(

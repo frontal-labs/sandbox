@@ -1,92 +1,95 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use sandbox_types::{SessionConfig, SessionId, Tier, TierPreference};
+//! Session micro-benchmarks for the isolate tier.
+//!
+//! PLAN.md section 6 targets: isolate session from a warm pool < 5 ms p50.
+//! This measures cold creation, since there is no pool yet.
+
+use criterion::{criterion_group, criterion_main, Criterion};
+use sandbox_session::{IsolateBackend, Session};
+use sandbox_types::{ExecRequest, SessionConfig};
+use sandbox_vfs::OpenFlags;
+use std::path::Path;
 use tokio::runtime::Runtime;
 
-/// Session benchmarks are not yet implemented - the session crate is in early development.
-/// These benchmarks are placeholders and will be enabled once the session APIs are available.
-/// To enable them, replace the `std::hint::black_box(())` calls with actual API calls.
-macro_rules! bench_not_yet_implemented {
-    ($group:expr, $name:expr, $body:expr) => {
-        // Skip this benchmark - not yet implemented
-        // $group.bench_function($name, |b| { $body });
-        // For now, we just document the intended benchmark
-        eprintln!("BENCHMARK NOT YET IMPLEMENTED: {}", $name);
+fn session_create_benchmarks(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("session_create");
+    group.bench_function("isolate_cold", |b| {
+        b.to_async(&rt)
+            .iter(|| async { IsolateBackend::new(SessionConfig::default()).await.unwrap() });
+    });
+    group.finish();
+}
+
+fn session_exec_benchmarks(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let session = rt
+        .block_on(IsolateBackend::new(SessionConfig::default()))
+        .unwrap();
+    let mut group = c.benchmark_group("session_exec");
+
+    group.bench_function("echo_argv", |b| {
+        b.to_async(&rt).iter(|| async {
+            let req = ExecRequest {
+                argv: vec!["echo".to_string(), "hi".to_string()],
+                ..ExecRequest::default()
+            };
+            session.exec(req).await.unwrap()
+        });
+    });
+
+    group.bench_function("run_script_pipeline", |b| {
+        b.to_async(&rt).iter(|| async {
+            session
+                .run_script("echo hi | cat > /bench && cat /bench")
+                .await
+                .unwrap()
+        });
+    });
+
+    group.finish();
+}
+
+fn session_fs_benchmarks(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let session = rt
+        .block_on(IsolateBackend::new(SessionConfig::default()))
+        .unwrap();
+    let write_flags = OpenFlags {
+        read: false,
+        write: true,
+        create: true,
+        truncate: true,
+        ..OpenFlags::default()
     };
-}
+    rt.block_on(async {
+        let h = session
+            .fs()
+            .open(Path::new("/data"), write_flags)
+            .await
+            .unwrap();
+        session.fs().write(&h, 0, &[7u8; 4096]).await.unwrap();
+    });
 
-fn session_create_benchmarks(_c: &mut Criterion) {
-    // let rt = Runtime::new().unwrap();
-    // let mut group = c.benchmark_group("session_create");
-    // 
-    // bench_not_yet_implemented!(group, "isolate_session", {
-    //     let config = SessionConfig::default().with_tier(TierPreference::Isolate);
-    //     b.to_async(&rt).iter(|| async {
-    //         sandbox_session::IsolateBackend::new(config).await
-    //     });
-    // });
-    // bench_not_yet_implemented!(group, "auto_session", { ... });
-    // bench_not_yet_implemented!(group, "with_snapshot", { ... });
-    // bench_not_yet_implemented!(group, "with_limits", { ... });
-    // group.finish();
-}
-
-fn session_exec_benchmarks(_c: &mut Criterion) {
-    // let rt = Runtime::new().unwrap();
-    // let mut group = c.benchmark_group("session_exec");
-    // 
-    // bench_not_yet_implemented!(group, "exec_echo", { ... });
-    // bench_not_yet_implemented!(group, "exec_pipeline", { ... });
-    // bench_not_yet_implemented!(group, "exec_file_io", { ... });
-    // bench_not_yet_implemented!(group, "exec_wasm_tool", { ... });
-    // bench_not_yet_implemented!(group, "exec_js", { ... });
-    // group.finish();
-}
-
-fn session_snapshot_benchmarks(_c: &mut Criterion) {
-    // let rt = Runtime::new().unwrap();
-    // let mut group = c.benchmark_group("session_snapshot");
-    // 
-    // bench_not_yet_implemented!(group, "snapshot", { ... });
-    // bench_not_yet_implemented!(group, "snapshot_with_changes", { ... });
-    // bench_not_yet_implemented!(group, "snapshot_with_runtime", { ... });
-    // group.finish();
-}
-
-fn session_fork_benchmarks(_c: &mut Criterion) {
-    // let rt = Runtime::new().unwrap();
-    // let mut group = c.benchmark_group("session_fork");
-    // 
-    // bench_not_yet_implemented!(group, "fork_1", { ... });
-    // bench_not_yet_implemented!(group, "fork_10", { ... });
-    // bench_not_yet_implemented!(group, "fork_100", { ... });
-    // group.finish();
-}
-
-fn session_restore_benchmarks(_c: &mut Criterion) {
-    // let rt = Runtime::new().unwrap();
-    // let mut group = c.benchmark_group("session_restore");
-    // 
-    // bench_not_yet_implemented!(group, "restore", { ... });
-    // bench_not_yet_implemented!(group, "restore_with_runtime", { ... });
-    // group.finish();
-}
-
-fn session_sleep_benchmarks(_c: &mut Criterion) {
-    // let rt = Runtime::new().unwrap();
-    // let mut group = c.benchmark_group("session_sleep");
-    // 
-    // bench_not_yet_implemented!(group, "sleep", { ... });
-    // bench_not_yet_implemented!(group, "wake", { ... });
-    // group.finish();
+    let mut group = c.benchmark_group("session_fs");
+    group.bench_function("read_4kb", |b| {
+        b.to_async(&rt).iter(|| async {
+            let h = session
+                .fs()
+                .open(Path::new("/data"), OpenFlags::default())
+                .await
+                .unwrap();
+            let data = session.fs().read(&h, 0, 4096).await.unwrap();
+            session.fs().close(&h);
+            data
+        });
+    });
+    group.finish();
 }
 
 criterion_group!(
     benches,
     session_create_benchmarks,
     session_exec_benchmarks,
-    session_snapshot_benchmarks,
-    session_fork_benchmarks,
-    session_restore_benchmarks,
-    session_sleep_benchmarks
+    session_fs_benchmarks
 );
 criterion_main!(benches);
