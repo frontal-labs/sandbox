@@ -18,6 +18,9 @@ jobs:
       - uses: actions/checkout@v4
       # rust-toolchain.toml pins the toolchain; rustup installs it on first use.
       - uses: Swatinem/rust-cache@v2
+      # sandbox-proto's build script runs protoc (see docs/DEVELOPMENT.md).
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler && protoc --version
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
