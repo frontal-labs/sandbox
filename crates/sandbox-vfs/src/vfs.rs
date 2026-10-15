@@ -42,8 +42,9 @@ pub struct Vfs {
     overlay: RwLock<Overlay>,
     handles: RwLock<HashMap<u64, OpenFile>>,
     next_handle: AtomicU64,
-    /// Change events for watchers. See ADR 0005.
-    events: tokio::sync::broadcast::Sender<WatchEvent>,
+    /// Change events for watchers, created by the first `watch` call. A VFS that
+    /// nobody watches allocates nothing for events. See ADR 0005.
+    events: std::sync::OnceLock<tokio::sync::broadcast::Sender<WatchEvent>>,
     quotas: Quotas,
 }
 
@@ -95,14 +96,20 @@ impl Vfs {
             overlay: RwLock::new(Overlay::default()),
             handles: RwLock::new(HashMap::new()),
             next_handle: AtomicU64::new(1),
-            events: tokio::sync::broadcast::channel(EVENT_CAPACITY).0,
+            events: std::sync::OnceLock::new(),
             quotas: Quotas::default(),
         }
     }
 
-    fn emit(&self, event: WatchEvent) {
-        // A send fails only when nobody is watching, which is not an error.
-        let _ = self.events.send(event);
+    /// Sends an event to watchers. The event is built only when someone is
+    /// watching, so an unwatched VFS pays one load per change.
+    fn emit(&self, event: impl FnOnce() -> WatchEvent) {
+        if let Some(tx) = self.events.get() {
+            if tx.receiver_count() > 0 {
+                // A send fails only when every watcher has gone away in the meantime.
+                let _ = tx.send(event());
+            }
+        }
     }
 
     /// Handles that are open and not yet closed. Useful for leak checks.
@@ -559,7 +566,7 @@ impl SessionFs for Vfs {
                     let old_len = self.file_bytes(&path).await?.map_or(0, |d| d.len() as u64);
                     self.check_write_quota(old_len, 0).await?;
                     self.put_file(&path, Vec::new());
-                    self.emit(WatchEvent::Modified(path.clone()));
+                    self.emit(|| WatchEvent::Modified(path.clone()));
                 }
             }
             None => {
@@ -569,7 +576,7 @@ impl SessionFs for Vfs {
                 self.require_parent_dir(&path).await?;
                 self.check_new_inode().await?;
                 self.put_file(&path, Vec::new());
-                self.emit(WatchEvent::Created(path.clone()));
+                self.emit(|| WatchEvent::Created(path.clone()));
             }
         }
 
@@ -631,7 +638,7 @@ impl SessionFs for Vfs {
         }
         contents[start..end].copy_from_slice(data);
         self.put_file(&open.path, contents);
-        self.emit(WatchEvent::Modified(open.path.clone()));
+        self.emit(|| WatchEvent::Modified(open.path.clone()));
         Ok(data.len())
     }
 
@@ -709,7 +716,7 @@ impl SessionFs for Vfs {
             .write()
             .nodes
             .insert(path.clone(), Node::Directory);
-        self.emit(WatchEvent::Created(path));
+        self.emit(|| WatchEvent::Created(path));
         Ok(())
     }
 
@@ -740,7 +747,7 @@ impl SessionFs for Vfs {
         for key in doomed {
             overlay.nodes.remove(&key);
             overlay.whiteouts.insert(key.clone());
-            self.emit(WatchEvent::Removed(key));
+            self.emit(|| WatchEvent::Removed(key));
         }
         Ok(())
     }
@@ -797,7 +804,7 @@ impl SessionFs for Vfs {
         }
         for (old, new, node) in moved {
             overlay.nodes.insert(new.clone(), node);
-            self.emit(WatchEvent::Renamed { from: old, to: new });
+            self.emit(|| WatchEvent::Renamed { from: old, to: new });
         }
         Ok(())
     }
@@ -818,7 +825,7 @@ impl SessionFs for Vfs {
             .write()
             .nodes
             .insert(link.clone(), Node::Symlink(target));
-        self.emit(WatchEvent::Created(link));
+        self.emit(|| WatchEvent::Created(link));
         Ok(())
     }
 
@@ -848,7 +855,7 @@ impl SessionFs for Vfs {
             .map_err(|_| VfsError::InvalidPath("size does not fit in memory".to_string()))?;
         contents.resize(size, 0);
         self.put_file(&path, contents);
-        self.emit(WatchEvent::Modified(path));
+        self.emit(|| WatchEvent::Modified(path));
         Ok(())
     }
 
@@ -858,7 +865,10 @@ impl SessionFs for Vfs {
 
     async fn watch(&self, path: &Path) -> VfsResult<Watch> {
         let prefix = self.normalize_path(path)?;
-        Ok(Watch::new(prefix, self.events.subscribe()))
+        let tx = self
+            .events
+            .get_or_init(|| tokio::sync::broadcast::channel(EVENT_CAPACITY).0);
+        Ok(Watch::new(prefix, tx.subscribe()))
     }
 
     /// Persists the overlay and returns the new root.
