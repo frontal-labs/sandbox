@@ -113,6 +113,8 @@ struct Entry {
     sleep_root: Option<ContentHash>,
     /// Commands the session ran, in order (ADR 0009).
     trace: Vec<RunRecord>,
+    /// Bytes the trace holds in its scripts and outputs.
+    trace_bytes: usize,
     /// False once a command could not be recorded faithfully, or the trace is full.
     trace_complete: bool,
     /// Held for every command, file operation, and snapshot on this session.
@@ -283,6 +285,7 @@ fn entry(
         session: Some(session),
         sleep_root: None,
         trace: Vec::new(),
+        trace_bytes: 0,
         trace_complete: true,
         gate: Arc::new(tokio::sync::Mutex::new(())),
     }
@@ -442,6 +445,7 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
                 state: sleeping.state,
                 session: None,
                 sleep_root: Some(sleeping.sleep_root),
+                trace_bytes: trace_size(&trace.runs),
                 trace: trace.runs,
                 trace_complete: sleeping.trace_complete,
                 gate: Arc::new(tokio::sync::Mutex::new(())),
@@ -504,8 +508,7 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
 /// is in memory and no table lock is held.
 async fn persist(state: &AppState) -> Result<(), ApiError> {
     if let Some(store) = &state.store {
-        let saved = capture(state).await;
-        store.write(&saved).await?;
+        store.save(|| capture(state)).await?;
     }
     Ok(())
 }
@@ -666,6 +669,23 @@ pub async fn exec_command(
 /// Most runs one session's trace holds. Runs past this are not recorded, and the
 /// trace reports itself incomplete, so a long session never fails over its trace.
 pub const MAX_TRACE_RUNS: usize = 4096;
+/// Most bytes of scripts and output one session's trace holds. Output is the
+/// bulk of a trace, and a session's trace is kept in memory and saved with the
+/// state, so the budget bounds both.
+pub const MAX_TRACE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Bytes a run takes in a trace: its script and its output.
+fn run_size(run: &RunRecord) -> usize {
+    let outcome = match &run.outcome {
+        sandbox_trace::Outcome::Completed { stdout, stderr, .. } => stdout.len() + stderr.len(),
+        sandbox_trace::Outcome::Failed { message, .. } => message.len(),
+    };
+    run.script.len() + outcome
+}
+
+fn trace_size(runs: &[RunRecord]) -> usize {
+    runs.iter().map(run_size).sum()
+}
 
 /// Appends one command to the session's trace (ADR 0009).
 async fn record_exec(
@@ -701,11 +721,18 @@ async fn record_exec(
             .map_err(|e| SandboxError::new(e.code, e.message.clone())),
     );
     let seq = entry.trace.len() as u64 + 1;
-    entry.trace.push(RunRecord {
+    let run = RunRecord {
         seq,
         script,
         outcome,
-    });
+    };
+    let size = run_size(&run);
+    if entry.trace_bytes + size > MAX_TRACE_BYTES {
+        entry.trace_complete = false;
+        return;
+    }
+    entry.trace_bytes += size;
+    entry.trace.push(run);
 }
 
 /// The script that runs `request` in a shell: its environment, its directory,

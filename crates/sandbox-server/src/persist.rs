@@ -113,9 +113,22 @@ impl Store {
         ))
     }
 
-    /// Writes the state atomically: a temporary file, synced, then renamed.
-    pub async fn write(&self, saved: &Saved) -> Result<(), SandboxError> {
+    /// Captures the state with `capture` and writes it, under one lock. Two
+    /// saves therefore cannot write their captures out of order, so the file
+    /// always holds the newest state.
+    pub async fn save<F, Fut>(&self, capture: F) -> Result<(), SandboxError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Saved>,
+    {
         let _guard = self.write.lock().await;
+        let saved = capture().await;
+        self.write_locked(&saved).await
+    }
+
+    /// Writes the state atomically: a temporary file, synced, then renamed. The
+    /// caller holds the write lock.
+    async fn write_locked(&self, saved: &Saved) -> Result<(), SandboxError> {
         let bytes = serde_json::to_vec_pretty(saved)
             .map_err(|e| SandboxError::internal(format!("cannot encode state: {e}")))?;
         let tmp = self.path.with_extension("json.tmp");

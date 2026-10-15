@@ -784,3 +784,45 @@ async fn a_trace_is_readable_only_by_the_session_owner() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn a_trace_stops_recording_at_its_byte_budget_and_says_so() {
+    use sandbox_server::api::MAX_TRACE_BYTES;
+
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    // A 1 MiB file, read back nine times: nine outputs of 1 MiB exceed the budget.
+    let big = vec![b'x'; 1024 * 1024];
+    let request = Request::builder()
+        .method("PUT")
+        .uri(format!("/v1/sessions/{id}/fs/big.txt"))
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .body(Body::from(big))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    for _ in 0..9 {
+        let (status, _) = exec_argv(&app, &key, &id, &["cat", "/big.txt"]).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/v1/sessions/{id}/trace"))
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.headers()["x-trace-complete"], "false");
+    let text = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let recorded = text.lines().count() - 1;
+    assert!(recorded < 9, "the budget should stop recording: {recorded} runs");
+    assert!(recorded * 1024 * 1024 <= MAX_TRACE_BYTES);
+}
