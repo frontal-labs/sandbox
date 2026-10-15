@@ -74,6 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: dist }
       - uses: actions/setup-node@v4
@@ -87,6 +88,28 @@ jobs:
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the sandbox-cli wrapper
+        # The wrapper lists each platform package in optionalDependencies at the
+        # same version, so it is published after them.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          WRAP="$RUNNER_TEMP/sandbox-cli"
+          rm -rf "$WRAP" && cp -r npm/sandbox-cli "$WRAP"
+          node -e '
+            const fs = require("fs")
+            const dir = process.argv[1], version = process.argv[2]
+            const pkg = JSON.parse(fs.readFileSync(dir + "/package.json", "utf8"))
+            pkg.version = version
+            pkg.optionalDependencies = Object.fromEntries(
+              fs.readdirSync(process.argv[3])
+                .map((d) => JSON.parse(fs.readFileSync(process.argv[3] + "/" + d + "/package.json", "utf8")).name)
+                .map((name) => [name, version])
+            )
+            fs.writeFileSync(dir + "/package.json", JSON.stringify(pkg, null, 2))
+          ' "$WRAP" "$VERSION" "$GITHUB_WORKSPACE/dist"
+          (cd "$WRAP" && npm publish --access public)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release:
     name: Attach to release
@@ -94,9 +117,13 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: dist }
-      - name: Publish to the GitHub release
+      - name: Create the GitHub release and attach the binaries
+        # This is the only workflow that creates a release for a v* tag, so the
+        # binaries and the notes land on one release.
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/**/*
+          generate_release_notes: true
+          files: dist/**/sandbox*
