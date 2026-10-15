@@ -16,6 +16,12 @@ dry_run=false
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo_root"
 
+# A real publish must come from a clean tree, so the artifacts match a commit.
+if ! $dry_run && [[ -n "$(git status --porcelain)" ]]; then
+  echo "refusing to publish from a tree with uncommitted changes" >&2
+  exit 1
+fi
+
 version="$(node -p "require('./sdks/typescript/package.json').version")"
 image="ghcr.io/frontal-labs/sandbox-sdk-${sdk}"
 out="$repo_root/release/${sdk}"
@@ -37,19 +43,11 @@ case "$sdk" in
   rs)
     # The crate depends on sandbox-types, which is not on crates.io, so a
     # `cargo package` tarball cannot be built. This is a source snapshot of the
-    # workspace at HEAD. Build it with `cargo build -p sandbox-sdk`.
-    # Tracked and untracked files that git does not ignore, so the snapshot is
-    # the working tree. In CI that is the checked-out commit.
+    # workspace at HEAD: committed files only, so untracked local files such as
+    # .env never reach the registry. Build it with `cargo build -p sandbox-sdk`.
     prefix="sandbox-sdk-rs-${version}"
-    stage="$out/.stage"
-    rm -rf "$stage"
-    mkdir -p "$stage/$prefix"
-    git ls-files -co --exclude-standard -z \
-      | tar --null -T - -cf - \
-      | tar -xf - -C "$stage/$prefix"
-    tar -czf "$out/${prefix}.tar.gz" -C "$stage" "$prefix"
-    rm -rf "$stage"
-    artifacts=("$out/sandbox-sdk-rs-${version}.tar.gz:application/gzip")
+    git archive --format=tar --prefix="$prefix/" HEAD | gzip -n > "$out/${prefix}.tar.gz"
+    artifacts=("$out/${prefix}.tar.gz:application/gzip")
     ;;
   *)
     echo "unknown SDK: $sdk" >&2
