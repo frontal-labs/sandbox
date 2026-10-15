@@ -17,6 +17,15 @@ fn collect_protos(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// On Windows, `canonicalize` returns a `\\?\` verbatim path. protoc cannot map
+/// files under such a path to their import names, so the prefix is removed.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(plain) => PathBuf::from(plain),
+        None => path,
+    }
+}
+
 fn main() {
     // Bazel sets SANDBOX_PROTO_ROOT to the proto/buf.yaml path, because its sandbox
     // does not place proto/ at ../../proto from the crate. Cargo uses the relative path.
@@ -33,9 +42,11 @@ fn main() {
         }
         None => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../proto"),
     };
-    let proto_root = candidate
-        .canonicalize()
-        .unwrap_or_else(|e| panic!("proto root {} not found: {e}", candidate.display()));
+    let proto_root = without_verbatim_prefix(
+        candidate
+            .canonicalize()
+            .unwrap_or_else(|e| panic!("proto root {} not found: {e}", candidate.display())),
+    );
 
     if std::env::var_os("PROTOC").is_none()
         && std::process::Command::new("protoc")
