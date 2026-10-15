@@ -139,10 +139,11 @@ where
     let total_duration = start_time.elapsed();
 
     // Calculate latency percentiles
-    let mut histogram = LatencyHistogram::new();
-    for iter in &all_iterations {
-        histogram.record(iter.duration.as_nanos() as u64);
-    }
+    let samples: Vec<u64> = all_iterations
+        .iter()
+        .map(|iter| iter.duration.as_nanos() as u64)
+        .collect();
+    let histogram = LatencyHistogram::from_samples(&samples);
 
     let mut latencies = HashMap::new();
     latencies.insert("overall".to_string(), histogram);

@@ -1,4 +1,3 @@
-use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -57,60 +56,46 @@ pub struct LatencyHistogram {
 }
 
 impl LatencyHistogram {
-    pub fn new() -> Self {
+    /// Summarizes latency samples in nanoseconds. Percentiles are exact
+    /// nearest-rank values over every sample, so the reported p99 is the value
+    /// that 99% of samples are at or below.
+    pub fn from_samples(samples: &[u64]) -> Self {
+        if samples.is_empty() {
+            return Self {
+                min: 0,
+                max: 0,
+                mean: 0.0,
+                percentiles: HashMap::new(),
+                std_dev: 0.0,
+                count: 0,
+            };
+        }
+        let mut sorted = samples.to_vec();
+        sorted.sort_unstable();
+        let count = sorted.len() as u64;
+        let mean = sorted.iter().map(|&v| v as f64).sum::<f64>() / count as f64;
+        let variance = sorted
+            .iter()
+            .map(|&v| {
+                let d = v as f64 - mean;
+                d * d
+            })
+            .sum::<f64>()
+            / count as f64;
+        // The JSON key is the integer percentile, so p99.9 is not reported.
+        let percentiles = [50u8, 90, 95, 99]
+            .into_iter()
+            .map(|p| {
+                let rank = (f64::from(p) / 100.0 * count as f64).ceil() as usize;
+                (p, sorted[rank.clamp(1, sorted.len()) - 1])
+            })
+            .collect();
         Self {
-            min: u64::MAX,
-            max: 0,
-            mean: 0.0,
-            percentiles: HashMap::new(),
-            std_dev: 0.0,
-            count: 0,
-        }
-    }
-
-    pub fn record(&mut self, value: u64) {
-        // Simple recording - for full histogram use hdrhistogram
-        if value < self.min {
-            self.min = value;
-        }
-        if value > self.max {
-            self.max = value;
-        }
-        // Update mean incrementally
-        self.count += 1;
-        let delta = value as f64 - self.mean;
-        self.mean += delta / self.count as f64;
-    }
-
-    #[allow(dead_code)] // kept for histogram-based reports; not used by the CLI yet
-    pub fn from_histogram(hist: &Histogram<u64>) -> Self {
-        let mut percentiles = HashMap::new();
-        for &p in &[50, 90, 95, 99] {
-            percentiles.insert(p, hist.value_at_percentile(p as f64));
-        }
-        // 99.9 percentile
-        percentiles.insert(99, hist.value_at_percentile(99.9));
-
-        let count = hist.len();
-        let mean = hist.mean();
-
-        let mut sum_sq = 0.0;
-        for v in hist.iter_recorded() {
-            let diff = v.value_iterated_to() as f64 - mean;
-            sum_sq += diff * diff * v.count_at_value() as f64;
-        }
-        let std_dev = if count > 0 {
-            (sum_sq / count as f64).sqrt()
-        } else {
-            0.0
-        };
-
-        Self {
-            min: hist.min(),
-            max: hist.max(),
+            min: sorted[0],
+            max: sorted[sorted.len() - 1],
             mean,
             percentiles,
-            std_dev,
+            std_dev: variance.sqrt(),
             count,
         }
     }
@@ -118,7 +103,7 @@ impl LatencyHistogram {
 
 impl Default for LatencyHistogram {
     fn default() -> Self {
-        Self::new()
+        Self::from_samples(&[])
     }
 }
 
@@ -227,5 +212,41 @@ impl ReportGenerator {
 impl fmt::Display for ScenarioResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ScenarioResult({})", self.scenario)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LatencyHistogram;
+
+    #[test]
+    fn percentiles_are_exact_nearest_rank_values() {
+        // 1..=100 in shuffled order: nearest rank p99 is the 99th smallest value.
+        let mut samples: Vec<u64> = (1..=100).rev().collect();
+        samples.swap(0, 50);
+        let h = LatencyHistogram::from_samples(&samples);
+        assert_eq!(h.count, 100);
+        assert_eq!(h.min, 1);
+        assert_eq!(h.max, 100);
+        assert_eq!(h.percentiles[&50], 50);
+        assert_eq!(h.percentiles[&90], 90);
+        assert_eq!(h.percentiles[&95], 95);
+        assert_eq!(h.percentiles[&99], 99);
+        assert!((h.mean - 50.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn empty_samples_report_zeroes_and_no_percentiles() {
+        let h = LatencyHistogram::from_samples(&[]);
+        assert_eq!(h.count, 0);
+        assert_eq!((h.min, h.max), (0, 0));
+        assert!(h.percentiles.is_empty());
+    }
+
+    #[test]
+    fn a_single_sample_is_every_percentile() {
+        let h = LatencyHistogram::from_samples(&[42]);
+        assert_eq!(h.percentiles[&99], 42);
+        assert_eq!(h.std_dev, 0.0);
     }
 }

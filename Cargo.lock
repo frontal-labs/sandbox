@@ -4100,7 +4100,6 @@ dependencies = [
  "clap",
  "csv",
  "futures",
- "hdrhistogram",
  "indicatif",
  "rand 0.8.6",
  "sandbox-sdk",
