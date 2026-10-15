@@ -189,7 +189,10 @@ fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
                 b'0'..=b'9' => Ok(c - b'0'),
                 b'a'..=b'f' => Ok(c - b'a' + 10),
                 b'A'..=b'F' => Ok(c - b'A' + 10),
-                _ => Err(format!("'{}' is not a hex digit", c as char)),
+                _ => Err(format!(
+                    "'{}' is not a hex digit",
+                    (c as char).escape_debug()
+                )),
             };
             Ok(digit(pair[0])? << 4 | digit(pair[1])?)
         })

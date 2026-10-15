@@ -211,7 +211,8 @@ fn replay_trace(path: &Path) -> Result<i32, SandboxError> {
         report.divergences.len()
     );
     for d in &report.divergences {
-        println!("run {} diverged: {}", d.seq, d.script);
+        // Scripts come from the trace file, so they are escaped before printing.
+        println!("run {} diverged: {}", d.seq, escaped(&d.script));
         println!("  expected: {}", describe(&d.expected));
         println!("  actual:   {}", describe(&d.actual));
     }
@@ -255,8 +256,14 @@ fn describe(outcome: &Outcome) -> String {
                 err.chars().take(PREVIEW).collect::<String>()
             )
         }
-        Outcome::Failed { code, message } => format!("error {code}: {message}"),
+        Outcome::Failed { code, message } => format!("error {code}: {}", escaped(message)),
     }
+}
+
+/// Escapes control characters, so text from a trace or from a script cannot
+/// move the cursor or set the title of the terminal it is printed to.
+fn escaped(text: &str) -> String {
+    text.escape_debug().collect()
 }
 
 /// Runs the server until the process is stopped. The key is printed once, to

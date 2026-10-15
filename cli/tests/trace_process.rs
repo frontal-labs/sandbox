@@ -109,3 +109,29 @@ fn a_file_that_is_not_a_trace_is_refused() {
     assert_eq!(replay.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&replay.stderr).contains("not a sandbox-trace header"));
 }
+
+#[test]
+fn control_characters_from_a_trace_are_escaped_in_the_report() {
+    // A trace is a file that can come from anywhere. Its script carries an
+    // escape sequence and its recorded output is wrong, so the report prints
+    // the script. The raw ESC byte must not reach the terminal.
+    let dir = scratch("escapes");
+    let trace = dir.join("hostile.jsonl");
+    std::fs::write(
+        &trace,
+        concat!(
+            r#"{"format":"sandbox-trace","version":1}"#,
+            "\n",
+            r#"{"seq":1,"script":"echo \u001b]0;pwned\u0007","exit_code":0,"stdout":"6e6f","stderr":""}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let replay = sandbox().arg("replay").arg(&trace).output().unwrap();
+    assert_eq!(replay.status.code(), Some(1));
+    let report = replay.stdout;
+    assert!(!report.contains(&0x1b), "raw escape byte in the report");
+    assert!(!report.contains(&0x07), "raw bell byte in the report");
+    assert!(String::from_utf8_lossy(&report).contains(r"\u{1b}"));
+}
