@@ -23,6 +23,8 @@ sandbox-session = { path = "../crates/sandbox-session" }
 sandbox-worker = { path = "../crates/sandbox-worker" }
 sandbox-server = { path = "../crates/sandbox-server" }
 sandbox-scheduler = { path = "../crates/sandbox-scheduler" }
+sandbox-trace = { path = "../crates/sandbox-trace" }
+sandbox-vfs = { path = "../crates/sandbox-vfs" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

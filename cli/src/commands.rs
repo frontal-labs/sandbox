@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
 use sandbox_session::{IsolateBackend, Session};
-use sandbox_types::{SandboxError, SessionConfig};
+use sandbox_trace::{outcome_of, replay, Outcome, RunRecord, Trace};
+use sandbox_types::{ErrorCode, ExecResult, SandboxError, SessionConfig};
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "sandbox", version, about = "Frontal Sandbox CLI")]
@@ -16,6 +17,9 @@ pub enum Commands {
     /// Run a command in a new sandbox. Arguments are joined with spaces and run
     /// as one shell script, so quote the whole script if it has spaces.
     Run {
+        /// Write a trace of the script to this file. See `sandbox replay`.
+        #[arg(long)]
+        trace: Option<PathBuf>,
         /// Command to execute
         #[arg(required = true, num_args = 1..)]
         command: Vec<String>,
@@ -23,7 +27,11 @@ pub enum Commands {
 
     /// Start an interactive shell in a new sandbox. Reads one script per line
     /// from stdin; `exit` or end of input stops it.
-    Shell,
+    Shell {
+        /// Write a trace of every line to this file when the shell exits.
+        #[arg(long)]
+        trace: Option<PathBuf>,
+    },
 
     /// Snapshot a session on the server named by SANDBOX_BASE_URL. Uses SANDBOX_API_KEY.
     Snapshot {
@@ -41,7 +49,8 @@ pub enum Commands {
         count: usize,
     },
 
-    /// Replay a trace (not implemented yet)
+    /// Replay a trace in a fresh sandbox and report every run whose output
+    /// differs from the recorded one. Exits 1 when any run diverges.
     Replay {
         /// Trace file path
         trace_file: PathBuf,
@@ -62,7 +71,7 @@ pub enum Commands {
         addr: String,
     },
 
-    /// Run benchmarks (not implemented yet)
+    /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
     Bench {
         /// Benchmark name
         #[arg(short, long)]
@@ -86,8 +95,15 @@ impl Cli {
     /// Runs the command and returns the process exit code.
     pub fn execute(&self) -> Result<i32, SandboxError> {
         match &self.command {
-            Commands::Run { command } => run_script_once(&command.join(" ")),
-            Commands::Shell => interactive_shell(),
+            Commands::Run { command, trace } => {
+                run_script_once(&command.join(" "), trace.as_deref())
+            }
+            Commands::Shell { trace } => interactive_shell(trace.as_deref()),
+            Commands::Replay { trace_file } => replay_trace(trace_file),
+            Commands::Bench { name } => {
+                let rt = runtime()?;
+                rt.block_on(crate::bench::run(name.as_deref()))
+            }
             Commands::Worker { socket } => {
                 let rt = runtime()?;
                 rt.block_on(sandbox_worker::serve(socket))?;
@@ -96,24 +112,7 @@ impl Cli {
             Commands::Serve { addr } => serve(addr),
             Commands::Snapshot { session_id } => snapshot(session_id),
             Commands::Fork { snapshot_id, count } => fork(snapshot_id, *count),
-            other => Err(SandboxError::unsupported(format!(
-                "`sandbox {}` is not implemented yet",
-                subcommand_name(other)
-            ))),
         }
-    }
-}
-
-fn subcommand_name(command: &Commands) -> &'static str {
-    match command {
-        Commands::Run { .. } => "run",
-        Commands::Shell => "shell",
-        Commands::Worker { .. } => "worker",
-        Commands::Snapshot { .. } => "snapshot",
-        Commands::Fork { .. } => "fork",
-        Commands::Replay { .. } => "replay",
-        Commands::Serve { .. } => "serve",
-        Commands::Bench { .. } => "bench",
     }
 }
 
@@ -130,20 +129,26 @@ fn print_output(stdout: &[u8], stderr: &[u8]) -> std::io::Result<()> {
     std::io::stderr().write_all(stderr)
 }
 
-fn run_script_once(script: &str) -> Result<i32, SandboxError> {
+fn run_script_once(script: &str, trace: Option<&Path>) -> Result<i32, SandboxError> {
     let rt = runtime()?;
     rt.block_on(async {
         let session = IsolateBackend::new(SessionConfig::default()).await?;
-        let out = session.run_script(script).await?;
+        let result = session.run_script(script).await;
+        if let Some(path) = trace {
+            let runs = vec![record(1, script, &result)];
+            write_trace(path, runs)?;
+        }
+        let out = result?;
         print_output(&out.stdout, &out.stderr)
             .map_err(|e| SandboxError::internal(format!("failed to write output: {e}")))?;
         Ok(out.exit_code)
     })
 }
 
-fn interactive_shell() -> Result<i32, SandboxError> {
+fn interactive_shell(trace: Option<&Path>) -> Result<i32, SandboxError> {
     let rt = runtime()?;
     let session = rt.block_on(IsolateBackend::new(SessionConfig::default()))?;
+    let mut runs = Vec::new();
 
     for line in std::io::stdin().lock().lines() {
         let line =
@@ -152,13 +157,106 @@ fn interactive_shell() -> Result<i32, SandboxError> {
             break;
         }
         // A bad line reports its error and the session continues.
-        match rt.block_on(session.run_script(&line)) {
+        let result = rt.block_on(session.run_script(&line));
+        if trace.is_some() {
+            runs.push(record(runs.len() as u64 + 1, &line, &result));
+        }
+        match result {
             Ok(out) => print_output(&out.stdout, &out.stderr)
                 .map_err(|e| SandboxError::internal(format!("failed to write output: {e}")))?,
             Err(e) => eprintln!("Error: {}", e.message),
         }
     }
+    if let Some(path) = trace {
+        write_trace(path, runs)?;
+    }
     Ok(0)
+}
+
+/// Replays a trace in one fresh sandbox, in the order it was recorded, and
+/// prints every run whose outcome differs from the recording.
+fn replay_trace(path: &Path) -> Result<i32, SandboxError> {
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        SandboxError::new(
+            ErrorCode::InvalidArgument,
+            format!("cannot read {}: {e}", path.display()),
+        )
+    })?;
+    let trace = Trace::parse(&text).map_err(|e| {
+        SandboxError::new(
+            ErrorCode::InvalidArgument,
+            format!("{}: {e}", path.display()),
+        )
+    })?;
+
+    let rt = runtime()?;
+    let report = rt.block_on(async {
+        let session = IsolateBackend::new(SessionConfig::default()).await?;
+        let report = replay(&trace, |script| {
+            let session = &session;
+            async move {
+                session
+                    .run_script(&script)
+                    .await
+                    .map(|out| (out.exit_code, out.stdout, out.stderr))
+            }
+        })
+        .await;
+        Ok::<_, SandboxError>(report)
+    })?;
+
+    println!(
+        "replayed {} runs: {} diverged",
+        report.runs,
+        report.divergences.len()
+    );
+    for d in &report.divergences {
+        println!("run {} diverged: {}", d.seq, d.script);
+        println!("  expected: {}", describe(&d.expected));
+        println!("  actual:   {}", describe(&d.actual));
+    }
+    Ok(if report.matches() { 0 } else { 1 })
+}
+
+/// One run as the trace records it.
+fn record(seq: u64, script: &str, result: &Result<ExecResult, SandboxError>) -> RunRecord {
+    let outcome = outcome_of(
+        result
+            .as_ref()
+            .map(|out| (out.exit_code, out.stdout.clone(), out.stderr.clone()))
+            .map_err(|e| SandboxError::new(e.code, e.message.clone())),
+    );
+    RunRecord {
+        seq,
+        script: script.to_string(),
+        outcome,
+    }
+}
+
+fn write_trace(path: &Path, runs: Vec<RunRecord>) -> Result<(), SandboxError> {
+    std::fs::write(path, Trace { runs }.to_jsonl())
+        .map_err(|e| SandboxError::internal(format!("cannot write trace {}: {e}", path.display())))
+}
+
+/// A short, readable form of an outcome for the replay report.
+fn describe(outcome: &Outcome) -> String {
+    const PREVIEW: usize = 120;
+    match outcome {
+        Outcome::Completed {
+            exit_code,
+            stdout,
+            stderr,
+        } => {
+            let out = String::from_utf8_lossy(stdout);
+            let err = String::from_utf8_lossy(stderr);
+            format!(
+                "exit {exit_code}, stdout {:?}, stderr {:?}",
+                out.chars().take(PREVIEW).collect::<String>(),
+                err.chars().take(PREVIEW).collect::<String>()
+            )
+        }
+        Outcome::Failed { code, message } => format!("error {code}: {message}"),
+    }
 }
 
 /// Runs the server until the process is stopped. The key is printed once, to
@@ -215,17 +313,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn replay_and_bench_are_reported_as_unsupported_not_faked() {
-        // Neither has a backing implementation yet. Both must say so.
-        let replay = Cli::try_parse_from(["sandbox", "replay", "trace.jsonl"]).unwrap();
+    fn replay_refuses_a_missing_trace_as_invalid_argument() {
+        let replay = Cli::try_parse_from(["sandbox", "replay", "no-such-trace.jsonl"]).unwrap();
         assert_eq!(
             replay.execute().unwrap_err().code,
-            sandbox_types::ErrorCode::Unsupported
-        );
-        let bench = Cli::try_parse_from(["sandbox", "bench"]).unwrap();
-        assert_eq!(
-            bench.execute().unwrap_err().code,
-            sandbox_types::ErrorCode::Unsupported
+            sandbox_types::ErrorCode::InvalidArgument
         );
     }
 

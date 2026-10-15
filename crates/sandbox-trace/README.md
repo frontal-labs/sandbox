@@ -1,42 +1,17 @@
-# Sandbox Trace
+# sandbox-trace
 
-Event log and replay for the sandbox system.
+Trace files and replay for the sandbox system. See [ADR 0007](../../docs/adr/0007-trace-format-and-replay.md).
 
-## Status
+**Status: implemented for the local isolate runtime.** `sandbox run --trace` and `sandbox shell --trace` record scripts and their outcomes. `sandbox replay` re-runs them and compares. The server does not record traces yet.
 
-Early / partial. `TraceLog` is an in-memory, async event queue. `ReplayEngine::replay` is a stub that returns `completed: true` with no divergences and does not re-execute anything. Not yet implemented: JSONL persistence, sequence numbers, `diff`, Parquet or ClickHouse sinks, OpenTelemetry, and Prometheus metrics. No tests exist.
+## Public API
 
-## Overview
+- `format` (`src/format.rs`): `Trace`, `RunRecord`, `Outcome` (`Completed { exit_code, stdout, stderr }` or `Failed { code, message }`), `TraceError`. `Trace::to_jsonl()` writes the file, and `Trace::parse()` reads it. Output bytes are hex-encoded, so they survive exactly.
+- `replay` (`src/replay.rs`): `replay(&Trace, run)` calls `run` once per recorded script, in order, and returns a `ReplayReport` (`runs`, `divergences`, `matches()`). Each `Divergence` holds the sequence number, the script, the expected outcome, and the actual outcome. `outcome_of` turns a run result into an `Outcome`. The caller supplies `run`, so this crate does not depend on the session crate.
+- `log` (`src/log.rs`): `TraceLog`, an in-memory queue of `sandbox_types::Event` values. Nothing writes to it yet.
 
-Per-session event log built on the `Event` enum from `sandbox-types`. Source: `crates/sandbox-trace/src/`.
+## Limits
 
-## Public API (from `src/lib.rs`)
-
-- `TraceLog` (`log.rs`): `new()`, `append(event).await`, `events().await -> Vec<Event>`. Implements `Default`.
-- `replay` module (`replay.rs`): `ReplayConfig` (`deterministic`, `virtual_clock`; default both `true`), `ReplayEngine` (`new`, `replay`), `ReplayResult` (`divergences`, `completed`). Stub.
-
-## Invariants and security assumptions
-
-- Events are appended in call order to a shared queue; this is not yet a monotonic sequence number scheme.
-- Trace events may contain command output (`StdoutChunk`, `StderrChunk`) and file data. Persisted traces must be treated as sensitive, and secret values must not be recorded.
-- Replay determinism is a goal, not a current guarantee.
-
-## Example
-
-```rust
-use sandbox_trace::TraceLog;
-use sandbox_types::{Event, SessionId};
-use std::time::SystemTime;
-
-# async fn demo() {
-let log = TraceLog::new();
-log.append(Event::SessionDestroyed {
-    session_id: SessionId::new(),
-    timestamp: SystemTime::now(),
-})
-.await;
-let events = log.events().await;
-# }
-```
-
-See `PLAN.md` section 4.12 for the target spec.
+- Replay checks outputs and exit codes. It does not record or restore the environment, the working directory, or files the trace did not create.
+- A script that depends on the clock, randomness, or the host can diverge on replay. That is reported, not hidden.
+- Traces hold full output, so noisy scripts make large files.
