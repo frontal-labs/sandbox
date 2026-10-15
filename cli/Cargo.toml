@@ -21,6 +21,9 @@ sandbox-sdk = { path = "../sdks/rust" }
 sandbox-types = { path = "../crates/sandbox-types" }
 sandbox-session = { path = "../crates/sandbox-session" }
 sandbox-worker = { path = "../crates/sandbox-worker" }
+sandbox-server = { path = "../crates/sandbox-server" }
+sandbox-scheduler = { path = "../crates/sandbox-scheduler" }
+axum = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

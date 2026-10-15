@@ -25,13 +25,13 @@ pub enum Commands {
     /// from stdin; `exit` or end of input stops it.
     Shell,
 
-    /// Create a snapshot of a session (not implemented yet)
+    /// Snapshot a session on the server named by SANDBOX_BASE_URL. Uses SANDBOX_API_KEY.
     Snapshot {
         /// Session ID
         session_id: String,
     },
 
-    /// Fork a snapshot into multiple sessions (not implemented yet)
+    /// Fork a snapshot into sessions on the server named by SANDBOX_BASE_URL
     Fork {
         /// Snapshot ID
         snapshot_id: String,
@@ -55,7 +55,7 @@ pub enum Commands {
         socket: PathBuf,
     },
 
-    /// Start the sandbox server (not implemented yet)
+    /// Start the sandbox server in the foreground. Prints one API key to stderr.
     Serve {
         /// Bind address
         #[arg(long, default_value = "0.0.0.0:8080")]
@@ -93,6 +93,9 @@ impl Cli {
                 rt.block_on(sandbox_worker::serve(socket))?;
                 Ok(0)
             }
+            Commands::Serve { addr } => serve(addr),
+            Commands::Snapshot { session_id } => snapshot(session_id),
+            Commands::Fork { snapshot_id, count } => fork(snapshot_id, *count),
             other => Err(SandboxError::unsupported(format!(
                 "`sandbox {}` is not implemented yet",
                 subcommand_name(other)
@@ -158,15 +161,72 @@ fn interactive_shell() -> Result<i32, SandboxError> {
     Ok(0)
 }
 
+/// Runs the server until the process is stopped. The key is printed once, to
+/// stderr, because keys live in memory and nothing else can provision them.
+fn serve(addr: &str) -> Result<i32, SandboxError> {
+    use std::sync::Arc;
+    let auth = Arc::new(sandbox_server::auth::AuthManager::new());
+    let key = auth.create_key();
+    let app = sandbox_server::create_router(Arc::new(sandbox_scheduler::Scheduler::new()), auth);
+    let rt = runtime()?;
+    rt.block_on(async {
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(|e| SandboxError::unavailable(format!("binding {addr}: {e}")))?;
+        eprintln!("sandbox server listening on {addr}");
+        eprintln!("API key (shown once): {key}");
+        axum::serve(listener, app)
+            .await
+            .map_err(|e| SandboxError::unavailable(format!("server stopped: {e}")))
+    })?;
+    Ok(0)
+}
+
+fn client() -> Result<sandbox_sdk::Client, SandboxError> {
+    sandbox_sdk::Client::from_env()
+}
+
+fn snapshot(session_id: &str) -> Result<i32, SandboxError> {
+    let session: sandbox_types::SessionId = session_id
+        .parse()
+        .map_err(|_| SandboxError::invalid_argument(format!("not a session id: {session_id}")))?;
+    let rt = runtime()?;
+    let id = rt.block_on(client()?.snapshot(session))?;
+    println!("{id}");
+    Ok(0)
+}
+
+fn fork(snapshot_id: &str, count: usize) -> Result<i32, SandboxError> {
+    let snapshot: sandbox_types::SnapshotId = snapshot_id
+        .parse()
+        .map_err(|_| SandboxError::invalid_argument(format!("not a snapshot id: {snapshot_id}")))?;
+    let count =
+        u32::try_from(count).map_err(|_| SandboxError::invalid_argument("count is too large"))?;
+    let rt = runtime()?;
+    let ids = rt.block_on(client()?.fork(snapshot, count))?;
+    for id in ids {
+        println!("{id}");
+    }
+    Ok(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn placeholder_subcommands_return_errors_not_success() {
-        let cli = Cli::try_parse_from(["sandbox", "serve"]).unwrap();
-        let err = cli.execute().unwrap_err();
-        assert_eq!(err.code, sandbox_types::ErrorCode::Unsupported);
+    fn replay_and_bench_are_reported_as_unsupported_not_faked() {
+        // Neither has a backing implementation yet. Both must say so.
+        let replay = Cli::try_parse_from(["sandbox", "replay", "trace.jsonl"]).unwrap();
+        assert_eq!(
+            replay.execute().unwrap_err().code,
+            sandbox_types::ErrorCode::Unsupported
+        );
+        let bench = Cli::try_parse_from(["sandbox", "bench"]).unwrap();
+        assert_eq!(
+            bench.execute().unwrap_err().code,
+            sandbox_types::ErrorCode::Unsupported
+        );
     }
 
     #[test]
