@@ -1,6 +1,6 @@
 {
   "name": "sandbox-sdk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "TypeScript SDK for the sandbox system",
   "type": "module",
   "main": "./dist/index.js",
@@ -34,7 +34,8 @@
     "lint": "biome check src",
     "format": "biome format --write src",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepack": "npm run build"
   },
   "keywords": [
     "sandbox",
@@ -49,6 +50,11 @@
     "url": "https://github.com/frontal-labs/sandbox.git",
     "directory": "sdks/typescript"
   },
+  "files": [
+    "dist",
+    "!dist/tsbuildinfo.json",
+    "README.md"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },
