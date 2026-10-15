@@ -5,6 +5,7 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
   schedule:
     # Run nightly at 2 AM UTC
     - cron: '0 2 * * *'
