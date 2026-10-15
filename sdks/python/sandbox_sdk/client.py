@@ -4,7 +4,6 @@ HTTP client for the sandbox SDK.
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from .errors import (
     internal,
     is_sandbox_error,
     network_error,
+    unsupported,
 )
 from .types import (
     ExecRequest,
@@ -117,34 +117,9 @@ class Client:
     async def exec_stream(
         self, session_id: str, request: ExecRequest
     ) -> AsyncGenerator[Result[ExecResult], None]:
-        url = f"{self.base_url}/v1/sessions/{session_id}/exec?stream=true"
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        try:
-            async with self._client.stream(
-                "POST", url, json=request.__dict__, headers=headers
-            ) as response:
-                if not response.is_success:
-                    error_data = await response.aread()
-                    yield internal(error_data.decode() if error_data else f"HTTP {response.status_code}")
-                    return
-
-                async for line in response.aiter_lines():
-                    if line.strip():
-                        try:
-                            data = json.loads(line)
-                            yield ExecResult(**data)
-                        except json.JSONDecodeError:
-                            yield internal(f"Failed to parse stream chunk: {line}")
-        except httpx.RequestError as e:
-            yield network_error(str(e), e)
-        except Exception as e:
-            if is_sandbox_error(e):
-                yield e
-            else:
-                yield internal(f"Stream failed: {e}", e)
+        # Streaming exec is not implemented on the server, so this yields one
+        # UNSUPPORTED error and does not send a request.
+        yield unsupported("streaming exec is not implemented yet")
 
     async def snapshot(self, session_id: str) -> Result[Snapshot]:
         result = await self._request(
