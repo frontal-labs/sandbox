@@ -1,0 +1,24 @@
+{
+  "scenario": "concurrent_sessions",
+  "duration_secs": 10.136295943,
+  "concurrency": 100,
+  "total_iterations": 8425078,
+  "total_errors": 0,
+  "latencies": {
+    "overall": {
+      "min": 1071,
+      "max": 68954442,
+      "mean": 106754.41442748984,
+      "percentiles": {},
+      "std_dev": 0.0,
+      "count": 8425078
+    }
+  },
+  "throughput": {
+    "overall": 831179.1651878766
+  },
+  "error_rates": {
+    "overall": 0.0
+  },
+  "timestamp": "2026-10-15T14:14:29.263809243+00:00"
+}
