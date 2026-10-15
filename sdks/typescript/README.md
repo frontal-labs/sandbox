@@ -6,12 +6,19 @@ TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox), t
 
 ## Installation
 
-The package is not published yet. To use it from this repo, build it first:
+Releases are pushed to GHCR as an OCI artifact, `ghcr.io/frontal-labs/sandbox-sdk-ts`. npm cannot install from GHCR, so pull the packed tarball with [`oras`](https://oras.land) and install that file:
+
+```bash
+oras pull ghcr.io/frontal-labs/sandbox-sdk-ts:0.1.0
+npm install ./sandbox-sdk-0.1.0.tgz
+```
+
+If the package is private, run `oras login ghcr.io` first. To build from source instead:
 
 ```bash
 cd sdks/typescript
-bun install
-bun run build   # tsc --build, emits dist/
+npm install
+npm run build   # tsc --build, emits dist/
 ```
 
 Requires Node.js 20+ (per `engines` in `package.json`).

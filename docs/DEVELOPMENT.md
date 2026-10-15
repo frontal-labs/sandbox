@@ -186,14 +186,46 @@ See [docs/adr/README.md](adr/README.md) for the template and process.
 3. `cargo test --workspace`
 4. `cargo bench --workspace --no-run`
 
-CI does not yet run `cargo deny`, `cargo audit`, or the TypeScript and Python
-SDK tests. These steps have not been run in this refresh, so a passing CI is
-not confirmed.
+Two more jobs run the SDK suites: `sdk-typescript` (build, test, and an
+`npm pack --dry-run`) and `sdk-python` (editable install, `ruff check`, and
+`pytest`). CI does not yet run `cargo deny` or `cargo audit`. The new SDK jobs
+have not run on GitHub yet, so a passing run is not confirmed.
 
-Other workflows in `.github/workflows/`: `pr-checks.yml` (PR title, labels,
-size, auto-assign), `benchmarks.yml`, `codeql-analysis.yml`, `release.yml`, and
-`release-binaries.yml`. The former `update-flake.yml` (weekly `nix flake update`)
-was deleted because the flake it updated no longer exists.
+`pr-checks.yml` requires a changeset (`.changeset/*.md`) on any PR that changes
+files under `sdks/`. The older semver-label check is still there.
+
+Other workflows in `.github/workflows/`: `benchmarks.yml`, `codeql-analysis.yml`,
+`release.yml`, and `release-binaries.yml`. The former `update-flake.yml` (weekly
+`nix flake update`) was deleted because the flake it updated no longer exists.
+
+## Releasing the SDKs
+
+The three SDKs share one version. `sdks/typescript/package.json` is the source
+of truth. Changesets manages it.
+
+1. Add a changeset with `npm run changeset` on the PR that changes an SDK.
+   Use `"sandbox-sdk": minor` or `patch` (or `major`).
+2. When changesets land on `master`, `sdk-release.yml` opens a "version SDKs"
+   PR through `npm run version-packages`. That runs `changeset version`, then
+   `scripts/sync-sdk-versions.mjs`, which copies the version into
+   `sdks/python/pyproject.toml`, `sdks/rust/Cargo.toml`, and `Cargo.lock`.
+3. Merging that PR runs `scripts/release/publish-sdk.sh` for `ts`, `py`, and
+   `rs`. Each script packs the SDK and pushes it to GHCR as an OCI artifact:
+   - `ghcr.io/frontal-labs/sandbox-sdk-ts:<version>` holds the npm tarball.
+   - `ghcr.io/frontal-labs/sandbox-sdk-py:<version>` holds the wheel and sdist.
+   - `ghcr.io/frontal-labs/sandbox-sdk-rs:<version>` holds a source snapshot.
+4. The release job creates tag `sdk-v<version>` and a GitHub release.
+
+GHCR is not a package index. npm, pip, and cargo cannot install from it, so
+consumers pull the artifact with `oras`. See each SDK README. The Rust SDK has
+no crates.io package because `sandbox-types` is not published there.
+
+Run the publish step without pushing: `scripts/release/publish-sdk.sh <ts|py|rs>
+--dry-run`. The workflow's manual trigger also defaults to a dry run.
+
+Other workflows in `.github/workflows/`: `pr-checks.yml`, `benchmarks.yml`,
+`codeql-analysis.yml`, `release.yml`, and `release-binaries.yml`. Both
+`release.yml` and `release-binaries.yml` create GitHub releases on `v*` tags.
 
 ## Local Development Loop
 

@@ -6,13 +6,18 @@ Python client SDK for Frontal Sandbox. The distribution name is `sandbox-sdk` an
 
 ## Installation
 
-The package is not published to PyPI. Install from the repo:
+Releases are pushed to GHCR as an OCI artifact, `ghcr.io/frontal-labs/sandbox-sdk-py`. The artifact holds the wheel and sdist. pip cannot install from GHCR, so pull the wheel with [`oras`](https://oras.land) and install that file:
+
+```bash
+oras pull ghcr.io/frontal-labs/sandbox-sdk-py:0.1.0
+pip install ./sandbox_sdk-0.1.0-py3-none-any.whl
+```
+
+If the package is private, run `oras login ghcr.io` first. To work from the repo:
 
 ```bash
 pip install -e sdks/python
 ```
-
-Note: `pyproject.toml` sets `[tool.hatch.build.targets.wheel] packages = ["src/sandbox_sdk"]`, but the package lives at `sdks/python/sandbox_sdk/`. That path does not exist, so the editable install is expected to fail until the build config is fixed. This was not verified by a build.
 
 Requires Python 3.11+. Runtime dependencies: `httpx`, `pydantic`, `ulid-py`, `python-dotenv`.
 
