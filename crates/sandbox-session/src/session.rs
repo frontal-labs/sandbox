@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use sandbox_types::hash::ContentHash;
-use sandbox_types::{ExecRequest, ExecResult, SandboxError, SessionId, SnapshotId, Tier};
+use sandbox_types::{ExecRequest, ExecResult, SandboxError, SessionId, Tier};
 
 // The VFS is the source of truth for files (invariant 1), so sessions expose
 // the VFS trait directly rather than a second, divergent definition.
@@ -23,6 +23,9 @@ pub trait Session: Send + Sync {
     /// keeps the hash, and `restore` starts a session from it. The session
     /// keeps running. Take snapshots while the session is idle.
     async fn snapshot(&self) -> Result<ContentHash, SandboxError>;
-    async fn sleep(&self) -> Result<SnapshotId, SandboxError>;
+    /// Checkpoints the session for sleep and returns the root to wake from.
+    /// The session still runs. Its owner drops it once the root is recorded, and
+    /// frees its memory then. See ADR 0006.
+    async fn sleep(&self) -> Result<ContentHash, SandboxError>;
     async fn destroy(self: Box<Self>) -> Result<(), SandboxError>;
 }

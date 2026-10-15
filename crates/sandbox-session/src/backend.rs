@@ -4,7 +4,7 @@ use sandbox_cas::{BlobStore, MemStore};
 use sandbox_shell::{ExecutionResult, Shell, ShellConfig};
 use sandbox_types::hash::ContentHash;
 use sandbox_types::{
-    ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, SnapshotId, Tier,
+    ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, Tier,
 };
 use sandbox_vfs::Vfs;
 use std::sync::{Arc, OnceLock};
@@ -23,8 +23,8 @@ fn shared_store() -> Arc<dyn BlobStore> {
 /// Tier 1 session. Owns its VFS, which is the source of truth for files, and
 /// a shell that runs against that VFS.
 ///
-/// A snapshot records the committed filesystem root. Sleep is not implemented
-/// yet and returns `Unsupported`.
+/// A snapshot records the committed filesystem root. Sleep checkpoints the
+/// same root, and the owner drops the session to release its memory.
 pub struct IsolateBackend {
     id: SessionId,
     tier: Tier,
@@ -123,8 +123,8 @@ impl Session for IsolateBackend {
             .map_err(|e| SandboxError::new(ErrorCode::VfsError, e.to_string()))
     }
 
-    async fn sleep(&self) -> Result<SnapshotId, SandboxError> {
-        Err(SandboxError::unsupported("sleep is not implemented yet"))
+    async fn sleep(&self) -> Result<ContentHash, SandboxError> {
+        self.snapshot().await
     }
 
     async fn destroy(self: Box<Self>) -> Result<(), SandboxError> {
@@ -284,12 +284,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sleep_reports_unsupported() {
+    async fn sleep_checkpoints_a_root_that_wakes_with_the_files() {
         let backend = new_backend().await;
-        assert_eq!(
-            backend.sleep().await.err().unwrap().code,
-            ErrorCode::Unsupported
-        );
+        write_text(backend.fs(), "/keep.txt", "kept").await;
+        let root = backend.sleep().await.unwrap();
+        // Writes after sleep belong to the session that is gone, not to the wake.
+        write_text(backend.fs(), "/keep.txt", "later").await;
+        let woken = restore(root).await.unwrap();
+        assert_eq!(read_text(woken.fs(), "/keep.txt").await, "kept");
     }
 
     #[tokio::test]

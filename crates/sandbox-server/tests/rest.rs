@@ -561,3 +561,138 @@ async fn timestamps_are_rfc3339_strings_on_the_wire() {
     let created = body["created_at"].as_str().expect("created_at is a string");
     assert!(created.ends_with('Z') && created.contains('T'), "{created}");
 }
+
+async fn sleep(app: &axum::Router, key: &str, id: &str) -> (StatusCode, Value) {
+    let (status, body) = call(app, "POST", &format!("/v1/sessions/{id}/sleep"), key, None).await;
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+async fn wake(app: &axum::Router, key: &str, id: &str) -> (StatusCode, Value) {
+    let (status, body) = call(app, "POST", &format!("/v1/sessions/{id}/wake"), key, None).await;
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn sleep_releases_the_session_and_wake_restores_its_files() {
+    let (app, owner, _) = router();
+    let id = create(&app, &owner).await;
+    write_file(&app, &owner, &id, "/keep.txt", b"kept").await;
+
+    let (status, body) = sleep(&app, &owner, &id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["snapshot_id"].is_string());
+
+    let (status, state) = get_json(&app, &owner, &format!("/v1/sessions/{id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(state["status"], "sleeping");
+
+    // Asleep, the session refuses work with a conflict, not a not-found.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/exec"),
+        &owner,
+        json_body(&json!({
+            "argv": ["true"],
+            "env": {},
+            "cwd": null,
+            "stdin": null,
+            "timeout_ms": null,
+            "stream": false,
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/snapshot"),
+        &owner,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, state) = wake(&app, &owner, &id).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["status"], "running");
+    assert_eq!(state["id"], json!(id));
+
+    let (status, bytes) = read_file(&app, &owner, &id, "/keep.txt").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, b"kept");
+    write_file(&app, &owner, &id, "/after.txt", b"again").await;
+}
+
+#[tokio::test]
+async fn sleep_snapshot_can_be_forked_into_a_new_session() {
+    let (app, owner, _) = router();
+    let id = create(&app, &owner).await;
+    write_file(&app, &owner, &id, "/f.txt", b"slept").await;
+    let (_, body) = sleep(&app, &owner, &id).await;
+    let snapshot_id = body["snapshot_id"].as_str().unwrap().to_string();
+
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/snapshots/{snapshot_id}/fork"),
+        &owner,
+        json_body(&json!({"count": 1})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let forked: Value = serde_json::from_slice(&body).unwrap();
+    let new_id = forked["session_ids"][0].as_str().unwrap().to_string();
+    let (status, bytes) = read_file(&app, &owner, &new_id, "/f.txt").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, b"slept");
+}
+
+#[tokio::test]
+async fn sleep_and_wake_are_conflicts_in_the_wrong_state() {
+    let (app, owner, _) = router();
+    let id = create(&app, &owner).await;
+
+    let (status, _) = wake(&app, &owner, &id).await;
+    assert_eq!(status, StatusCode::CONFLICT, "waking a running session");
+
+    assert_eq!(sleep(&app, &owner, &id).await.0, StatusCode::OK);
+    assert_eq!(
+        sleep(&app, &owner, &id).await.0,
+        StatusCode::CONFLICT,
+        "sleeping twice"
+    );
+    assert_eq!(wake(&app, &owner, &id).await.0, StatusCode::OK);
+    assert_eq!(
+        wake(&app, &owner, &id).await.0,
+        StatusCode::CONFLICT,
+        "waking twice"
+    );
+}
+
+#[tokio::test]
+async fn sleeping_sessions_are_invisible_to_other_keys() {
+    let (app, owner, other) = router();
+    let id = create(&app, &owner).await;
+    assert_eq!(sleep(&app, &other, &id).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(sleep(&app, &owner, &id).await.0, StatusCode::OK);
+    assert_eq!(wake(&app, &other, &id).await.0, StatusCode::NOT_FOUND);
+    let (status, _) = call(&app, "DELETE", &format!("/v1/sessions/{id}"), &other, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_sleeping_session_can_be_destroyed_without_waking() {
+    let (app, owner, _) = router();
+    let id = create(&app, &owner).await;
+    assert_eq!(sleep(&app, &owner, &id).await.0, StatusCode::OK);
+    let (status, _) = call(&app, "DELETE", &format!("/v1/sessions/{id}"), &owner, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = get_json(&app, &owner, &format!("/v1/sessions/{id}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

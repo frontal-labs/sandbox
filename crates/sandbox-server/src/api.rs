@@ -102,7 +102,11 @@ pub struct SessionTable(Arc<RwLock<HashMap<SessionId, Entry>>>);
 struct Entry {
     owner: KeyId,
     state: SessionState,
-    session: Arc<dyn Session>,
+    /// `None` while the session sleeps. Sleep drops the live session, so a
+    /// sleeping session holds no VFS in memory. See ADR 0006.
+    session: Option<Arc<dyn Session>>,
+    /// The committed root a sleeping session wakes from.
+    sleep_root: Option<ContentHash>,
     /// Held for every command, file operation, and snapshot on this session.
     /// A checkpoint must not interleave with a write, or the write can be lost
     /// from the snapshot or from the overlay.
@@ -268,31 +272,63 @@ fn entry(
     Entry {
         owner,
         state,
-        session,
+        session: Some(session),
+        sleep_root: None,
         gate: Arc::new(tokio::sync::Mutex::new(())),
     }
 }
 
 /// A session the caller owns. A session owned by another key is not found, so
 /// the response does not reveal that it exists.
+/// A session the caller owns. `session` is `None` while it sleeps.
+struct Lookup {
+    session: Option<Arc<dyn Session>>,
+    state: SessionState,
+    gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// A live session the caller owns.
 struct Owned {
     session: Arc<dyn Session>,
     state: SessionState,
     gate: Arc<tokio::sync::Mutex<()>>,
 }
 
-async fn owned(state: &AppState, owner: &KeyId, raw: &str) -> Result<Owned, ApiError> {
+/// Finds a session the caller owns, sleeping or not. Other keys get the same
+/// not-found answer as a missing session.
+async fn lookup(state: &AppState, owner: &KeyId, raw: &str) -> Result<Lookup, ApiError> {
     let not_found = || SandboxError::not_found(format!("session {raw} not found"));
     let id: SessionId = raw.parse().map_err(|_| not_found())?;
     let table = state.sessions.0.read().await;
     match table.get(&id) {
-        Some(entry) if entry.owner == *owner => Ok(Owned {
+        Some(entry) if entry.owner == *owner => Ok(Lookup {
             session: entry.session.clone(),
             state: entry.state.clone(),
             gate: entry.gate.clone(),
         }),
         _ => Err(not_found().into()),
     }
+}
+
+/// Finds a live session the caller owns. A sleeping session is refused until
+/// it is woken.
+async fn owned(state: &AppState, owner: &KeyId, raw: &str) -> Result<Owned, ApiError> {
+    let found = lookup(state, owner, raw).await?;
+    match found.session {
+        Some(session) => Ok(Owned {
+            session,
+            state: found.state,
+            gate: found.gate,
+        }),
+        None => Err(asleep().into()),
+    }
+}
+
+fn asleep() -> SandboxError {
+    SandboxError::new(
+        ErrorCode::InvalidState,
+        "the session is asleep; wake it before using it",
+    )
 }
 
 /// Rejects requests without a valid `Authorization: Bearer <key>` header, and
@@ -340,6 +376,8 @@ pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Route
         .route("/v1/sessions/:id/fs/*path", get(read_file))
         .route("/v1/sessions/:id/fs/*path", axum::routing::put(write_file))
         .route("/v1/sessions/:id/fs/*path", delete(delete_file))
+        .route("/v1/sessions/:id/sleep", post(sleep_session))
+        .route("/v1/sessions/:id/wake", post(wake_session))
         .route("/v1/sessions/:id/snapshot", post(take_snapshot))
         .route("/v1/sessions/:id/snapshots", get(list_snapshots))
         .route("/v1/sessions/:id/snapshots/:snapshot_id", get(get_snapshot))
@@ -414,7 +452,7 @@ pub async fn get_session(
     Extension(owner): Extension<KeyId>,
     Path(id): Path<String>,
 ) -> Result<Json<SessionState>, ApiError> {
-    Ok(Json(owned(&state, &owner, &id).await?.state))
+    Ok(Json(lookup(&state, &owner, &id).await?.state))
 }
 
 /// Destroy a session.
@@ -435,8 +473,9 @@ pub async fn destroy_session(
     Extension(owner): Extension<KeyId>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    // Confirms ownership before removing the entry.
-    owned(&state, &owner, &id).await?;
+    // Confirms ownership before removing the entry. A sleeping session can be
+    // destroyed without waking it.
+    lookup(&state, &owner, &id).await?;
     let session_id: SessionId = id
         .parse()
         .map_err(|_| SandboxError::not_found(format!("session {id} not found")))?;
@@ -641,31 +680,50 @@ pub async fn take_snapshot(
 ) -> Result<(StatusCode, Json<TakeSnapshotResponse>), ApiError> {
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
-    let session = own.session;
-    let _admit = state.snapshots.admit.lock().await;
-    {
-        let records = state.snapshots.records.read().await;
-        if records.len() >= MAX_SNAPSHOTS_TOTAL {
-            return Err(
-                SandboxError::resource_exhausted("the server is at its snapshot limit").into(),
-            );
-        }
-        let held = records.values().filter(|r| r.owner == owner).count();
-        if held >= MAX_SNAPSHOTS_PER_KEY {
-            return Err(SandboxError::resource_exhausted(format!(
-                "this key already holds {MAX_SNAPSHOTS_PER_KEY} snapshots"
-            ))
-            .into());
-        }
+    let _admit = admit_snapshot(&state, &owner).await?;
+    let root = own.session.snapshot().await?;
+    let snapshot_id = store_snapshot(&state, owner, &own.state, root).await;
+    Ok((
+        StatusCode::CREATED,
+        Json(TakeSnapshotResponse { snapshot_id }),
+    ))
+}
+
+/// Takes the snapshot admission lock and checks the limits. Hold the returned
+/// guard until the record is stored, so two requests cannot both pass the check.
+async fn admit_snapshot<'a>(
+    state: &'a AppState,
+    owner: &KeyId,
+) -> Result<tokio::sync::MutexGuard<'a, ()>, ApiError> {
+    let admit = state.snapshots.admit.lock().await;
+    let records = state.snapshots.records.read().await;
+    if records.len() >= MAX_SNAPSHOTS_TOTAL {
+        return Err(SandboxError::resource_exhausted("the server is at its snapshot limit").into());
     }
-    let root = session.snapshot().await?;
+    let held = records.values().filter(|r| r.owner == *owner).count();
+    if held >= MAX_SNAPSHOTS_PER_KEY {
+        return Err(SandboxError::resource_exhausted(format!(
+            "this key already holds {MAX_SNAPSHOTS_PER_KEY} snapshots"
+        ))
+        .into());
+    }
+    Ok(admit)
+}
+
+/// Stores a snapshot record for a checkpointed root and returns its ID.
+async fn store_snapshot(
+    state: &AppState,
+    owner: KeyId,
+    session: &SessionState,
+    root: ContentHash,
+) -> SnapshotId {
     let snapshot_id = SnapshotId::new();
     let record = SnapshotRecord {
         owner,
-        session: own.state.id,
+        session: session.id,
         root,
         created_at: SystemTime::now(),
-        labels: own.state.labels.clone(),
+        labels: session.labels.clone(),
     };
     state
         .snapshots
@@ -673,10 +731,104 @@ pub async fn take_snapshot(
         .write()
         .await
         .insert(snapshot_id, record);
-    Ok((
-        StatusCode::CREATED,
-        Json(TakeSnapshotResponse { snapshot_id }),
-    ))
+    snapshot_id
+}
+
+/// Put a session to sleep. The filesystem is checkpointed and recorded as a
+/// snapshot, and the live session is released, so a sleeping session holds no
+/// VFS in memory. Shell state (working directory and environment) is not kept,
+/// so a woken session starts with fresh shell state. See ADR 0006.
+#[utoipa::path(
+    post,
+    path = "/v1/sessions/{id}/sleep",
+    tag = "sessions",
+    params(("id" = String, Path, description = "Session ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$")),
+    responses(
+        (status = 200, description = "Session is asleep; the snapshot is its wake root", body = TakeSnapshotResponse),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "No such session for this key", body = ErrorBody),
+        (status = 409, description = "The session is already asleep", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn sleep_session(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+) -> Result<Json<TakeSnapshotResponse>, ApiError> {
+    let found = lookup(&state, &owner, &id).await?;
+    let session_id = found.state.id;
+    let gate = found.gate.clone();
+    let _gate = gate.lock().await;
+
+    // Read again under the gate. Another request may have slept or destroyed
+    // the session while this one waited.
+    let (session, live_state) = {
+        let table = state.sessions.0.read().await;
+        let entry = table
+            .get(&session_id)
+            .ok_or_else(|| SandboxError::not_found(format!("session {id} not found")))?;
+        let session = entry.session.clone().ok_or_else(asleep)?;
+        (session, entry.state.clone())
+    };
+
+    let _admit = admit_snapshot(&state, &owner).await?;
+    let root = session.sleep().await?;
+    let snapshot_id = store_snapshot(&state, owner, &live_state, root).await;
+
+    let mut table = state.sessions.0.write().await;
+    if let Some(entry) = table.get_mut(&session_id) {
+        // Dropping the live session here releases its VFS once no other handle
+        // to it remains.
+        entry.session = None;
+        entry.sleep_root = Some(root);
+        entry.state.status = SessionStatus::Sleeping;
+        entry.state.updated_at = SystemTime::now();
+    }
+    Ok(Json(TakeSnapshotResponse { snapshot_id }))
+}
+
+/// Wake a sleeping session. The filesystem is restored from the root that
+/// sleep recorded. The session keeps its ID.
+#[utoipa::path(
+    post,
+    path = "/v1/sessions/{id}/wake",
+    tag = "sessions",
+    params(("id" = String, Path, description = "Session ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$")),
+    responses(
+        (status = 200, description = "Session is running again", body = SessionState),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "No such session for this key", body = ErrorBody),
+        (status = 409, description = "The session is not asleep", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn wake_session(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+) -> Result<Json<SessionState>, ApiError> {
+    let not_found = || SandboxError::not_found(format!("session {id} not found"));
+    let session_id: SessionId = id.parse().map_err(|_| not_found())?;
+    // The write lock covers the check and the restore, so two wakes cannot both
+    // succeed.
+    let mut table = state.sessions.0.write().await;
+    let entry = match table.get_mut(&session_id) {
+        Some(entry) if entry.owner == owner => entry,
+        _ => return Err(not_found().into()),
+    };
+    if entry.session.is_some() {
+        return Err(SandboxError::new(ErrorCode::InvalidState, "the session is not asleep").into());
+    }
+    let root = entry
+        .sleep_root
+        .ok_or_else(|| SandboxError::internal("a sleeping session has no wake root"))?;
+    let session: Arc<dyn Session> = sandbox_session::restore(root).await?.into();
+    entry.session = Some(session);
+    entry.sleep_root = None;
+    entry.state.status = SessionStatus::Running;
+    entry.state.updated_at = SystemTime::now();
+    Ok(Json(entry.state.clone()))
 }
 
 /// Fork a snapshot into new sessions, each owned by the caller. The caller must

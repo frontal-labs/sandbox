@@ -494,6 +494,74 @@
         ]
       }
     },
+    "/v1/sessions/{id}/sleep": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Put a session to sleep. The filesystem is checkpointed and recorded as a",
+        "description": "snapshot, and the live session is released, so a sleeping session holds no\nVFS in memory. Shell state (working directory and environment) is not kept,\nso a woken session starts with fresh shell state. See ADR 0006.",
+        "operationId": "sleep_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session ID (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session is asleep; the snapshot is its wake root",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeSnapshotResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session for this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The session is already asleep",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions/{id}/snapshot": {
       "post": {
         "tags": [
@@ -662,6 +730,74 @@
           },
           "404": {
             "description": "No such session or snapshot for this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/wake": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Wake a sleeping session. The filesystem is restored from the root that",
+        "description": "sleep recorded. The session keeps its ID.",
+        "operationId": "wake_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session ID (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session is running again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session for this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The session is not asleep",
             "content": {
               "application/json": {
                 "schema": {
