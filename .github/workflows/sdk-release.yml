@@ -81,6 +81,9 @@ jobs:
         if: matrix.sdk == 'py' && (steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch')
         with:
           python-version: "3.12"
+      - name: Install TypeScript dependencies
+        if: matrix.sdk == 'ts' && (steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch')
+        run: npm ci
       - name: Install packaging tools
         if: matrix.sdk == 'py' && (steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch')
         run: python -m pip install build
