@@ -507,3 +507,57 @@ async fn get_snapshot_returns_it_only_under_its_own_session() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn empty_limits_mean_defaults_and_are_accepted() {
+    let (app, key, _) = router();
+    let mut with_empty_limits: Value = config();
+    with_empty_limits["limits"] = json!({});
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/v1/sessions",
+        &key,
+        json_body(&with_empty_limits),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[tokio::test]
+async fn streaming_exec_is_refused_not_faked() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let request = json!({ "argv": ["echo", "hi"], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": true });
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/exec"),
+        &key,
+        json_body(&request),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_IMPLEMENTED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let (status, _) = call(&app, "POST", &format!("/v1/sessions/{id}/exec?stream=true"), &key, json_body(&json!({ "argv": ["echo", "hi"], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": false }))).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+}
+
+#[tokio::test]
+async fn timestamps_are_rfc3339_strings_on_the_wire() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let (status, body) = get_json(&app, &key, &format!("/v1/sessions/{id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let created = body["created_at"].as_str().expect("created_at is a string");
+    assert!(created.ends_with('Z') && created.contains('T'), "{created}");
+}

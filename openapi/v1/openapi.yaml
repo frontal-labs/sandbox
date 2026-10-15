@@ -154,6 +154,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+        '501':
+          description: Streaming exec is not implemented yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
       security:
       - bearer: []
   /v1/sessions/{id}/fs/{path}:

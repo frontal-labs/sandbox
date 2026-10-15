@@ -251,6 +251,16 @@
                 }
               }
             }
+          },
+          "501": {
+            "description": "Streaming exec is not implemented yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [

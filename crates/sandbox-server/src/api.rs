@@ -4,7 +4,7 @@
 use crate::auth::{AuthManager, KeyId};
 use axum::{
     body::Bytes,
-    extract::{Path, Request, State},
+    extract::{Path, Query, Request, State},
     http::{header, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
@@ -197,6 +197,22 @@ fn vfs_path(raw: &str) -> Result<PathBuf, ApiError> {
     Ok(PathBuf::from(format!("/{raw}")))
 }
 
+/// Whether `requested` sets a limit to a value other than the default. A field
+/// left unset means the default, so `{}` requests no custom limits.
+fn requests_custom_limits(requested: &ResourceLimits) -> bool {
+    let d = ResourceLimits::default();
+    (requested.memory_bytes.is_some() && requested.memory_bytes != d.memory_bytes)
+        || (requested.cpu_ms_per_sec.is_some() && requested.cpu_ms_per_sec != d.cpu_ms_per_sec)
+        || (requested.wall_timeout_secs.is_some()
+            && requested.wall_timeout_secs != d.wall_timeout_secs)
+        || (requested.max_file_size.is_some() && requested.max_file_size != d.max_file_size)
+        || (requested.max_total_size.is_some() && requested.max_total_size != d.max_total_size)
+        || (requested.max_inodes.is_some() && requested.max_inodes != d.max_inodes)
+        || (requested.max_path_depth.is_some() && requested.max_path_depth != d.max_path_depth)
+        || (requested.max_processes.is_some() && requested.max_processes != d.max_processes)
+        || (requested.max_open_files.is_some() && requested.max_open_files != d.max_open_files)
+}
+
 /// Refuses a config that asks for something the backend does not enforce.
 /// Ignoring such a setting would look like success while giving no protection.
 fn refuse_unenforced(config: &SessionConfig) -> Result<(), ApiError> {
@@ -212,7 +228,7 @@ fn refuse_unenforced(config: &SessionConfig) -> Result<(), ApiError> {
     ) {
         return refuse("the vm tier");
     }
-    if config.limits != ResourceLimits::default() {
+    if requests_custom_limits(&config.limits) {
         return refuse("per-session resource limits");
     }
     if config.network != NetworkPolicy::default() {
@@ -439,6 +455,7 @@ pub async fn destroy_session(
         (status = 200, description = "Command finished", body = ExecResult),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 404, description = "No such session for this key", body = ErrorBody),
+        (status = 501, description = "Streaming exec is not implemented yet", body = ErrorBody),
     ),
     security(("bearer" = []))
 )]
@@ -446,12 +463,25 @@ pub async fn exec_command(
     State(state): State<AppState>,
     Extension(owner): Extension<KeyId>,
     Path(id): Path<String>,
+    Query(query): Query<ExecQuery>,
     Json(request): Json<ExecRequest>,
 ) -> Result<Json<ExecResult>, ApiError> {
+    // Output is buffered. Streaming would need the backend to emit chunks while
+    // the command runs, which it cannot do yet, so refuse rather than fake it.
+    if query.stream.unwrap_or(false) || request.stream {
+        return Err(SandboxError::unsupported("streaming exec is not implemented yet").into());
+    }
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
     let session = own.session;
     Ok(Json(session.exec(request).await?))
+}
+
+/// Query options for exec.
+#[derive(Debug, Deserialize)]
+pub struct ExecQuery {
+    /// Streaming output. Not implemented, so `true` is refused with 501.
+    pub stream: Option<bool>,
 }
 
 /// Read a file from a session's filesystem.
