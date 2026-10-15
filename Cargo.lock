@@ -728,7 +728,10 @@ checksum = "7e36cc9d416881d2e24f9a963be5fb1cd90966419ac844274161d10488b3e825"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "serde",
+ "wasm-bindgen",
  "windows-targets 0.52.6",
 ]
 
@@ -814,8 +817,11 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 name = "cli"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "clap",
+ "sandbox-scheduler",
  "sandbox-sdk",
+ "sandbox-server",
  "sandbox-session",
  "sandbox-types",
  "sandbox-worker",
@@ -4085,6 +4091,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "sandbox-load"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "clap",
+ "csv",
+ "futures",
+ "hdrhistogram",
+ "indicatif",
+ "rand 0.8.6",
+ "sandbox-sdk",
+ "sandbox-session",
+ "sandbox-types",
+ "sandbox-vfs",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sandbox-policy"
 version = "0.0.0"
 dependencies = [
@@ -4179,20 +4210,17 @@ dependencies = [
 name = "sandbox-sdk"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "bytes",
  "futures",
  "reqwest",
- "sandbox-cas",
- "sandbox-policy",
- "sandbox-runtime",
+ "sandbox-scheduler",
+ "sandbox-server",
  "sandbox-session",
- "sandbox-shell",
- "sandbox-snapshot",
  "sandbox-types",
- "sandbox-vfs",
- "sandbox-wasm",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

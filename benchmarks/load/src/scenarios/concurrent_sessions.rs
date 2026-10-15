@@ -1,8 +1,11 @@
-use crate::scenarios::{ScenarioConfig, WorkerIteration, WorkerResult, create_session_config, run_with_ramp_up};
 use crate::reporter::ScenarioResult;
+use crate::scenarios::{
+    create_exec_request, exec_outcome, new_session, run_with_ramp_up, ScenarioConfig,
+    WorkerIteration, WorkerResult,
+};
 use anyhow::Result;
-use std::time::Duration;
-use tokio::time::sleep;
+use sandbox_session::Session;
+use std::time::Instant;
 
 pub struct ConcurrentSessionsScenario {
     config: ScenarioConfig,
@@ -12,37 +15,36 @@ impl ConcurrentSessionsScenario {
     pub fn new(config: ScenarioConfig) -> Self {
         Self { config }
     }
-    
+
+    /// Each iteration creates a session, runs one command, and destroys it. The
+    /// workers do this at the same time, so the session lifecycle is measured
+    /// under concurrency.
     pub async fn run(self) -> Result<ScenarioResult> {
         let config = self.config;
         let mut result = run_with_ramp_up(&config, move |worker_id| async move {
-            let _session_config = create_session_config();
-            
-            // In embedded mode, we create sessions directly
-            // For server mode, we'd use the SDK client
-            
-            // Simulate session creation
-            let start = std::time::Instant::now();
-            
-            // Placeholder: let session = sandbox_session::IsolateBackend::new(session_config).await?;
-            
-            // Keep session alive for the test duration
-            let remaining = config.duration.saturating_sub(start.elapsed());
-            if remaining > Duration::ZERO {
-                sleep(remaining).await;
-            }
-            
+            let start = Instant::now();
+            let (success, error) = match new_session().await {
+                Ok(session) => {
+                    let outcome =
+                        exec_outcome(session.exec(create_exec_request("echo ready")).await);
+                    let _ = Box::new(session).destroy().await;
+                    outcome
+                }
+                Err(e) => (false, Some(e.to_string())),
+            };
+            let duration = start.elapsed();
             Ok(WorkerResult {
                 worker_id,
                 iterations: vec![WorkerIteration {
-                    duration: start.elapsed(),
-                    success: true,
-                    error: None,
+                    duration,
+                    success,
+                    error,
                 }],
-                total_duration: start.elapsed(),
+                total_duration: duration,
             })
-        }).await?;
-        
+        })
+        .await?;
+
         result.scenario = "concurrent_sessions".to_string();
         Ok(result)
     }

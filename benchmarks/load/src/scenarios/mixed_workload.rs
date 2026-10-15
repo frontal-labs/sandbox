@@ -1,8 +1,24 @@
-use crate::scenarios::{ScenarioConfig, WorkerIteration, WorkerResult, create_session_config, run_with_ramp_up};
 use crate::reporter::ScenarioResult;
+use crate::scenarios::{
+    create_exec_request, exec_outcome, new_session, run_with_ramp_up, ScenarioConfig,
+    WorkerIteration, WorkerResult,
+};
 use anyhow::Result;
-use std::time::Duration;
-use tokio::time::sleep;
+use sandbox_session::Session;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+/// Commands the isolate shell runs. The set is deliberately limited to builtins,
+/// because host tools such as git or cargo are not available in the isolate.
+const WORKLOAD: &[&str] = &[
+    "echo hello",
+    "pwd",
+    "echo one two three",
+    "ls /",
+    "true",
+    "false",
+];
 
 pub struct MixedWorkloadScenario {
     config: ScenarioConfig,
@@ -12,61 +28,36 @@ impl MixedWorkloadScenario {
     pub fn new(config: ScenarioConfig) -> Self {
         Self { config }
     }
-    
+
+    /// Each iteration starts a session and runs one command from the workload.
+    /// `false` exits 1, so it counts as a failed iteration. That keeps the error
+    /// rate honest about what the workload does.
     pub async fn run(self) -> Result<ScenarioResult> {
-        let workloads = vec![
-            // Git operations
-            "git clone https://github.com/example/repo.git /work/repo",
-            "cd /work/repo && git status",
-            "cd /work/repo && git diff",
-            "cd /work/repo && git log --oneline -10",
-            
-            // File operations
-            "find /work -name '*.rs' -type f | head -20",
-            "grep -r 'TODO' /work --include='*.rs' | head -10",
-            "wc -l /work/**/*.rs",
-            
-            // Build/test operations
-            "cd /work/repo && cargo check 2>&1 | head -20",
-            "cd /work/repo && cargo test --no-run 2>&1 | head -20",
-            
-            // Node.js operations
-            "cd /work/repo && npm install 2>&1 | tail -10",
-            "cd /work/repo && npm test 2>&1 | tail -20",
-            
-            // Python operations
-            "python3 -c \"import sys; print(sys.version)\"",
-            "pip list 2>&1 | head -20",
-        ];
-        
+        // Every iteration takes the next command, so the whole list runs no
+        // matter how many workers there are.
+        let next = Arc::new(AtomicUsize::new(0));
         let mut result = run_with_ramp_up(&self.config, move |worker_id| {
-            let workloads = workloads.clone();
+            let next = next.clone();
             async move {
-                let _session_config = create_session_config();
-                
-                // Placeholder: let session = sandbox_session::IsolateBackend::new(session_config).await?;
-                
-                let _workload = &workloads[worker_id % workloads.len()];
-                let start = std::time::Instant::now();
-                
-                // Placeholder: let handle = session.exec(create_exec_request(workload)).await?;
-                // Placeholder: let _ = handle.wait().await?;
-                
-                // Simulate realistic workload duration
-                sleep(Duration::from_millis(10 + (worker_id % 100) as u64)).await;
-                
+                let command = WORKLOAD[next.fetch_add(1, Ordering::Relaxed) % WORKLOAD.len()];
+                let session = new_session().await?;
+                let start = Instant::now();
+                let outcome = exec_outcome(session.exec(create_exec_request(command)).await);
+                let duration = start.elapsed();
+                let _ = Box::new(session).destroy().await;
                 Ok(WorkerResult {
                     worker_id,
                     iterations: vec![WorkerIteration {
-                        duration: start.elapsed(),
-                        success: true,
-                        error: None,
+                        duration,
+                        success: outcome.0,
+                        error: outcome.1,
                     }],
-                    total_duration: start.elapsed(),
+                    total_duration: duration,
                 })
             }
-        }).await?;
-        
+        })
+        .await?;
+
         result.scenario = "mixed_workload".to_string();
         Ok(result)
     }

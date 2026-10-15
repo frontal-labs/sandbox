@@ -21,6 +21,7 @@ members = [
     "sdks/rust",
     "cli",
     "benchmarks",
+    "benchmarks/load",
 ]
 
 [workspace.package]
