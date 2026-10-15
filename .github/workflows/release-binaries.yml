@@ -46,6 +46,23 @@ jobs:
           PKG_DIR="target/npm-pkg/${{ matrix.target }}"
           mkdir -p "$PKG_DIR"
           cp "$BIN" "$PKG_DIR/$EXE"
+          # Each platform package needs its own package.json, or npm publish fails.
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e '
+            const [pkgDir, target, osName, arch, exe, version] = process.argv.slice(1)
+            const pkg = {
+              name: `@frontal-labs/sandbox-cli-${target}`,
+              version,
+              description: `sandbox CLI binary for ${target}`,
+              os: [osName],
+              cpu: [arch],
+              files: [exe],
+              license: "Apache-2.0",
+              repository: "https://github.com/frontal-labs/sandbox",
+              publishConfig: { registry: "https://npm.pkg.github.com" },
+            }
+            require("fs").writeFileSync(pkgDir + "/package.json", JSON.stringify(pkg, null, 2))
+          ' "$PKG_DIR" "${{ matrix.target }}" "${{ matrix.os_name }}" "${{ matrix.arch }}" "$EXE" "$VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: sandbox-${{ matrix.target }}
