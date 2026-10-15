@@ -42,15 +42,25 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_test(
-    name = "sandbox_proto_test",
-    srcs = glob(["tests/**/*.rs"]),
-    edition = "2021",
-    crate = ":sandbox_proto",
-    deps = [
-        "@crates//:proptest",
-        "@crates//:serde",
-        "@crates//:serde_json",
-    ],
-    data = ["//proto:protos"],
-)
+# Each file in tests/ is its own integration test crate, as in Cargo.
+[
+    rust_test(
+        name = "sandbox_proto_%s_test" % name,
+        srcs = ["tests/%s.rs" % name],
+        crate_root = "tests/%s.rs" % name,
+        edition = "2021",
+        deps = [
+            ":sandbox_proto",
+            "//crates/sandbox-types:sandbox_types",
+            "@crates//:blake3",
+            "@crates//:prost",
+            "@crates//:prost-types",
+            "@crates//:ulid",
+            "@crates//:proptest",
+            "@crates//:serde",
+            "@crates//:serde_json",
+        ],
+        data = ["//proto:protos"],
+    )
+    for name in ["roundtrip", "compat"]
+]
