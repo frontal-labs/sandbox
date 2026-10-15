@@ -88,4 +88,4 @@ bazel test //sdks/rust:sandbox_sdk_unit_test //sdks/rust:sandbox_sdk_test
 
 - `crates/sandbox-server/`: the server these methods call. Its routes and limits are in its README.
 - `crates/sandbox-types/`: `SessionConfig`, `SessionId`, `SnapshotId`, `Snapshot`, and `SandboxError`.
-- `sdks/typescript/` and `sdks/python/`: the other SDKs. The TypeScript SDK's camelCase schemas do not yet match the server's snake_case JSON.
+- `sdks/typescript/` and `sdks/python/`: the other SDKs. They use the same snake_case wire format.

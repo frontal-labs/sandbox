@@ -19,10 +19,9 @@ http://localhost:8080/v1
 The SDKs default to `SANDBOX_BASE_URL=http://localhost:8080`. There is no
 hosted endpoint yet.
 
-**Known gap:** the Rust and Python SDKs use snake_case JSON, which matches the
-server. The TypeScript SDK's schemas use camelCase, so its responses do not parse
-against the server yet. The snapshot routes, `GET /v1/sessions/{id}/snapshots` and
-`GET /v1/sessions/{id}/snapshots/{snapshot_id}`, are routed.
+**Wire format:** all SDKs use the server's snake_case field names. Timestamps are
+RFC 3339 strings, and byte fields (stdin, stdout, stderr) are arrays of 0-255
+integers. The SDKs convert those arrays to bytes on their side.
 
 ## Routed endpoints
 
