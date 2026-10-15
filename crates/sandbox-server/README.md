@@ -41,7 +41,7 @@ Errors use the `ErrorBody` shape (`code`, `message`). Status codes follow the er
 | File read size | 16 MiB | `413`, `RESOURCE_EXHAUSTED` |
 | Request body size | 2 MiB | `413` from the framework |
 
-The process-wide snapshot registry in `sandbox-session` is separate, and caps at 1024 snapshots across all keys. A key that fills it blocks other keys' snapshots, so the registry should move into the server before the server is exposed to untrusted keys.
+Snapshots are held in this server's own table, so the per-key limits, the owner checks, and the total cap all apply to the same records. A snapshot holds a reference to the blob store, which is process-wide and is never freed. Blobs are not charged to a key, so the per-key limit bounds the number of snapshots, not the bytes they pin.
 
 ## Ownership and paths
 

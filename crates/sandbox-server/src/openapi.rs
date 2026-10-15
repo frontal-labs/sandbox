@@ -25,6 +25,8 @@ use utoipa::{Modify, OpenApi};
         crate::api::write_file,
         crate::api::delete_file,
         crate::api::take_snapshot,
+        crate::api::list_snapshots,
+        crate::api::get_snapshot,
         crate::api::fork_snapshot,
     ),
     components(schemas(

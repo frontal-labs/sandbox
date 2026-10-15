@@ -18,7 +18,7 @@ use sandbox_types::hash::ContentHash;
 use sandbox_types::policy::{NetworkPolicy, ResourceLimits};
 use sandbox_types::{
     ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, SessionState,
-    SessionStatus, SnapshotId, TenantId, Tier, TierPreference,
+    SessionStatus, Snapshot, SnapshotId, TenantId, Tier, TierPreference,
 };
 use sandbox_vfs::{OpenFlags, VfsError};
 use serde::{Deserialize, Serialize};
@@ -34,14 +34,26 @@ pub struct AppState {
     pub scheduler: Arc<Scheduler>,
     pub auth: Arc<AuthManager>,
     pub sessions: SessionTable,
-    pub snapshots: SnapshotOwners,
+    pub snapshots: SnapshotTable,
 }
 
-/// The key that took each snapshot. Snapshots are visible only to that key.
+/// A snapshot taken through the API. Only the key that took it can see it, and
+/// the root is the filesystem state it restores.
+#[derive(Clone)]
+struct SnapshotRecord {
+    owner: KeyId,
+    session: SessionId,
+    root: ContentHash,
+    created_at: SystemTime,
+    labels: HashMap<String, String>,
+}
+
+/// Snapshots held by the server, keyed by ID. The server owns this table, so
+/// the snapshot limits and the owner checks live in one place.
 #[derive(Clone, Default)]
-pub struct SnapshotOwners {
-    owners: Arc<RwLock<HashMap<SnapshotId, KeyId>>>,
-    /// Serializes snapshot admission, so the per-key count cannot be raced past.
+pub struct SnapshotTable {
+    records: Arc<RwLock<HashMap<SnapshotId, SnapshotRecord>>>,
+    /// Serializes snapshot admission, so the limits cannot be raced past.
     admit: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -60,6 +72,8 @@ pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 /// Snapshots one key may hold. Snapshots pin blobs in the shared store, and
 /// the process-wide snapshot registry is capped separately.
 pub const MAX_SNAPSHOTS_PER_KEY: usize = 32;
+/// Snapshots the server holds across all keys.
+pub const MAX_SNAPSHOTS_TOTAL: usize = 4096;
 
 /// Stores a new session if the caller and the server are under their limits.
 /// The check and the insert happen under one lock, so concurrent creates
@@ -299,7 +313,7 @@ pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Route
         scheduler,
         auth: auth.clone(),
         sessions: SessionTable::default(),
-        snapshots: SnapshotOwners::default(),
+        snapshots: SnapshotTable::default(),
     };
 
     Router::new()
@@ -311,6 +325,8 @@ pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Route
         .route("/v1/sessions/:id/fs/*path", axum::routing::put(write_file))
         .route("/v1/sessions/:id/fs/*path", delete(delete_file))
         .route("/v1/sessions/:id/snapshot", post(take_snapshot))
+        .route("/v1/sessions/:id/snapshots", get(list_snapshots))
+        .route("/v1/sessions/:id/snapshots/:snapshot_id", get(get_snapshot))
         .route("/v1/snapshots/:id/fork", post(fork_snapshot))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -350,8 +366,8 @@ pub async fn create_session(
     let labels = config.labels.clone();
     let session: Arc<dyn Session> = match config.initial_snapshot {
         Some(snapshot_id) => {
-            check_snapshot_owner(&state, &owner, snapshot_id).await?;
-            sandbox_session::restore(snapshot_id).await?.into()
+            let record = snapshot_for(&state, &owner, snapshot_id).await?;
+            sandbox_session::restore(record.root).await?.into()
         }
         None => Arc::new(IsolateBackend::new(config).await?),
     };
@@ -597,27 +613,36 @@ pub async fn take_snapshot(
     let _gate = own.gate.lock().await;
     let session = own.session;
     let _admit = state.snapshots.admit.lock().await;
-    let taken = state
-        .snapshots
-        .owners
-        .read()
-        .await
-        .values()
-        .filter(|k| **k == owner)
-        .count();
-    if taken >= MAX_SNAPSHOTS_PER_KEY {
-        return Err(SandboxError::resource_exhausted(format!(
-            "this key already holds {MAX_SNAPSHOTS_PER_KEY} snapshots"
-        ))
-        .into());
+    {
+        let records = state.snapshots.records.read().await;
+        if records.len() >= MAX_SNAPSHOTS_TOTAL {
+            return Err(
+                SandboxError::resource_exhausted("the server is at its snapshot limit").into(),
+            );
+        }
+        let held = records.values().filter(|r| r.owner == owner).count();
+        if held >= MAX_SNAPSHOTS_PER_KEY {
+            return Err(SandboxError::resource_exhausted(format!(
+                "this key already holds {MAX_SNAPSHOTS_PER_KEY} snapshots"
+            ))
+            .into());
+        }
     }
-    let snapshot_id = session.snapshot().await?;
+    let root = session.snapshot().await?;
+    let snapshot_id = SnapshotId::new();
+    let record = SnapshotRecord {
+        owner,
+        session: own.state.id,
+        root,
+        created_at: SystemTime::now(),
+        labels: own.state.labels.clone(),
+    };
     state
         .snapshots
-        .owners
+        .records
         .write()
         .await
-        .insert(snapshot_id, owner);
+        .insert(snapshot_id, record);
     Ok((
         StatusCode::CREATED,
         Json(TakeSnapshotResponse { snapshot_id }),
@@ -653,11 +678,11 @@ pub async fn fork_snapshot(
         .into());
     }
     let snapshot_id = parse_snapshot_id(&id)?;
-    check_snapshot_owner(&state, &owner, snapshot_id).await?;
+    let record = snapshot_for(&state, &owner, snapshot_id).await?;
 
     let mut session_ids = Vec::with_capacity(request.count as usize);
     for _ in 0..request.count {
-        let session: Arc<dyn Session> = sandbox_session::restore(snapshot_id).await?.into();
+        let session: Arc<dyn Session> = sandbox_session::restore(record.root).await?.into();
         let session_id = session.id();
         let entry = entry(owner.clone(), session, TenantId::nil(), HashMap::new());
         admit_session(&state, &owner, entry).await?;
@@ -671,15 +696,93 @@ fn parse_snapshot_id(raw: &str) -> Result<SnapshotId, ApiError> {
         .map_err(|_| SandboxError::not_found(format!("snapshot {raw} not found")).into())
 }
 
-/// Fails with `NotFound` unless the caller took the snapshot.
-async fn check_snapshot_owner(
+/// The snapshot, if the caller took it. Otherwise `NotFound`, which does not
+/// reveal that the snapshot exists.
+async fn snapshot_for(
     state: &AppState,
     owner: &KeyId,
     snapshot_id: SnapshotId,
-) -> Result<(), ApiError> {
-    let table = state.snapshots.owners.read().await;
-    match table.get(&snapshot_id) {
-        Some(taken_by) if taken_by == owner => Ok(()),
+) -> Result<SnapshotRecord, ApiError> {
+    let records = state.snapshots.records.read().await;
+    match records.get(&snapshot_id) {
+        Some(record) if record.owner == *owner => Ok(record.clone()),
+        _ => Err(SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into()),
+    }
+}
+
+/// The API view of a snapshot. The VFS root is the only state a snapshot
+/// captures, so `env` is empty and `cwd` is the root directory.
+fn snapshot_view(id: SnapshotId, record: &SnapshotRecord) -> Snapshot {
+    Snapshot {
+        id,
+        parent: None,
+        vfs_root: record.root,
+        env: HashMap::new(),
+        cwd: "/".to_string(),
+        tier: Tier::Isolate,
+        runtime_blob: None,
+        created_at: record.created_at,
+        labels: record.labels.clone(),
+    }
+}
+
+/// List the snapshots taken from one session.
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{id}/snapshots",
+    tag = "snapshots",
+    params(("id" = String, Path, description = "Session ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$")),
+    responses(
+        (status = 200, description = "Snapshots taken from this session", body = Vec<Snapshot>),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "No such session for this key", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn list_snapshots(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<Snapshot>>, ApiError> {
+    let session_id = owned(&state, &owner, &id).await?.state.id;
+    let records = state.snapshots.records.read().await;
+    let mut snapshots: Vec<Snapshot> = records
+        .iter()
+        .filter(|(_, r)| r.owner == owner && r.session == session_id)
+        .map(|(snapshot_id, r)| snapshot_view(*snapshot_id, r))
+        .collect();
+    snapshots.sort_by_key(|s| s.created_at);
+    Ok(Json(snapshots))
+}
+
+/// Read one snapshot taken from a session.
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{id}/snapshots/{snapshot_id}",
+    tag = "snapshots",
+    params(
+        ("id" = String, Path, description = "Session ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"),
+        ("snapshot_id" = String, Path, description = "Snapshot ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"),
+    ),
+    responses(
+        (status = 200, description = "The snapshot", body = Snapshot),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "No such session or snapshot for this key", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn get_snapshot(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path((id, snapshot_id)): Path<(String, String)>,
+) -> Result<Json<Snapshot>, ApiError> {
+    let session_id = owned(&state, &owner, &id).await?.state.id;
+    let snapshot_id = parse_snapshot_id(&snapshot_id)?;
+    let records = state.snapshots.records.read().await;
+    match records.get(&snapshot_id) {
+        Some(record) if record.owner == owner && record.session == session_id => {
+            Ok(Json(snapshot_view(snapshot_id, record)))
+        }
         _ => Err(SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into()),
     }
 }

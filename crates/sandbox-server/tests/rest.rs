@@ -432,3 +432,78 @@ async fn snapshot_limit_is_per_key() {
     let other_id = create(&app, &other).await;
     snapshot(&app, &other, &other_id).await;
 }
+
+async fn get_json(app: &axum::Router, key: &str, uri: &str) -> (StatusCode, Value) {
+    let (status, body) = call(app, "GET", uri, key, None).await;
+    let value = if body.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&body).unwrap_or(Value::Null)
+    };
+    (status, value)
+}
+
+#[tokio::test]
+async fn snapshot_listing_is_per_session_and_per_key() {
+    let (app, owner, other) = router();
+    let first = create(&app, &owner).await;
+    let second = create(&app, &owner).await;
+    let first_snap = snapshot(&app, &owner, &first).await;
+    let second_snap = snapshot(&app, &owner, &second).await;
+
+    let (status, list) = get_json(&app, &owner, &format!("/v1/sessions/{first}/snapshots")).await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![first_snap.as_str()],
+        "only this session's snapshots"
+    );
+    assert_ne!(first_snap, second_snap);
+
+    // Another key cannot list the session at all.
+    let (status, _) = get_json(&app, &other, &format!("/v1/sessions/{first}/snapshots")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_snapshot_returns_it_only_under_its_own_session() {
+    let (app, owner, other) = router();
+    let first = create(&app, &owner).await;
+    let second = create(&app, &owner).await;
+    let snap = snapshot(&app, &owner, &first).await;
+
+    let (status, body) = get_json(
+        &app,
+        &owner,
+        &format!("/v1/sessions/{first}/snapshots/{snap}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], snap);
+    assert_eq!(body["tier"], "isolate");
+    assert!(body["vfs_root"].as_str().unwrap().len() == 64);
+
+    // The same snapshot under a different session is not found.
+    let (status, _) = get_json(
+        &app,
+        &owner,
+        &format!("/v1/sessions/{second}/snapshots/{snap}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Another key is not found either.
+    let (status, _) = get_json(
+        &app,
+        &other,
+        &format!("/v1/sessions/{first}/snapshots/{snap}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

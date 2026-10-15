@@ -328,6 +328,82 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
       security:
       - bearer: []
+  /v1/sessions/{id}/snapshots:
+    get:
+      tags:
+      - snapshots
+      summary: List the snapshots taken from one session.
+      operationId: list_snapshots
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Snapshots taken from this session
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Snapshot'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/sessions/{id}/snapshots/{snapshot_id}:
+    get:
+      tags:
+      - snapshots
+      summary: Read one snapshot taken from a session.
+      operationId: get_snapshot
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+      - name: snapshot_id
+        in: path
+        description: Snapshot ID (ULID)
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session or snapshot for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
   /v1/snapshots/{id}/fork:
     post:
       tags:
