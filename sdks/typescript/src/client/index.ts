@@ -1,12 +1,16 @@
 import type { Result, SandboxError } from "../errors/index.js"
-import { isSandboxError, SandboxErrorCodes } from "../errors/index.js"
+import { createSandboxError, isSandboxError, SandboxErrorCodes } from "../errors/index.js"
+import type { ErrorCode } from "../errors/index.js"
 import * as z from "zod"
 import {
+  CreateSessionResponseSchema,
   ExecRequestSchema,
   ExecResultSchema,
+  ForkResponseSchema,
   SessionConfigSchema,
   SessionStateSchema,
   SnapshotSchema,
+  TakeSnapshotResponseSchema,
   type ExecRequest,
   type ExecResult,
   type SessionConfig,
@@ -42,32 +46,31 @@ export class Client {
     return new Client(config)
   }
 
+  private headers(contentType: boolean): Record<string, string> {
+    const headers: Record<string, string> = {}
+    if (contentType) {
+      headers["Content-Type"] = "application/json"
+    }
+    if (this.apiKey !== undefined) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`
+    }
+    return headers
+  }
+
   private async request<T>(
     path: string,
     options: RequestInit = {},
-    responseSchema?: z.ZodSchema<T>,
+    responseSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
   ): Promise<Result<T>> {
     const url = `${this.baseUrlValue}${path}`
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    }
-
-    if (this.apiKey !== undefined) {
-      (headers as Record<string, string>)["Authorization"] = `Bearer ${this.apiKey}`
-    }
-
     try {
       const response = await fetch(url, {
         ...options,
-        headers,
+        headers: { ...this.headers(options.body !== undefined), ...(options.headers as Record<string, string>) },
       })
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        return SandboxErrorCodes.internal(
-          errorData.message ?? `HTTP ${response.status}: ${response.statusText}`,
-        )
+        return errorFromResponse(response)
       }
 
       if (response.status === 204) {
@@ -98,6 +101,7 @@ export class Client {
     }
   }
 
+  /// Creates a session. Returns the new session's ID.
   async createSession(config: SessionConfig): Promise<Result<string>> {
     const parseResult = SessionConfigSchema.safeParse(config)
     if (!parseResult.success) {
@@ -106,10 +110,15 @@ export class Client {
       )
     }
 
-    return this.request<string>("/v1/sessions", {
-      method: "POST",
-      body: JSON.stringify(parseResult.data),
-    })
+    const created = await this.request(
+      "/v1/sessions",
+      { method: "POST", body: JSON.stringify(parseResult.data) },
+      CreateSessionResponseSchema,
+    )
+    if (isSandboxError(created)) {
+      return created
+    }
+    return created.session_id
   }
 
   async getSession(sessionId: string): Promise<Result<SessionState>> {
@@ -130,124 +139,36 @@ export class Client {
       )
     }
 
+    const { stdin, ...rest } = parseResult.data
+    const wire = { ...rest, stdin: stdin === undefined ? undefined : Array.from(stdin) }
     return this.request<ExecResult>(
       `/v1/sessions/${sessionId}/exec`,
-      {
-        method: "POST",
-        body: JSON.stringify(parseResult.data),
-      },
+      { method: "POST", body: JSON.stringify(wire) },
       ExecResultSchema,
     )
   }
 
+  /// Streaming exec is not implemented on the server, so this yields one
+  /// `UNSUPPORTED` error and does not send a request.
   async *execStream(
-    sessionId: string,
-    request: ExecRequest,
+    _sessionId: string,
+    _request: ExecRequest,
   ): AsyncGenerator<Result<ExecResult>, void, unknown> {
-    const parseResult = ExecRequestSchema.safeParse(request)
-    if (!parseResult.success) {
-      yield SandboxErrorCodes.invalidArgument(
-        `Invalid exec request: ${parseResult.error.message}`,
-      )
-      return
-    }
-
-    const url = `${this.baseUrlValue}/v1/sessions/${sessionId}/exec?stream=true`
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-    }
-
-    if (this.apiKey !== undefined) {
-      (headers as Record<string, string>)["Authorization"] = `Bearer ${this.apiKey}`
-    }
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(parseResult.data),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        yield SandboxErrorCodes.internal(
-          errorData.message ?? `HTTP ${response.status}: ${response.statusText}`,
-        )
-        return
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        yield SandboxErrorCodes.internal("No response body")
-        return
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-
-        for (const line of lines) {
-          if (line.trim()) {
-            try {
-              const parsed = JSON.parse(line)
-              const result = ExecResultSchema.safeParse(parsed)
-              if (result.success) {
-                yield result.data
-              } else {
-                yield SandboxErrorCodes.internal(
-                  `Failed to parse stream chunk: ${result.error.message}`,
-                )
-              }
-            } catch {
-              yield SandboxErrorCodes.internal("Failed to parse stream chunk")
-            }
-          }
-        }
-      }
-
-      if (buffer.trim()) {
-        try {
-          const parsed = JSON.parse(buffer)
-          const result = ExecResultSchema.safeParse(parsed)
-          if (result.success) {
-            yield result.data
-          } else {
-            yield SandboxErrorCodes.internal(
-              `Failed to parse final stream chunk: ${result.error.message}`,
-            )
-          }
-        } catch {
-          yield SandboxErrorCodes.internal("Failed to parse final stream chunk")
-        }
-      }
-    } catch (error) {
-      if (isSandboxError(error)) {
-        yield error
-      } else {
-        yield SandboxErrorCodes.networkError(
-          error instanceof Error ? error.message : "Network error",
-          error instanceof Error ? error : undefined,
-        )
-      }
-    }
+    yield SandboxErrorCodes.unsupported("streaming exec is not implemented yet")
   }
 
   async snapshot(sessionId: string): Promise<Result<Snapshot>> {
-    return this.request<Snapshot>(
+    const taken = await this.request(
       `/v1/sessions/${sessionId}/snapshot`,
       { method: "POST" },
-      SnapshotSchema,
+      TakeSnapshotResponseSchema,
     )
+    if (isSandboxError(taken)) {
+      return taken
+    }
+    return this.getSnapshot(sessionId, taken.snapshot_id)
   }
 
-  // Not routed by the server yet (see crates/sandbox-server/src/api.rs).
   async listSnapshots(sessionId: string): Promise<Result<Snapshot[]>> {
     return this.request<Snapshot[]>(
       `/v1/sessions/${sessionId}/snapshots`,
@@ -256,7 +177,6 @@ export class Client {
     )
   }
 
-  // Not routed by the server yet (see crates/sandbox-server/src/api.rs).
   async getSnapshot(sessionId: string, snapshotId: string): Promise<Result<Snapshot>> {
     return this.request<Snapshot>(
       `/v1/sessions/${sessionId}/snapshots/${snapshotId}`,
@@ -264,4 +184,35 @@ export class Client {
       SnapshotSchema,
     )
   }
+
+  /// Starts `count` sessions from a snapshot. Returns their IDs.
+  async fork(snapshotId: string, count: number): Promise<Result<string[]>> {
+    const forked = await this.request(
+      `/v1/snapshots/${snapshotId}/fork`,
+      { method: "POST", body: JSON.stringify({ count }) },
+      ForkResponseSchema,
+    )
+    if (isSandboxError(forked)) {
+      return forked
+    }
+    return forked.session_ids
+  }
+}
+
+/// Maps a non-2xx response to the error the server sent. The server's error
+/// body is `{ code, message }`. A body without it is mapped from the status.
+async function errorFromResponse(response: Response): Promise<SandboxError> {
+  const body = (await response.json().catch(() => ({}))) as { code?: unknown; message?: unknown }
+  const message =
+    typeof body.message === "string" ? body.message : `HTTP ${response.status}: ${response.statusText}`
+  if (typeof body.code === "string") {
+    return createSandboxError(body.code as ErrorCode, message)
+  }
+  const code: ErrorCode =
+    response.status === 401 ? "PERMISSION_DENIED"
+    : response.status === 404 ? "NOT_FOUND"
+    : response.status === 400 ? "INVALID_ARGUMENT"
+    : response.status === 501 ? "UNSUPPORTED"
+    : "INTERNAL"
+  return createSandboxError(code, message)
 }

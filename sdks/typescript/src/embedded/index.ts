@@ -65,11 +65,13 @@ export class EmbeddedSandbox {
       return SandboxErrorCodes.invalidState("No active session")
     }
 
-    return this.client.exec(this.sessionId, {
-      argv: ["sh", "-c", command],
-      env: {},
-      stream: false,
-    })
+    // The isolate shell has no `sh`, so the command is split into argv, as the
+    // Rust SDK does. Quoting is not interpreted.
+    const argv = command.split(/\s+/).filter((word) => word.length > 0)
+    if (argv.length === 0) {
+      return SandboxErrorCodes.invalidArgument("command is empty")
+    }
+    return this.client.exec(this.sessionId, { argv, env: {}, stream: false })
   }
 
   async snapshot(): Promise<Result<Snapshot>> {

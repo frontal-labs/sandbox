@@ -17,37 +17,37 @@ import {
 describe("types", () => {
   it("should create session config with builder", () => {
     const config: SessionConfig = {
-      tenantId: "tenant-123",
-      tierPreference: "auto",
+      tenant_id: "tenant-123",
+      tier_preference: "auto",
       limits: {},
-      network: { defaultDeny: true, rules: [] },
+      network: { default_deny: true, rules: [] },
       env: {},
       cwd: "/work",
       labels: {},
     }
 
-    expect(config.tenantId).toBe("tenant-123")
-    expect(config.tierPreference).toBe("auto")
+    expect(config.tenant_id).toBe("tenant-123")
+    expect(config.tier_preference).toBe("auto")
     expect(config.cwd).toBe("/work")
   })
 
   it("should create resource limits", () => {
     const limits: ResourceLimits = {
-      memoryBytes: 1024 * 1024 * 1024,
-      cpuMsPerSec: 500,
+      memory_bytes: 1024 * 1024 * 1024,
+      cpu_ms_per_sec: 500,
     }
 
-    expect(limits.memoryBytes).toBe(1024 * 1024 * 1024)
-    expect(limits.cpuMsPerSec).toBe(500)
+    expect(limits.memory_bytes).toBe(1024 * 1024 * 1024)
+    expect(limits.cpu_ms_per_sec).toBe(500)
   })
 
   it("should create network policy", () => {
     const policy: NetworkPolicy = {
-      defaultDeny: false,
+      default_deny: false,
       rules: [],
     }
 
-    expect(policy.defaultDeny).toBe(false)
+    expect(policy.default_deny).toBe(false)
     expect(policy.rules).toEqual([])
   })
 
@@ -99,15 +99,15 @@ describe("exec request", () => {
 describe("exec result", () => {
   it("should create exec result", () => {
     const result: ExecResult = {
-      exitCode: 0,
+      exit_code: 0,
       stdout: new TextEncoder().encode("hello"),
       stderr: new TextEncoder().encode(""),
-      cpuMs: 10,
-      wallMs: 20,
+      cpu_ms: 10,
+      wall_ms: 20,
     }
 
-    expect(result.exitCode).toBe(0)
-    expect(result.cpuMs).toBe(10)
+    expect(result.exit_code).toBe(0)
+    expect(result.cpu_ms).toBe(10)
   })
 })
 
@@ -116,12 +116,12 @@ describe("snapshot", () => {
     const snap: Snapshot = {
       id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
       parent: undefined,
-      vfsRoot: "hash123",
+      vfs_root: "hash123",
       env: {},
       cwd: "/work",
       tier: "isolate",
-      runtimeBlob: undefined,
-      createdAt: "2024-01-01T00:00:00Z",
+      runtime_blob: undefined,
+      created_at: "2024-01-01T00:00:00Z",
       labels: {},
     }
 

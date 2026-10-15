@@ -2,7 +2,7 @@
 
 TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox), the execution platform for AI agents. The npm package is `sandbox-sdk`. Source is in `sdks/typescript/`.
 
-**Status: early.** The HTTP client and the Zod types are written, but the client's request paths do not match `sandbox-server` (see Known issues), and the server's handlers return placeholder strings. "Embedded" mode does not start a local backend. Treat this SDK as unverified against a live server.
+**Status: early.** The client covers sessions, exec, snapshots, and forks over the server's `/v1` API. Field names and byte encodings match the server's wire format, and the tests check that against server-shaped responses and against a live server. Streaming exec is refused with `UNSUPPORTED`. "Embedded" mode is a wrapper over a remote server, not a local backend.
 
 ## Installation
 
@@ -18,7 +18,7 @@ Requires Node.js 20+ (per `engines` in `package.json`).
 
 ## Quick Start
 
-This shows the intended usage. It will not work end to end until the path mismatch below is fixed.
+This shows the usage against a running server.
 
 ```typescript
 import { Client, isSandboxError } from "sandbox-sdk"
@@ -33,8 +33,8 @@ const client = new Client({
 // const client = Client.fromEnv()
 
 const session = await client.createSession({
-  tenantId: "my-tenant",
-  tierPreference: "auto",
+  tenant_id: "my-tenant",
+  tier_preference: "auto",
 })
 if (isSandboxError(session)) throw session
 
@@ -46,7 +46,7 @@ const result = await client.exec(session, {
 if (isSandboxError(result)) {
   console.error("Execution failed:", result.code, result.message)
 } else {
-  console.log("Exit code:", result.exitCode)
+  console.log("Exit code:", result.exit_code)
   console.log("Stdout:", new TextDecoder().decode(result.stdout))
 }
 ```
@@ -57,14 +57,14 @@ if (isSandboxError(result)) {
 
 - `EmbeddedSandbox.new()` checks `http://localhost:8080/health` when `SANDBOX_BASE_URL` is unset, then creates a session on that server. It returns `UNAVAILABLE` if the check fails. The server does not route `/health` yet.
 - `serverPath` in `EmbeddedSandboxConfig` is accepted and ignored.
-- `exec(command)` runs `sh -c <command>` through the remote `Client`, so it needs a running server.
+- `exec(command)` splits the command on whitespace into argv and runs it through the remote `Client`. Quoting is not interpreted, and the isolate shell has no `sh`.
 
 Local in-process execution is planned. See `PLAN.md`.
 
 ```typescript
 import { EmbeddedSandbox, isSandboxError } from "sandbox-sdk"
 
-const sandbox = await EmbeddedSandbox.new({ tenantId: "local-dev" })
+const sandbox = await EmbeddedSandbox.new({ tenant_id: "local-dev" })
 if (isSandboxError(sandbox)) throw sandbox
 
 const result = await sandbox.exec("echo hi")
@@ -96,10 +96,10 @@ Validates the config with Zod, then POSTs it. Returns the session ID.
 
 ```typescript
 interface SessionConfig {
-  tenantId: string                              // required, min length 1
+  tenant_id: string                             // required, min length 1
   tierPreference?: "auto" | "isolate" | "vm"    // default "auto"
   limits?: ResourceLimits
-  network?: NetworkPolicy                       // default defaultDeny: true
+  network?: NetworkPolicy                       // default default_deny: true
   env?: Record<string, string>
   cwd?: string                                  // default "/work"
   initialSnapshot?: string
@@ -131,7 +131,7 @@ interface ExecRequest {
 }
 
 interface ExecResult {
-  exitCode: number
+  exit_code: number
   stdout: Uint8Array
   stderr: Uint8Array
   cpuMs: number
@@ -200,9 +200,9 @@ Note: the client currently maps every non-OK HTTP response to `INTERNAL`. It doe
 
 ## Known issues
 
-- **Wire casing.** The server sends snake_case JSON (`vfs_root`, `created_at`). These schemas expect camelCase (`vfsRoot`, `createdAt`), so responses from the server fail to parse until one side changes.
-- **Not routed on the server:** the `GET` session list and the `/health` endpoint that `EmbeddedSandbox.new` checks. `listSnapshots` and `getSnapshot` are routed.
-- **Tests.** `tests/types.test.ts` covers the types only. No client tests exist.
+- **Not routed on the server:** the `GET` session list and the `/health` endpoint that `EmbeddedSandbox.new` checks. Any HTTP answer from that path counts as reachable.
+- **Tests.** `tests/types.test.ts` covers the types. `tests/wire.test.ts` checks the wire format with a stubbed `fetch`, and runs one live test when `SANDBOX_BASE_URL` and `SANDBOX_API_KEY` are set.
+- **Streaming exec, sleep, VFS watch, replay, and bench** are not implemented. Streaming exec is refused with `UNSUPPORTED`.
 
 ## Development
 
