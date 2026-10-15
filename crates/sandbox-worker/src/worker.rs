@@ -234,7 +234,10 @@ fn map_status(status: Status) -> SandboxError {
 /// Creates a fresh directory with mode `0700`. Its name is short, so the socket
 /// path stays under the platform's Unix socket path limit.
 fn private_dir() -> Result<PathBuf, SandboxError> {
-    let name = format!("sbx-{}", &ulid::Ulid::new().to_string()[..12]);
+    // A ULID starts with 10 timestamp characters, so only the last 16 are random.
+    // Keeping just a short prefix made two workers started in the same millisecond
+    // collide.
+    let name = format!("sbx-{}", &ulid::Ulid::new().to_string()[10..]);
     let dir = std::env::temp_dir().join(name);
     std::fs::DirBuilder::new()
         .mode(0o700)
