@@ -18,6 +18,10 @@ jobs:
       - uses: actions/checkout@v4
       # rust-toolchain.toml pins the toolchain; rustup installs it on first use.
       - uses: Swatinem/rust-cache@v2
+      # The runner's disk filled during the workspace build. These preinstalled
+      # toolchains are not used by this job.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android && df -h /
       # sandbox-proto's build script runs protoc (see docs/DEVELOPMENT.md).
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler && protoc --version
