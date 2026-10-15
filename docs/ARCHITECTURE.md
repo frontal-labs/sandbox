@@ -23,7 +23,7 @@ Rust workspace with TypeScript and Python SDKs.
 | `sandbox-snapshot`, `sandbox-trace`, `sandbox-vmm`, `sandbox-guest` | Early or partial scaffolding |
 | `sandbox-runtime` | `execute_script` runs JS in a fresh V8 isolate with a timeout, a heap cap, and captured `console.log`. No modules |
 | `sandbox-wasm` | Runs WASI preview1 command modules. Files are the VFS directory mounted as the preopen. Stdio is in memory. Tool registry at `/etc/tools.toml`. Compiled modules cached per process |
-| `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot` and `restore` work; `sleep` returns `Unsupported` |
+| `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot`, `restore`, and `sleep` (a checkpoint) work; the server releases a sleeping session (ADR 0006) |
 | `sandbox-worker` | One child process per session, served as gRPC over a private Unix socket (mode 0700), with crash isolation. No seccomp, cgroups, or namespaces |
 | `sandbox-proto` | Generated protobuf and gRPC bindings from `proto/`, with conversions to and from `sandbox-types` |
 | `sandbox-promote` | Stub. Needs a Linux host with KVM |
@@ -94,7 +94,7 @@ crates/
 ├── sandbox-guest       # In-VM guest agent
 ├── sandbox-promote     # Isolate-to-VM handoff
 ├── sandbox-policy      # Capabilities, network policy, limits
-├── sandbox-trace       # Event log, diff, and replay
+├── sandbox-trace       # Trace format and replay (ADR 0007); event log
 ├── sandbox-worker      # Per-tenant worker process
 ├── sandbox-scheduler   # Placement, pools, sleep, metering
 └── sandbox-server      # HTTP API (axum)

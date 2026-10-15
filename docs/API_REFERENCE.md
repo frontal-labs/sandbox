@@ -1,7 +1,8 @@
 # API Reference
 
-> **Status: early.** Session, exec, filesystem, snapshot, and fork routes work
-> against in-memory sessions, and every `/v1` route requires a valid API key.
+> **Status: early.** Session, exec, filesystem, snapshot, fork, sleep, and wake
+> routes work against in-memory sessions, and every `/v1` route requires a valid
+> API key.
 > Settings the backend does not enforce (VM tier, custom limits, network policy,
 > secrets, environment, working directory) are refused with `501`, not ignored. The full target API is specified in
 > [PLAN.md section 4.15](../PLAN.md#415-sandbox-server).
@@ -35,6 +36,8 @@ integers. The SDKs convert those arrays to bytes on their side.
 | PUT | `/v1/sessions/{id}/fs/{path}` | `write_file` | Write a file |
 | DELETE | `/v1/sessions/{id}/fs/{path}` | `delete_file` | Delete a file |
 | POST | `/v1/sessions/{id}/snapshot` | `take_snapshot` | Snapshot the committed filesystem |
+| POST | `/v1/sessions/{id}/sleep` | `sleep_session` | Snapshot, then release the live session (ADR 0006) |
+| POST | `/v1/sessions/{id}/wake` | `wake_session` | Restore a sleeping session under the same ID |
 | POST | `/v1/snapshots/{id}/fork` | `fork_snapshot` | Start 1 to 64 sessions from a snapshot |
 | GET | `/v1/sessions/{id}/snapshots` | `list_snapshots` | Snapshots taken from a session |
 | GET | `/v1/sessions/{id}/snapshots/{snapshot_id}` | `get_snapshot` | One snapshot taken from a session |
@@ -198,20 +201,44 @@ Delete returns `204`. Paths are interpreted against the session VFS (see
 POST /v1/sessions/{id}/snapshot
 ```
 
-Planned response: `201` with `id`, `parent`, `session`, `vfs_root` (BLAKE3
-hex, matching `ContentHash` in `sandbox-types`), `tier`, `created_at`, `labels`.
+Response: `201` with `{ "snapshot_id": "..." }`. Read the record with
+`GET /v1/sessions/{id}/snapshots/{snapshot_id}`, which returns `id`, `parent`,
+`vfs_root` (BLAKE3 hex, matching `ContentHash`), `env`, `cwd`, `tier`,
+`runtime_blob`, `created_at`, and `labels`.
 
-### Fork snapshot (planned)
+### Sleep and wake
+
+```
+POST /v1/sessions/{id}/sleep
+POST /v1/sessions/{id}/wake
+```
+
+Sleep checkpoints the filesystem, records it as a snapshot under the caller's
+key, and releases the live session, so a sleeping session holds no filesystem in
+memory. Response: `200` with `{ "snapshot_id": "..." }`. The session's status is
+`sleeping`.
+
+Wake restores the session from the root that sleep recorded. Response: `200`
+with the session state, status `running`. The session keeps its ID. Files come
+back. The working directory and environment start fresh, because shell state is
+not part of a snapshot.
+
+While a session sleeps, `exec`, file operations, and `snapshot` return `409` with
+code `INVALID_STATE`. `get` and `destroy` still work. Sleeping or waking in the
+wrong state returns `409`. See [ADR 0006](adr/0006-sleep-and-wake.md).
+
+### Fork snapshot
 
 ```
 POST /v1/snapshots/{id}/fork
 ```
 
 ```json
-{ "count": 3, "config_overrides": { "memory_limit_mb": 1024 } }
+{ "count": 3 }
 ```
 
-Planned response: `201` with a `sessions` array of `{id, snapshot}`.
+Response: `200` with `{ "session_ids": [...] }`. `count` is 1 to 64. The caller
+must own the snapshot.
 
 ## Rate limiting (planned)
 
@@ -220,46 +247,17 @@ yet. The `middleware.rs` module only adds a request ID.
 
 ## CLI
 
-The `sandbox` binary (crate `cli`, source `cli/src/`) runs commands in an
-in-process isolate session. It does not call the server.
+The `sandbox` binary (crate `cli`) runs commands in an in-process isolate
+session, records and replays traces, and times the local runtime. `snapshot`
+and `fork` call a server named by `SANDBOX_BASE_URL`. See
+[cli/README.md](../cli/README.md) for every command.
 
 ```bash
-sandbox run "echo hi | cat > /a && cat /a"  # args are joined and run as one script
-sandbox shell                               # one script per stdin line; state persists
-sandbox snapshot <session-id>     # returns an error; not implemented yet
-sandbox fork <snapshot-id> 3      # returns an error; not implemented yet
-sandbox replay <trace-file>       # returns an error; not implemented yet
-sandbox serve --addr 0.0.0.0:8080 # returns an error; not implemented yet
-sandbox bench [name]              # returns an error; not implemented yet
+sandbox run --trace one.jsonl "echo hi | cat > /a && cat /a"  # exit code = the script's
+sandbox shell --trace session.jsonl                           # one script per stdin line
+sandbox replay one.jsonl                                      # exit 1 on any divergence
+sandbox bench --name exec_echo                                # one JSON line per case
+sandbox serve --addr 127.0.0.1:8080                           # prints one API key to stderr
+SANDBOX_BASE_URL=... SANDBOX_API_KEY=... sandbox snapshot <session-id>
+SANDBOX_BASE_URL=... SANDBOX_API_KEY=... sandbox fork <snapshot-id> --count 3
 ```
-
-`run` exits with the script's exit code. Command output goes to stdout and
-stderr. Only builtins run. Other commands exit 127 with a message. See
-`crates/sandbox-shell/src/lib.rs` for the supported shell syntax.
-
-`sandbox-server` has no binary target (`crates/sandbox-server/src` has only
-`lib.rs`, `api.rs`, `auth.rs`, `middleware.rs`), so there is currently no way to
-run the HTTP routes.
-
-## SDKs
-
-Status of each client:
-
-- **Rust** (`sdks/rust`, crate `sandbox-sdk`): the HTTP client methods
-  (`create_session`, `exec`, `snapshot`, `destroy_session`) return `Unsupported`.
-  In embedded mode, `create_session` and `exec` also return `Unsupported`. The
-  working in-process path is `sandbox-session`'s `IsolateBackend`, which the
-  CLI uses directly.
-- **TypeScript** (`sdks/typescript`, npm `sandbox-sdk`): has a fetch-based
-  client, zod-validated types, and an embedded wrapper that spawns
-  `sandbox-server`. Its paths do not match the server (see the known mismatch
-  above).
-- **Python** (`sdks/python`, package `sandbox_sdk`): httpx-based client with
-  the same path mismatch, plus an embedded wrapper.
-
-None of the SDKs has been run end to end against the server in this repo.
-
-## OpenAPI
-
-Planned, not yet generated. PLAN.md section 4.15 requires an OpenAPI spec
-generated from types, with CI failing on drift. No spec file is committed.

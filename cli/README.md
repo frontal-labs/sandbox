@@ -1,70 +1,43 @@
-# Sandbox CLI
+# sandbox CLI
 
-Command-line interface for Frontal Sandbox. The crate is `cli` (`cli/`), and it builds a binary named `sandbox`.
-
-**Status: early scaffolding.** Every subcommand parses its arguments, but only prints a message. None of them execute code, create sessions, or call the server yet. See `cli/src/commands.rs`.
-
-## Installation
-
-Build and install from the repository root:
-
-```bash
-cargo install --path cli
-# or build without installing
-cargo build -p cli --bin sandbox
-```
+The `sandbox` binary, built from the `cli` crate. It runs commands in the local isolate runtime, drives a running server, and records and replays traces.
 
 ## Commands
 
-| Command | Status | Notes |
-|---------|--------|-------|
-| `sandbox run <command>...` | Stub | Prints the command, cwd, and limits. Options: `-c/--cwd` (default `/work`), `--memory` (MB, default 512), `--cpu` (ms per second, default 1000). Execution has a `TODO`. |
-| `sandbox shell` | Stub | Prints the cwd (`-c/--cwd`, default `/work`). Interactive shell has a `TODO`. |
-| `sandbox snapshot <session_id>` | Stub | Prints a message only. |
-| `sandbox fork <snapshot_id>` | Stub | Prints a message only. `-c/--count` (default 1). |
-| `sandbox replay <trace_file>` | Stub | Prints the path only. |
-| `sandbox serve` | Stub | Prints the address only. `--addr` (default `0.0.0.0:8080`). It does not start `sandbox-server`. |
-| `sandbox bench` | Stub | Prints the name only. `-n/--name` (optional). |
+| Command | What it does |
+|---------|--------------|
+| `sandbox run [--trace FILE] <command>...` | Runs the arguments, joined with spaces, as one shell script in a new local sandbox. `--trace` writes the script and its output to FILE. |
+| `sandbox shell [--trace FILE]` | Reads one script per line from stdin in one local sandbox. `exit` or end of input stops it. `--trace` writes every line to FILE when the shell exits. |
+| `sandbox replay <TRACE_FILE>` | Runs the scripts of a trace, in order, in a fresh local sandbox and compares each output with the recording. Exits 0 when every run matches and 1 when any run diverges. |
+| `sandbox bench [-n NAME]` | Times the cases in the table below and prints one JSON line per case. |
+| `sandbox serve [--addr ADDR]` | Starts the server in the foreground (default `0.0.0.0:8080`). Prints one API key to stderr. |
+| `sandbox snapshot <SESSION_ID>` | Snapshots a session on the server named by `SANDBOX_BASE_URL`, with `SANDBOX_API_KEY`. |
+| `sandbox fork <SNAPSHOT_ID> [-c N]` | Forks a snapshot into N sessions on that server. |
 
 Run `sandbox --help` or `sandbox <command> --help` for the generated help text.
 
-## Examples
+## Traces
 
-These show the current argument syntax. Today they only print what they would do.
+A trace is JSON Lines: a header line, then one line per script. See [ADR 0007](../docs/adr/0007-trace-format-and-replay.md) for the format and for what replay does and does not check.
 
 ```bash
-# Run a command (prints only; execution is not implemented)
-sandbox run --memory 512 --cpu 1000 "echo hello"
-
-# Interactive shell (stub)
-sandbox shell --cwd /work
-
-# Snapshot and fork (stubs)
-sandbox snapshot my-session
-sandbox fork snap_abc123 --count 3
-
-# Replay a trace (stub)
-sandbox replay trace.jsonl
-
-# Start the server address (stub; does not start sandbox-server)
-sandbox serve --addr 127.0.0.1:8080
+sandbox run --trace one.jsonl 'echo hi | cat > /a && cat /a'
+sandbox replay one.jsonl        # replayed 1 runs: 0 diverged
 ```
 
-## Configuration
+## Benchmarks
 
-Not implemented. The CLI does not read `SANDBOX_API_URL`, `SANDBOX_API_KEY`, or any config file, and it has no `--url` or `--key` flags. The planned server configuration is tracked in `PLAN.md`.
+`sandbox bench` runs these cases on the local isolate runtime, with 10 warm-up and 200 measured iterations each:
 
-## Not present
+| Case | Operation |
+|------|-----------|
+| `exec_echo` | one `echo` script |
+| `shell_pipeline` | `echo a \| cat \| cat` |
+| `vfs_write_read_4k` | write 4 KiB to a file and read it back through the VFS |
+| `snapshot_restore` | checkpoint the filesystem and start a session from the checkpoint |
 
-These are not implemented in `cli/src/commands.rs`, so do not use them:
+Each line reports `iterations`, `mean_ns`, `min_ns`, `p50_ns`, `p90_ns`, `p99_ns`, and `max_ns`. Percentiles are exact nearest-rank values over the iterations. Compare runs on the same machine, and build with `--release` for numbers you intend to keep.
 
-- `sandbox admin` (drain host, force GC, inspect trace)
-- `sandbox completions`
-- `--config` on `serve`
-- `--suite` on `bench` (the flag is `--name`)
+## Environment
 
-## Related
-
-- `sdks/rust/`: Rust SDK used by the CLI (its client methods are also stubs).
-- `crates/sandbox-server/`: the server, whose handlers currently return placeholder strings.
-- `PLAN.md`: target behavior and milestones.
+- `SANDBOX_BASE_URL` (default `http://localhost:8080`) and `SANDBOX_API_KEY`: used by `snapshot` and `fork`.

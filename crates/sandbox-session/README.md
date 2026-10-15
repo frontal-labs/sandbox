@@ -1,37 +1,26 @@
-# Sandbox Session
+# sandbox-session
 
-`Session` trait and the isolate (Tier 1) backend for the sandbox system.
+The `Session` trait and the isolate (Tier 1) backend.
 
-**Status: stub.** The trait is defined. `IsolateBackend` is a shell that records an id and tier. `exec` returns an empty handle, `snapshot` and `sleep` return fresh ids without saving state, and `fs()` panics with `unimplemented!()`. `restore` returns `unsupported`. `VmBackend` and the Auto tier do not exist.
+**Status: partial, in-process.** `IsolateBackend` owns a VFS and a shell. `exec` and `run_script` run builtin commands, `fs()` gives the VFS, and `snapshot`, `restore`, and `sleep` work. `VmBackend` and the Auto tier do not exist.
 
 ## Public API
 
-Re-exported from `src/lib.rs`: `IsolateBackend`, `Session`.
+Re-exported from `src/lib.rs`: `IsolateBackend`, `Session`, `restore`.
 
-- `trait Session` (`src/session.rs`): `id()`, `tier()`, `exec(ExecRequest) -> ExecHandle`, `fs() -> Box<dyn SessionFs>`, `snapshot()`, `sleep()`, `destroy(self: Box<Self>)`. All async methods return `Result<_, SandboxError>`.
-- `trait SessionFs`: `open`, `read`, `write`, `stat`, `readdir`, `mkdir`, `rm`, `rename`, `symlink`, `readlink`, `truncate`, `commit`. Handles are `u64`.
-- `ExecHandle` (`src/session.rs`): buffered `stdout`, `stderr`, and `stdin` as `Vec<u8>`, plus `wait()`. This is not the streaming shape in the PLAN.
-- `IsolateBackend` (`src/backend.rs`): `new(SessionConfig) -> Result<Self>`. Its `fs()` panics.
-- `Session::snapshot()` returns the committed root hash. The session keeps running. The server records the hash and owns the snapshot.
-- `restore(root: ContentHash)` (`src/backend.rs`): starts a session whose filesystem is that root. Blobs live in a process-wide store, which is never freed. The caller decides who may use a root.
+- `trait Session` (`src/session.rs`): `id()`, `tier()`, `exec(ExecRequest)`, `run_script(&str)`, `fs() -> &dyn SessionFs`, `snapshot() -> ContentHash`, `sleep() -> ContentHash`, and `destroy(self: Box<Self>)`. Every async method returns `Result<_, SandboxError>`.
+- `trait SessionFs` (re-exported from `sandbox-vfs`): file operations and `watch` (ADR 0005).
+- `IsolateBackend::new(SessionConfig)` starts a session. `exec` refuses streaming, timeouts, and an empty argv, rather than ignoring them.
+- `snapshot()` returns the committed root. The session keeps running. The server records the root and owns the snapshot (ADR 0004).
+- `sleep()` checkpoints the root, as `snapshot` does. The owner drops the session to release it (ADR 0006).
+- `restore(root)` starts a session whose filesystem is that root. Blobs live in a process-wide store, which is never freed.
 
-## Planned design
+## Limits
 
-- `IsolateBackend` wires together `sandbox-shell`, `sandbox-runtime`, `sandbox-wasm`, `sandbox-vfs`, and `sandbox-policy`. Command resolution goes shell, builtin, VFS executable, WASM tool, then `NeedsVm`.
-- `VmBackend` proxies to the guest agent over vsock (`sandbox-vmm`, `sandbox-guest`).
-- `Auto` starts on the isolate backend and calls `sandbox-promote` on `NeedsVm`.
-- The PLAN's streaming `ExecHandle` (`BoxStream` stdout and stderr, bounded stdin, cancellation token) is not implemented.
-
-## Invariants and security assumptions
-
-- The SDK should not depend on the tier. Tier is read-only session metadata.
-- Filesystem access must go through capability checks. Not implemented: `fs()` panics today.
-- Session state is not durable. `snapshot` and `sleep` do not record anything.
-
-## Example
-
-Not provided. `exec` returns an empty handle, and `fs()` panics, so an example would be misleading.
+- Shell state (working directory and environment) is not part of a snapshot or a sleep. A restored session starts with fresh shell state.
+- Session state is in memory. Nothing is durable across a process restart.
+- Exec timeouts and streaming exec are refused (`UNSUPPORTED`) until they are implemented.
 
 ## Spec
 
-See [PLAN.md](../../PLAN.md) section 4.8.
+See [PLAN.md](../../PLAN.md) section 4.8. The VM tier and the streaming `ExecHandle` in the plan are not implemented.

@@ -16,7 +16,7 @@ Source: PLAN.md section 6. Milestone acceptance criteria are in PLAN.md section 
 | Tier 2 resume from snapshot | < 150 ms p50 | none | Tier 2 is not implemented. |
 | Promotion (Tier 1 to Tier 2) | < 400 ms (M4 acceptance) | none | Promotion is not implemented. |
 | Idle sessions per 64 GB host | 10,000+ | `load` scenario `concurrent_sessions` | Scenario uses sleeps and is not a capacity test. |
-| Idle memory per sleeping session | 0 (on disk only) | none | Sleep is not implemented. |
+| Idle memory per sleeping session | 0 (on disk only) | none | Sleep releases the live session and keeps its root in server memory (ADR 0006). Nothing is written to disk, and no memory is measured. |
 
 Earlier drafts also listed p99 and capacity numbers that do not appear in PLAN.md section 6. They have been removed.
 

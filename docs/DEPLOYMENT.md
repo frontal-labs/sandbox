@@ -17,7 +17,7 @@ The TypeScript SDK (`sdks/typescript`, npm package `sandbox-sdk`) and the Python
 
 ### CLI
 
-The `sandbox` binary is built from the `cli` crate (`cli/src/main.rs`). `run` and `shell` execute builtin commands in an in-process isolate session. `snapshot`, `fork`, `replay`, `serve`, and `bench` return "not implemented" errors (`cli/src/commands.rs`).
+The `sandbox` binary is built from the `cli` crate (`cli/src/main.rs`). `run` and `shell` execute builtin commands in an in-process isolate session. `record` with `--trace`, `replay`, and `bench` work on the local runtime. `snapshot` and `fork` call a server named by `SANDBOX_BASE_URL`, and `serve` starts it in the foreground (`cli/src/commands.rs`).
 
 ```bash
 cargo run -p cli -- run "echo hi"   # prints "hi"

@@ -21,5 +21,4 @@ cargo run -p sandbox-server --bin gen_openapi
 ## Known gaps
 
 - Routes that return 501 refuse a setting the backend does not enforce yet. Their responses say so.
-- The Python and TypeScript SDKs also call `GET /v1/sessions/{id}/snapshots` and `GET /v1/sessions/{id}/snapshots/{snapshot_id}`. The server does not route them, so those calls return 404. They are not in this spec.
 - Byte fields (`stdout`, `stderr`, `stdin`) are integer arrays, which is serde's default for `Vec<u8>`. The SDKs model them as bytes but do not decode them. Choosing a JSON encoding (for example base64) is a wire-format decision that is still open.

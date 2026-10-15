@@ -71,7 +71,7 @@ Last reviewed against the source tree on 2026-10-13.
 - [ ] Tools: `jq`, `ripgrep`, `sqlite3`, `git`, `python`
 - [ ] Coreutils to 40 commands
 - [ ] `node:` shim (`fs`, `path`, `os`, `child_process`, `events`, `stream`, `util`, `buffer`, `url`, `crypto`)
-- [ ] **Partial.** `sandbox-trace`: `log.rs` and `replay.rs` exist; early
+- [x] `sandbox-trace`: trace format, recording from `run` and `shell`, and replay (ADR 0007). The event log in `log.rs` is still unused. Early
 
 ### Acceptance Criteria
 - [ ] `git clone` (via allowed host), commit, diff works
@@ -101,7 +101,7 @@ Last reviewed against the source tree on 2026-10-13.
 ### Acceptance Criteria
 - [ ] Snapshot/fork under 5 ms
 - [ ] 1,000 concurrent sessions on one node in load test
-- [ ] Sleeping sessions use no memory
+- [x] Sleeping sessions hold no VFS in memory (ADR 0006). Their roots are not durable across a server restart.
 - [ ] Escape test suite passes
 - [ ] TS SDK generated from OpenAPI (current TS SDK is hand-written)
 
@@ -159,7 +159,7 @@ Last reviewed against the source tree on 2026-10-13.
 
 ### Deliverables
 - [ ] Interactive PTY shell
-- [ ] `sandbox replay` CLI (placeholder subcommand only)
+- [x] `sandbox replay` CLI, with recording through `run --trace` and `shell --trace`
 - [ ] VS Code / MCP server
 - [ ] Docs site
 - [ ] Examples: coding agent, data agent, browser agent
