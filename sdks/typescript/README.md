@@ -200,9 +200,8 @@ Note: the client currently maps every non-OK HTTP response to `INTERNAL`. It doe
 
 ## Known issues
 
-- **Snapshot list and get are not routed.** `listSnapshots` and `getSnapshot` call `/v1/sessions/:id/snapshots` routes that `crates/sandbox-server/src/api.rs` does not define, so they will 404. `snapshot()` uses the routed `POST /v1/sessions/:id/snapshot`.
-- **Server placeholders.** Every server handler returns a fixed string, so responses will not match the schemas.
-- **Not routed on the server:** `GET` session list, `listSnapshots`, `getSnapshot`, and the `/health` endpoint that `EmbeddedSandbox.new` checks.
+- **Wire casing.** The server sends snake_case JSON (`vfs_root`, `created_at`). These schemas expect camelCase (`vfsRoot`, `createdAt`), so responses from the server fail to parse until one side changes.
+- **Not routed on the server:** the `GET` session list and the `/health` endpoint that `EmbeddedSandbox.new` checks. `listSnapshots` and `getSnapshot` are routed.
 - **Tests.** `tests/types.test.ts` covers the types only. No client tests exist.
 
 ## Development

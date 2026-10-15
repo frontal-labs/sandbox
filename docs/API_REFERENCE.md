@@ -19,10 +19,10 @@ http://localhost:8080/v1
 The SDKs default to `SANDBOX_BASE_URL=http://localhost:8080`. There is no
 hosted endpoint yet.
 
-**Known gap:** both SDKs now call `/v1/...`, matching the server. The snapshot
-take call uses `POST /v1/sessions/{id}/snapshot`. The SDKs also call
-`GET /v1/sessions/{id}/snapshots` and `GET /v1/sessions/{id}/snapshots/{snapshot_id}`,
-which the server does not route yet, so those calls will return 404.
+**Known gap:** the Rust and Python SDKs use snake_case JSON, which matches the
+server. The TypeScript SDK's schemas use camelCase, so its responses do not parse
+against the server yet. The snapshot routes, `GET /v1/sessions/{id}/snapshots` and
+`GET /v1/sessions/{id}/snapshots/{snapshot_id}`, are routed.
 
 ## Routed endpoints
 
@@ -37,6 +37,8 @@ which the server does not route yet, so those calls will return 404.
 | DELETE | `/v1/sessions/{id}/fs/{path}` | `delete_file` | Delete a file |
 | POST | `/v1/sessions/{id}/snapshot` | `take_snapshot` | Snapshot the committed filesystem |
 | POST | `/v1/snapshots/{id}/fork` | `fork_snapshot` | Start 1 to 64 sessions from a snapshot |
+| GET | `/v1/sessions/{id}/snapshots` | `list_snapshots` | Snapshots taken from a session |
+| GET | `/v1/sessions/{id}/snapshots/{snapshot_id}` | `get_snapshot` | One snapshot taken from a session |
 
 Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 

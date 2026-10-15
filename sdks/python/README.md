@@ -128,11 +128,9 @@ Defined in `sandbox_sdk/types.py`:
 
 ## Known issues
 
-- **Snapshot list and get are not routed.** `list_snapshots` and `get_snapshot` call `/v1/sessions/:id/snapshots` routes that `crates/sandbox-server/src/api.rs` does not define, so they will 404. `snapshot()` uses the routed `POST /v1/sessions/:id/snapshot`.
 - **`create_session` serialization.** The client sends `config.__dict__`. `SessionConfig` contains nested dataclasses (`ResourceLimits`, `NetworkPolicy`), which `httpx`'s JSON encoder cannot serialize. The resulting `TypeError` is caught and returned as an `INTERNAL` error. This was found by reading the code, not by running it.
 - **`ExecResult` from JSON.** The client builds `ExecResult(**json)`, but JSON has no `bytes` type, so `stdout` and `stderr` will not be `bytes` unless the server encodes them in a way the client decodes. The wire format is not defined yet.
-- **Server placeholders.** Every server handler returns a fixed string.
-- **Not routed on the server:** session list, `list_snapshots`, `get_snapshot`, and `/health`.
+- **Not routed on the server:** the session list and `/health`. `list_snapshots` and `get_snapshot` are routed.
 - **Packaging.** The wheel `packages` path does not match the directory layout (see Installation).
 - **Tests.** `tests/test_types.py` covers types, errors, and IDs only. There are no client tests.
 
