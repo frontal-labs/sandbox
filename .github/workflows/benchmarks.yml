@@ -48,22 +48,40 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Run VFS benchmarks
-        run: cargo bench --bench vfs_bench
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench vfs_bench
+          python3 scripts/bench/criterion_to_json.py target/criterion bench_results_vfs.json
       
       - name: Run CAS benchmarks
-        run: cargo bench --bench cas_bench
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench cas_bench
+          python3 scripts/bench/criterion_to_json.py target/criterion bench_results_cas.json
       
       - name: Run Shell benchmarks
-        run: cargo bench --bench shell_bench
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench shell_bench
+          python3 scripts/bench/criterion_to_json.py target/criterion bench_results_shell.json
       
       - name: Run Runtime benchmarks
-        run: cargo bench --bench runtime_bench
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench runtime_bench
+          python3 scripts/bench/criterion_to_json.py target/criterion bench_results_runtime.json
       
       - name: Run WASM benchmarks
-        run: cargo bench --bench wasm_bench
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench wasm_bench
+          python3 scripts/bench/criterion_to_json.py target/criterion bench_results_wasm.json
       
       - name: Run Session benchmarks
-        run: cargo bench --bench session_bench
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench session_bench
+          python3 scripts/bench/criterion_to_json.py target/criterion bench_results_session.json
       
       
       - name: Check for regressions
@@ -136,16 +154,7 @@ jobs:
       
       - name: Update baselines (on master only)
         if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-        run: |
-          mkdir -p benchmarks/baselines
-          for name in vfs cas shell runtime wasm session; do
-            if [ -f "bench_results_${name}.json" ]; then
-              cp "bench_results_${name}.json" "benchmarks/baselines/${name}.json"
-              echo "Updated baseline: benchmarks/baselines/${name}.json"
-            fi
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/bench/update_baselines.sh bench_results_ '' vfs cas shell runtime wasm session
 
   bench-load:
     name: Load Tests (Short)
@@ -265,16 +274,7 @@ jobs:
       
       - name: Update load test baselines (on master only)
         if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-        run: |
-          mkdir -p benchmarks/baselines
-          for name in concurrent throughput snapshot; do
-            if [ -f "load_results_${name}.json" ]; then
-              cp "load_results_${name}.json" "benchmarks/baselines/load_${name}.json"
-              echo "Updated baseline: benchmarks/baselines/load_${name}.json"
-            fi
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/bench/update_baselines.sh load_results_ load_ concurrent throughput snapshot
 
   bench-full:
     name: Full Load Tests (Nightly Only)
