@@ -454,6 +454,40 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
       security:
       - bearer: []
+  /v1/sessions/{id}/trace:
+    get:
+      tags:
+      - sessions
+      summary: The session's trace, one run per line, in the ADR 0007 format (ADR 0009).
+      operationId: get_trace
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The trace. X-Trace-Complete is false when a command could not be recorded or the trace is full
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
   /v1/sessions/{id}/wake:
     post:
       tags:

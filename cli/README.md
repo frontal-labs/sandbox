@@ -10,7 +10,7 @@ The `sandbox` binary, built from the `cli` crate. It runs commands in the local 
 | `sandbox shell [--trace FILE]` | Reads one script per line from stdin in one local sandbox. `exit` or end of input stops it. `--trace` writes every line to FILE when the shell exits. |
 | `sandbox replay <TRACE_FILE>` | Runs the scripts of a trace, in order, in a fresh local sandbox and compares each output with the recording. Exits 0 when every run matches and 1 when any run diverges. |
 | `sandbox bench [-n NAME]` | Times the cases in the table below and prints one JSON line per case. |
-| `sandbox serve [--addr ADDR]` | Starts the server in the foreground (default `0.0.0.0:8080`). Prints one API key to stderr. |
+| `sandbox serve [--addr ADDR] [--data-dir DIR]` | Starts the server in the foreground (default `0.0.0.0:8080`). Prints one API key to stderr on the first run. With `--data-dir`, keys, snapshots, and sleeping sessions survive a restart (ADR 0008). Without it, the server is in memory only. |
 | `sandbox snapshot <SESSION_ID>` | Snapshots a session on the server named by `SANDBOX_BASE_URL`, with `SANDBOX_API_KEY`. |
 | `sandbox fork <SNAPSHOT_ID> [-c N]` | Forks a snapshot into N sessions on that server. |
 

@@ -14,6 +14,7 @@ use axum::{
 use sandbox_scheduler::Scheduler;
 use sandbox_session::session::SessionFs;
 use sandbox_session::{IsolateBackend, Session};
+use sandbox_trace::{outcome_of, RunRecord, Trace};
 use sandbox_types::hash::ContentHash;
 use sandbox_types::policy::{NetworkPolicy, ResourceLimits};
 use sandbox_types::{
@@ -35,6 +36,9 @@ pub struct AppState {
     pub auth: Arc<AuthManager>,
     pub sessions: SessionTable,
     pub snapshots: SnapshotTable,
+    /// Where keys, snapshots, and sleeping sessions are saved. `None` keeps the
+    /// server in memory (ADR 0008).
+    pub store: Option<Arc<crate::persist::Store>>,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -107,6 +111,10 @@ struct Entry {
     session: Option<Arc<dyn Session>>,
     /// The committed root a sleeping session wakes from.
     sleep_root: Option<ContentHash>,
+    /// Commands the session ran, in order (ADR 0009).
+    trace: Vec<RunRecord>,
+    /// False once a command could not be recorded faithfully, or the trace is full.
+    trace_complete: bool,
     /// Held for every command, file operation, and snapshot on this session.
     /// A checkpoint must not interleave with a write, or the write can be lost
     /// from the snapshot or from the overlay.
@@ -274,6 +282,8 @@ fn entry(
         state,
         session: Some(session),
         sleep_root: None,
+        trace: Vec::new(),
+        trace_complete: true,
         gate: Arc::new(tokio::sync::Mutex::new(())),
     }
 }
@@ -361,13 +371,146 @@ async fn require_api_key(
 /// Builds the API router. Every `/v1` route requires a valid bearer API key,
 /// except `GET /v1/openapi.json`, which holds only the public contract.
 pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Router {
-    let state = AppState {
+    build_router(AppState {
         scheduler,
-        auth: auth.clone(),
+        auth,
         sessions: SessionTable::default(),
         snapshots: SnapshotTable::default(),
-    };
+        store: None,
+    })
+}
 
+/// Opens a durable server whose state lives in `dir` (ADR 0008). Keys, snapshots,
+/// and sleeping sessions from an earlier run are loaded. On the first run one key
+/// is created, and it is returned so the caller can show it once.
+pub async fn open_durable(
+    scheduler: Arc<Scheduler>,
+    dir: &std::path::Path,
+) -> Result<(Router, Option<String>), SandboxError> {
+    let (store, saved) = crate::persist::Store::open(dir)?;
+    let auth = Arc::new(AuthManager::new());
+    let new_key = if saved.keys.is_empty() {
+        Some(auth.create_key())
+    } else {
+        let records: Vec<(String, String)> = saved
+            .keys
+            .iter()
+            .map(|k| (k.id.clone(), k.digest.clone()))
+            .collect();
+        auth.import_digests(&records)?;
+        None
+    };
+    let state = AppState {
+        scheduler,
+        auth,
+        sessions: SessionTable::default(),
+        snapshots: SnapshotTable::default(),
+        store: Some(Arc::new(store)),
+    };
+    restore(&state, saved).await?;
+    persist(&state).await.map_err(|e| e.0)?;
+    Ok((build_router(state), new_key))
+}
+
+/// Loads snapshot records and sleeping sessions into an empty server.
+async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), SandboxError> {
+    {
+        let mut records = state.snapshots.records.write().await;
+        for s in saved.snapshots {
+            records.insert(
+                s.id,
+                SnapshotRecord {
+                    owner: KeyId::from_stored(s.owner),
+                    session: s.session,
+                    root: s.root,
+                    created_at: s.created_at,
+                    labels: s.labels,
+                },
+            );
+        }
+    }
+    let mut table = state.sessions.0.write().await;
+    for sleeping in saved.sleeping {
+        let trace = Trace::parse(&sleeping.trace).map_err(|e| {
+            SandboxError::internal(format!("a sleeping session's trace is damaged: {e}"))
+        })?;
+        let id = sleeping.state.id;
+        table.insert(
+            id,
+            Entry {
+                owner: KeyId::from_stored(sleeping.owner),
+                state: sleeping.state,
+                session: None,
+                sleep_root: Some(sleeping.sleep_root),
+                trace: trace.runs,
+                trace_complete: sleeping.trace_complete,
+                gate: Arc::new(tokio::sync::Mutex::new(())),
+            },
+        );
+    }
+    Ok(())
+}
+
+/// The durable state as it is now.
+async fn capture(state: &AppState) -> crate::persist::Saved {
+    use crate::persist::{Saved, SavedKey, SavedSleep, SavedSnapshot};
+    let keys = state
+        .auth
+        .export_digests()
+        .into_iter()
+        .map(|(id, digest)| SavedKey { id, digest })
+        .collect();
+    let snapshots = {
+        let records = state.snapshots.records.read().await;
+        records
+            .iter()
+            .map(|(id, r)| SavedSnapshot {
+                id: *id,
+                owner: r.owner.as_str().to_string(),
+                session: r.session,
+                root: r.root,
+                created_at: r.created_at,
+                labels: r.labels.clone(),
+            })
+            .collect()
+    };
+    let sleeping = {
+        let table = state.sessions.0.read().await;
+        table
+            .values()
+            .filter_map(|e| {
+                e.sleep_root.map(|root| SavedSleep {
+                    owner: e.owner.as_str().to_string(),
+                    state: e.state.clone(),
+                    sleep_root: root,
+                    trace: Trace {
+                        runs: e.trace.clone(),
+                    }
+                    .to_jsonl(),
+                    trace_complete: e.trace_complete,
+                })
+            })
+            .collect()
+    };
+    Saved {
+        version: 1,
+        keys,
+        snapshots,
+        sleeping,
+    }
+}
+
+/// Saves the durable state, if this server has a store. Call it after the change
+/// is in memory and no table lock is held.
+async fn persist(state: &AppState) -> Result<(), ApiError> {
+    if let Some(store) = &state.store {
+        let saved = capture(state).await;
+        store.write(&saved).await?;
+    }
+    Ok(())
+}
+
+fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/sessions", post(create_session))
         .route("/v1/sessions/:id", get(get_session))
@@ -376,6 +519,7 @@ pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Route
         .route("/v1/sessions/:id/fs/*path", get(read_file))
         .route("/v1/sessions/:id/fs/*path", axum::routing::put(write_file))
         .route("/v1/sessions/:id/fs/*path", delete(delete_file))
+        .route("/v1/sessions/:id/trace", get(get_trace))
         .route("/v1/sessions/:id/sleep", post(sleep_session))
         .route("/v1/sessions/:id/wake", post(wake_session))
         .route("/v1/sessions/:id/snapshot", post(take_snapshot))
@@ -480,6 +624,7 @@ pub async fn destroy_session(
         .parse()
         .map_err(|_| SandboxError::not_found(format!("session {id} not found")))?;
     state.sessions.0.write().await.remove(&session_id);
+    persist(&state).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -513,7 +658,130 @@ pub async fn exec_command(
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
     let session = own.session;
-    Ok(Json(session.exec(request).await?))
+    let result = session.exec(request.clone()).await;
+    record_exec(&state, own.state.id, &request, &result).await;
+    Ok(Json(result?))
+}
+
+/// Most runs one session's trace holds. Runs past this are not recorded, and the
+/// trace reports itself incomplete, so a long session never fails over its trace.
+pub const MAX_TRACE_RUNS: usize = 4096;
+
+/// Appends one command to the session's trace (ADR 0009).
+async fn record_exec(
+    state: &AppState,
+    id: SessionId,
+    request: &ExecRequest,
+    result: &Result<ExecResult, SandboxError>,
+) {
+    if request.argv.is_empty() {
+        return;
+    }
+    let mut table = state.sessions.0.write().await;
+    let Some(entry) = table.get_mut(&id) else {
+        return;
+    };
+    // Standard input cannot be written into a script, so the trace is marked
+    // incomplete rather than recording a command that replays differently.
+    let script = match script_for(request) {
+        Some(script) if request.stdin.as_ref().is_none_or(|s| s.is_empty()) => script,
+        _ => {
+            entry.trace_complete = false;
+            return;
+        }
+    };
+    if entry.trace.len() >= MAX_TRACE_RUNS {
+        entry.trace_complete = false;
+        return;
+    }
+    let outcome = outcome_of(
+        result
+            .as_ref()
+            .map(|out| (out.exit_code, out.stdout.clone(), out.stderr.clone()))
+            .map_err(|e| SandboxError::new(e.code, e.message.clone())),
+    );
+    let seq = entry.trace.len() as u64 + 1;
+    entry.trace.push(RunRecord {
+        seq,
+        script,
+        outcome,
+    });
+}
+
+/// The script that runs `request` in a shell: its environment, its directory,
+/// then its argv, with every word single-quoted so the arguments keep their
+/// meaning. `None` when an environment name cannot be written as a shell name.
+fn script_for(request: &ExecRequest) -> Option<String> {
+    fn quote(text: &str) -> String {
+        format!("'{}'", text.replace('\'', r"'\''"))
+    }
+    fn is_shell_name(name: &str) -> bool {
+        let mut chars = name.chars();
+        matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
+            && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    }
+
+    let mut parts = Vec::new();
+    let mut env: Vec<(&String, &String)> = request.env.iter().collect();
+    env.sort();
+    for (name, value) in env {
+        if !is_shell_name(name) {
+            return None;
+        }
+        parts.push(format!("export {name}={}", quote(value)));
+    }
+    if let Some(cwd) = &request.cwd {
+        parts.push(format!("cd {}", quote(cwd)));
+    }
+    parts.push(
+        request
+            .argv
+            .iter()
+            .map(|arg| quote(arg))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    Some(parts.join("; "))
+}
+
+/// The session's trace, one run per line, in the ADR 0007 format (ADR 0009).
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{id}/trace",
+    tag = "sessions",
+    params(("id" = String, Path, description = "Session ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$")),
+    responses(
+        (status = 200, description = "The trace. X-Trace-Complete is false when a command could not be recorded or the trace is full", body = String, content_type = "application/x-ndjson"),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "No such session for this key", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn get_trace(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let found = lookup(&state, &owner, &id).await?;
+    let (runs, complete) = {
+        let table = state.sessions.0.read().await;
+        let entry = table
+            .get(&found.state.id)
+            .ok_or_else(|| SandboxError::not_found(format!("session {id} not found")))?;
+        (entry.trace.clone(), entry.trace_complete)
+    };
+    let body = Trace { runs }.to_jsonl();
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson"),
+            (
+                header::HeaderName::from_static("x-trace-complete"),
+                if complete { "true" } else { "false" },
+            ),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 /// Query options for exec.
@@ -683,6 +951,7 @@ pub async fn take_snapshot(
     let _admit = admit_snapshot(&state, &owner).await?;
     let root = own.session.snapshot().await?;
     let snapshot_id = store_snapshot(&state, owner, &own.state, root).await;
+    persist(&state).await?;
     Ok((
         StatusCode::CREATED,
         Json(TakeSnapshotResponse { snapshot_id }),
@@ -785,6 +1054,8 @@ pub async fn sleep_session(
         entry.state.status = SessionStatus::Sleeping;
         entry.state.updated_at = SystemTime::now();
     }
+    drop(table);
+    persist(&state).await?;
     Ok(Json(TakeSnapshotResponse { snapshot_id }))
 }
 
@@ -828,7 +1099,10 @@ pub async fn wake_session(
     entry.sleep_root = None;
     entry.state.status = SessionStatus::Running;
     entry.state.updated_at = SystemTime::now();
-    Ok(Json(entry.state.clone()))
+    let woken = entry.state.clone();
+    drop(table);
+    persist(&state).await?;
+    Ok(Json(woken))
 }
 
 /// Fork a snapshot into new sessions, each owned by the caller. The caller must

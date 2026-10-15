@@ -25,6 +25,7 @@ use utoipa::{Modify, OpenApi};
         crate::api::write_file,
         crate::api::delete_file,
         crate::api::sleep_session,
+        crate::api::get_trace,
         crate::api::wake_session,
         crate::api::take_snapshot,
         crate::api::list_snapshots,

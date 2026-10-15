@@ -696,3 +696,91 @@ async fn a_sleeping_session_can_be_destroyed_without_waking() {
     let (status, _) = get_json(&app, &owner, &format!("/v1/sessions/{id}")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+async fn exec_argv(app: &axum::Router, key: &str, id: &str, argv: &[&str]) -> (StatusCode, Value) {
+    let request = json!({
+        "argv": argv,
+        "env": {},
+        "cwd": null,
+        "stdin": null,
+        "timeout_ms": null,
+        "stream": false,
+    });
+    let (status, body) = call(
+        app,
+        "POST",
+        &format!("/v1/sessions/{id}/exec"),
+        key,
+        json_body(&request),
+    )
+    .await;
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn the_trace_records_commands_and_replays_to_the_same_outputs() {
+    use sandbox_session::IsolateBackend;
+    use sandbox_trace::{replay, Trace};
+
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    // Arguments with quotes and spaces must keep their meaning in the trace.
+    let (status, _) = exec_argv(&app, &key, &id, &["echo", "it's", "a  test"]).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = exec_argv(&app, &key, &id, &["echo", "second"]).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/v1/sessions/{id}/trace"))
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "application/x-ndjson");
+    assert_eq!(response.headers()["x-trace-complete"], "true");
+    let text = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    let trace = Trace::parse(&text).unwrap();
+    assert_eq!(trace.runs.len(), 2);
+
+    // Replaying the trace in a fresh sandbox gives the recorded outputs.
+    let session = IsolateBackend::new(sandbox_types::SessionConfig::default())
+        .await
+        .unwrap();
+    let report = replay(&trace, |script| {
+        let session = &session;
+        async move {
+            use sandbox_session::Session;
+            session
+                .run_script(&script)
+                .await
+                .map(|out| (out.exit_code, out.stdout, out.stderr))
+        }
+    })
+    .await;
+    assert!(report.matches(), "{:?}", report.divergences);
+    assert_eq!(report.runs, 2);
+}
+
+#[tokio::test]
+async fn a_trace_is_readable_only_by_the_session_owner() {
+    let (app, owner, other) = router();
+    let id = create(&app, &owner).await;
+    let (status, _) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/trace"),
+        &other,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

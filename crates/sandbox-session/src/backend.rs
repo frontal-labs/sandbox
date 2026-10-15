@@ -11,13 +11,28 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-/// Blob store shared by every backend in the process. Blobs are content
-/// addressed and never change, so a restored session can read the blobs of
-/// the snapshot it came from. Nothing is freed yet: a process-wide store only
-/// grows.
+/// The blob store shared by every backend in the process. It is set once, by
+/// `install_blob_store`, or lazily to an in-memory store on first use.
+static STORE: OnceLock<Arc<dyn BlobStore>> = OnceLock::new();
+
+/// Blobs are content addressed and never change, so a restored session can read
+/// the blobs of the snapshot it came from. Nothing is freed yet: a process-wide
+/// store only grows.
 fn shared_store() -> Arc<dyn BlobStore> {
-    static STORE: OnceLock<Arc<dyn BlobStore>> = OnceLock::new();
     STORE.get_or_init(|| Arc::new(MemStore::new())).clone()
+}
+
+/// Makes `store` the blob store that every session uses, for example a disk
+/// store that keeps sleeping sessions across restarts (ADR 0008). Call it before
+/// the first session is created. It fails when a store is already in use, because
+/// blobs written to one store would not be visible in another.
+pub fn install_blob_store(store: Arc<dyn BlobStore>) -> Result<(), SandboxError> {
+    STORE.set(store).map_err(|_| {
+        SandboxError::new(
+            ErrorCode::InvalidState,
+            "a blob store is already in use; install it before the first session",
+        )
+    })
 }
 
 /// Tier 1 session. Owns its VFS, which is the source of truth for files, and

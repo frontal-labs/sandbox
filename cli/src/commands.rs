@@ -69,6 +69,10 @@ pub enum Commands {
         /// Bind address
         #[arg(long, default_value = "0.0.0.0:8080")]
         addr: String,
+        /// Keep keys, snapshots, and sleeping sessions in this directory, so they
+        /// survive a restart (ADR 0008). Without it the server is in memory only.
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
     },
 
     /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
@@ -109,7 +113,7 @@ impl Cli {
                 rt.block_on(sandbox_worker::serve(socket))?;
                 Ok(0)
             }
-            Commands::Serve { addr } => serve(addr),
+            Commands::Serve { addr, data_dir } => serve(addr, data_dir.as_deref()),
             Commands::Snapshot { session_id } => snapshot(session_id),
             Commands::Fork { snapshot_id, count } => fork(snapshot_id, *count),
         }
@@ -268,18 +272,32 @@ fn escaped(text: &str) -> String {
 
 /// Runs the server until the process is stopped. The key is printed once, to
 /// stderr, because keys live in memory and nothing else can provision them.
-fn serve(addr: &str) -> Result<i32, SandboxError> {
+fn serve(addr: &str, data_dir: Option<&Path>) -> Result<i32, SandboxError> {
     use std::sync::Arc;
-    let auth = Arc::new(sandbox_server::auth::AuthManager::new());
-    let key = auth.create_key();
-    let app = sandbox_server::create_router(Arc::new(sandbox_scheduler::Scheduler::new()), auth);
+    let scheduler = Arc::new(sandbox_scheduler::Scheduler::new());
     let rt = runtime()?;
+    let (app, new_key) = match data_dir {
+        Some(dir) => rt.block_on(sandbox_server::open_durable(scheduler, dir))?,
+        None => {
+            let auth = Arc::new(sandbox_server::auth::AuthManager::new());
+            let key = auth.create_key();
+            (sandbox_server::create_router(scheduler, auth), Some(key))
+        }
+    };
     rt.block_on(async {
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| SandboxError::unavailable(format!("binding {addr}: {e}")))?;
         eprintln!("sandbox server listening on {addr}");
-        eprintln!("API key (shown once): {key}");
+        if let Some(dir) = data_dir {
+            eprintln!("state directory: {}", dir.display());
+        }
+        // Printed once, on the first run of a durable server, and on every run of
+        // an in-memory one. Keys are stored as digests, so the key cannot be shown
+        // again.
+        if let Some(key) = &new_key {
+            eprintln!("API key (shown once): {key}");
+        }
         axum::serve(listener, app)
             .await
             .map_err(|e| SandboxError::unavailable(format!("server stopped: {e}")))

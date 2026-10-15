@@ -21,6 +21,11 @@ impl KeyId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// A key id read back from saved state, which was written by this module.
+    pub(crate) fn from_stored(id: String) -> Self {
+        Self(id)
+    }
 }
 
 #[derive(Default)]
@@ -73,6 +78,38 @@ impl AuthManager {
         } else {
             Err(denied())
         }
+    }
+
+    /// The stored key records as (id, hex digest). Digests only, so the result
+    /// cannot be used to authenticate.
+    pub fn export_digests(&self) -> Vec<(String, String)> {
+        let keys = self
+            .keys
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut out: Vec<(String, String)> = keys
+            .iter()
+            .map(|(id, digest)| (id.clone(), digest.to_hex().to_string()))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// Loads key records exported by `export_digests`. Keys already present are
+    /// replaced.
+    pub fn import_digests(&self, records: &[(String, String)]) -> Result<(), SandboxError> {
+        let mut parsed = Vec::with_capacity(records.len());
+        for (id, digest) in records {
+            let digest = blake3::Hash::from_hex(digest)
+                .map_err(|_| SandboxError::internal(format!("key {id} has a damaged digest")))?;
+            parsed.push((id.clone(), digest));
+        }
+        let mut keys = self
+            .keys
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        keys.extend(parsed);
+        Ok(())
     }
 
     /// Revokes a key by id. Returns whether a key was removed.

@@ -13,6 +13,8 @@ sandbox-types = { path = "../sandbox-types", features = ["openapi"] }
 sandbox-scheduler = { path = "../sandbox-scheduler" }
 sandbox-session = { path = "../sandbox-session" }
 sandbox-vfs = { path = "../sandbox-vfs" }
+sandbox-cas = { path = "../sandbox-cas" }
+sandbox-trace = { path = "../sandbox-trace" }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
