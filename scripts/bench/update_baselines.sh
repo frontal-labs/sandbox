@@ -10,6 +10,12 @@
 # turn.
 set -euo pipefail
 
+# Every git command here needs an identity, including the rebase below.
+export GIT_AUTHOR_NAME="github-actions[bot]"
+export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+
 results_prefix="${1:?results prefix}"
 baseline_prefix="${2-}"
 shift 2
@@ -31,9 +37,7 @@ if [[ -z "$(git status --porcelain -- benchmarks/baselines)" ]]; then
 fi
 
 git add benchmarks/baselines
-git -c user.name="github-actions[bot]" \
-  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-  commit -q -m "chore(bench): update benchmark baselines [skip ci]"
+git commit -q -m "chore(bench): update benchmark baselines [skip ci]"
 git pull -q --rebase origin master
 git push -q origin HEAD:master
 echo "pushed baseline update to master"
