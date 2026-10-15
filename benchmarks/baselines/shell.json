@@ -1,0 +1,27 @@
+[
+  {
+    "name": "shell_exec/echo",
+    "mean": 1191.8245048695146,
+    "p99": 1298.218613761294
+  },
+  {
+    "name": "shell_exec/pipe_and_redirect",
+    "mean": 5466.850728025663,
+    "p99": 7251.95652173913
+  },
+  {
+    "name": "shell_parser/operators_and_redirects",
+    "mean": 1813.4940935245304,
+    "p99": 1992.988648018648
+  },
+  {
+    "name": "shell_parser/pipeline",
+    "mean": 922.1302755967106,
+    "p99": 1049.6054251359863
+  },
+  {
+    "name": "shell_parser/simple",
+    "mean": 759.5535938512025,
+    "p99": 781.5347339884785
+  }
+]
