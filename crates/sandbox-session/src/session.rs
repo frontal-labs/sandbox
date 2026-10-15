@@ -1,6 +1,7 @@
 //! Session trait and types
 
 use async_trait::async_trait;
+use sandbox_types::hash::ContentHash;
 use sandbox_types::{ExecRequest, ExecResult, SandboxError, SessionId, SnapshotId, Tier};
 
 // The VFS is the source of truth for files (invariant 1), so sessions expose
@@ -18,7 +19,10 @@ pub trait Session: Send + Sync {
     /// persist across calls.
     async fn run_script(&self, script: &str) -> Result<ExecResult, SandboxError>;
     fn fs(&self) -> &dyn SessionFs;
-    async fn snapshot(&self) -> Result<SnapshotId, SandboxError>;
+    /// Writes the filesystem's committed root and returns its hash. The caller
+    /// keeps the hash, and `restore` starts a session from it. The session
+    /// keeps running. Take snapshots while the session is idle.
+    async fn snapshot(&self) -> Result<ContentHash, SandboxError>;
     async fn sleep(&self) -> Result<SnapshotId, SandboxError>;
     async fn destroy(self: Box<Self>) -> Result<(), SandboxError>;
 }

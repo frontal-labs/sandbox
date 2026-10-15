@@ -36,15 +36,15 @@ impl SessionBenchHarness {
         Ok(result)
     }
 
-    pub async fn snapshot(&mut self) -> Result<sandbox_types::SnapshotId> {
+    pub async fn snapshot(&mut self) -> Result<sandbox_types::hash::ContentHash> {
         self.session.snapshot().await
     }
 
     pub async fn fork(&mut self, n: usize) -> Result<Vec<Box<dyn Session>>> {
-        let snap_id = self.snapshot().await?;
+        let root = self.snapshot().await?;
         let mut forks = Vec::new();
         for _ in 0..n {
-            let session = sandbox_session::restore(snap_id).await?;
+            let session = sandbox_session::restore(root).await?;
             forks.push(session);
         }
         Ok(forks)

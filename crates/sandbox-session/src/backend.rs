@@ -7,8 +7,7 @@ use sandbox_types::{
     ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, SnapshotId, Tier,
 };
 use sandbox_vfs::Vfs;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio::sync::Mutex;
 
@@ -19,33 +18,6 @@ use tokio::sync::Mutex;
 fn shared_store() -> Arc<dyn BlobStore> {
     static STORE: OnceLock<Arc<dyn BlobStore>> = OnceLock::new();
     STORE.get_or_init(|| Arc::new(MemStore::new())).clone()
-}
-
-/// Most snapshots one process keeps. The registry and the blobs it points to
-/// are never freed, so this bounds what snapshots can grow to.
-pub const MAX_SNAPSHOTS: usize = 1024;
-
-/// Committed filesystem root of each snapshot taken in this process.
-fn snapshots() -> &'static StdMutex<HashMap<SnapshotId, ContentHash>> {
-    static SNAPSHOTS: OnceLock<StdMutex<HashMap<SnapshotId, ContentHash>>> = OnceLock::new();
-    SNAPSHOTS.get_or_init(|| StdMutex::new(HashMap::new()))
-}
-
-/// Records `root` as a new snapshot in `registry`, refusing once `limit` is
-/// reached. Pulled out so the limit can be tested without the shared registry.
-fn register_snapshot(
-    registry: &mut HashMap<SnapshotId, ContentHash>,
-    root: ContentHash,
-    limit: usize,
-) -> Result<SnapshotId, SandboxError> {
-    if registry.len() >= limit {
-        return Err(SandboxError::resource_exhausted(format!(
-            "this process already holds {limit} snapshots"
-        )));
-    }
-    let id = SnapshotId::new();
-    registry.insert(id, root);
-    Ok(id)
 }
 
 /// Tier 1 session. Owns its VFS, which is the source of truth for files, and
@@ -144,16 +116,11 @@ impl Session for IsolateBackend {
         self.fs.as_ref()
     }
 
-    async fn snapshot(&self) -> Result<SnapshotId, SandboxError> {
-        let root = self
-            .fs
+    async fn snapshot(&self) -> Result<ContentHash, SandboxError> {
+        self.fs
             .checkpoint()
             .await
-            .map_err(|e| SandboxError::new(ErrorCode::VfsError, e.to_string()))?;
-        let mut registry = snapshots()
-            .lock()
-            .map_err(|_| SandboxError::internal("snapshot registry poisoned"))?;
-        register_snapshot(&mut registry, root, MAX_SNAPSHOTS)
+            .map_err(|e| SandboxError::new(ErrorCode::VfsError, e.to_string()))
     }
 
     async fn sleep(&self) -> Result<SnapshotId, SandboxError> {
@@ -165,14 +132,9 @@ impl Session for IsolateBackend {
     }
 }
 
-/// Starts a new session whose filesystem is the snapshot's committed root.
-pub async fn restore(snapshot_id: SnapshotId) -> Result<Box<dyn Session>, SandboxError> {
-    let root = snapshots()
-        .lock()
-        .map_err(|_| SandboxError::internal("snapshot registry poisoned"))?
-        .get(&snapshot_id)
-        .copied()
-        .ok_or_else(|| SandboxError::not_found(format!("snapshot {snapshot_id} not found")))?;
+/// Starts a new session whose filesystem is `root`, a committed root returned
+/// by `Session::snapshot`. The caller is responsible for who may use `root`.
+pub async fn restore(root: ContentHash) -> Result<Box<dyn Session>, SandboxError> {
     Ok(Box::new(IsolateBackend::with_root(root)))
 }
 
@@ -334,34 +296,17 @@ mod tests {
     async fn restored_session_sees_the_snapshot_not_later_writes() {
         let backend = new_backend().await;
         write_text(backend.fs(), "/a.txt", "one").await;
-        let snapshot = backend.snapshot().await.unwrap();
+        let root = backend.snapshot().await.unwrap();
 
         // Changes after the snapshot must not reach the restored session.
         write_text(backend.fs(), "/a.txt", "two").await;
         write_text(backend.fs(), "/later.txt", "new").await;
 
-        let restored = restore(snapshot).await.unwrap();
+        let restored = restore(root).await.unwrap();
         assert_eq!(read_text(restored.fs(), "/a.txt").await, "one");
         assert!(restored.fs().stat(Path::new("/later.txt")).await.is_err());
 
         // The original keeps its own later state.
         assert_eq!(read_text(backend.fs(), "/a.txt").await, "two");
-    }
-
-    #[test]
-    fn registry_refuses_snapshots_past_its_limit() {
-        let mut registry = HashMap::new();
-        let root = ContentHash::nil();
-        assert!(register_snapshot(&mut registry, root, 2).is_ok());
-        assert!(register_snapshot(&mut registry, root, 2).is_ok());
-        let err = register_snapshot(&mut registry, root, 2).unwrap_err();
-        assert_eq!(err.code, ErrorCode::ResourceExhausted);
-        assert_eq!(registry.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn restore_unknown_snapshot_is_not_found() {
-        let err = restore(SnapshotId::new()).await.err().unwrap();
-        assert_eq!(err.code, ErrorCode::NotFound);
     }
 }
