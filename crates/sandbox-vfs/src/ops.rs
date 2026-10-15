@@ -16,7 +16,8 @@ pub trait SessionFs: Send + Sync {
     async fn symlink(&self, target: &Path, link: &Path) -> VfsResult<()>;
     async fn readlink(&self, path: &Path) -> VfsResult<String>;
     async fn truncate(&self, path: &Path, size: u64) -> VfsResult<()>;
-    async fn watch(&self, path: &Path) -> VfsResult<WatchHandle>;
+    /// Starts receiving changes under `path`. See ADR 0005.
+    async fn watch(&self, path: &Path) -> VfsResult<Watch>;
     /// Releases a handle. Using it afterwards fails with `InvalidPath`.
     fn close(&self, handle: &FileHandle);
     async fn commit(&mut self) -> VfsResult<ContentHash>;
@@ -69,8 +70,70 @@ pub struct DirEntry {
     pub mode: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WatchHandle(pub u64);
+/// A change under a watched path. Paths are normalized absolute paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchEvent {
+    Created(String),
+    Modified(String),
+    Removed(String),
+    Renamed {
+        from: String,
+        to: String,
+    },
+    /// Events were dropped because the reader fell behind. Re-read the tree.
+    Overflow,
+}
+
+/// A subscription to changes under one path. Dropping it ends the subscription.
+#[derive(Debug)]
+pub struct Watch {
+    prefix: String,
+    rx: tokio::sync::broadcast::Receiver<WatchEvent>,
+}
+
+impl Watch {
+    pub(crate) fn new(prefix: String, rx: tokio::sync::broadcast::Receiver<WatchEvent>) -> Self {
+        Self { prefix, rx }
+    }
+
+    /// Waits for the next event under the watched path. Returns `None` once the
+    /// VFS that produced the events has been dropped.
+    pub async fn next(&mut self) -> Option<WatchEvent> {
+        loop {
+            match self.rx.recv().await {
+                Ok(event) => {
+                    if self.covers(&event) {
+                        return Some(event);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    return Some(WatchEvent::Overflow);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+
+    fn covers(&self, event: &WatchEvent) -> bool {
+        match event {
+            WatchEvent::Created(p) | WatchEvent::Modified(p) | WatchEvent::Removed(p) => {
+                is_within(p, &self.prefix)
+            }
+            WatchEvent::Renamed { from, to } => {
+                is_within(from, &self.prefix) || is_within(to, &self.prefix)
+            }
+            WatchEvent::Overflow => true,
+        }
+    }
+}
+
+/// True when `path` is `prefix` or lies below it.
+pub(crate) fn is_within(path: &str, prefix: &str) -> bool {
+    if prefix == "/" {
+        return true;
+    }
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
 
 use crate::error::VfsError;
 pub type VfsResult<T> = Result<T, VfsError>;

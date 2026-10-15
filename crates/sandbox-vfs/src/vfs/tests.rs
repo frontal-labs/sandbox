@@ -256,12 +256,89 @@ async fn rm_and_rename_act_on_the_link_not_its_target() {
 }
 
 #[tokio::test]
-async fn watch_reports_unsupported_instead_of_a_dead_handle() {
+async fn watch_reports_changes_under_its_path_only() {
     let vfs = new_vfs();
-    assert!(matches!(
-        vfs.watch(Path::new("/")).await,
-        Err(VfsError::Unsupported(_))
-    ));
+    vfs.mkdir(Path::new("/d"), 0o755).await.unwrap();
+    vfs.mkdir(Path::new("/dx"), 0o755).await.unwrap();
+    let mut watch = vfs.watch(Path::new("/d")).await.unwrap();
+
+    // /dx shares the text prefix "/d" but is a different directory, and /d is
+    // the watched path, so nothing below /dx may appear.
+    write_file(&vfs, "/dx/y", b"no").await;
+    write_file(&vfs, "/d/a", b"1").await;
+    vfs.rm(Path::new("/d/a"), false).await.unwrap();
+
+    assert_eq!(watch.next().await, Some(WatchEvent::Created("/d/a".into())));
+    assert_eq!(
+        watch.next().await,
+        Some(WatchEvent::Modified("/d/a".into()))
+    );
+    assert_eq!(watch.next().await, Some(WatchEvent::Removed("/d/a".into())));
+}
+
+#[tokio::test]
+async fn rename_reaches_watches_on_both_sides_and_inside_the_subtree() {
+    let vfs = new_vfs();
+    vfs.mkdir(Path::new("/a"), 0o755).await.unwrap();
+    write_file(&vfs, "/a/f", b"x").await;
+    let mut inside = vfs.watch(Path::new("/a/f")).await.unwrap();
+    let mut destination = vfs.watch(Path::new("/b")).await.unwrap();
+
+    vfs.rename(Path::new("/a"), Path::new("/b")).await.unwrap();
+
+    // The moved nodes are reported in path order: /a, then /a/f.
+    assert_eq!(
+        inside.next().await,
+        Some(WatchEvent::Renamed {
+            from: "/a/f".into(),
+            to: "/b/f".into()
+        })
+    );
+    assert_eq!(
+        destination.next().await,
+        Some(WatchEvent::Renamed {
+            from: "/a".into(),
+            to: "/b".into()
+        })
+    );
+    assert_eq!(
+        destination.next().await,
+        Some(WatchEvent::Renamed {
+            from: "/a/f".into(),
+            to: "/b/f".into()
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_watcher_that_falls_behind_gets_overflow() {
+    let vfs = new_vfs();
+    let mut watch = vfs.watch(Path::new("/")).await.unwrap();
+    write_file(&vfs, "/f", b"").await;
+    let h = vfs.open(Path::new("/f"), rw()).await.unwrap();
+    for _ in 0..(EVENT_CAPACITY + 100) {
+        vfs.write(&h, 0, b"x").await.unwrap();
+    }
+
+    assert_eq!(watch.next().await, Some(WatchEvent::Overflow));
+    // After the overflow, later changes are delivered again.
+    vfs.rm(Path::new("/f"), false).await.unwrap();
+    let mut seen_removal = false;
+    while let Some(event) = watch.next().await {
+        if event == WatchEvent::Removed("/f".into()) {
+            seen_removal = true;
+            break;
+        }
+    }
+    assert!(seen_removal);
+}
+
+#[tokio::test]
+async fn watch_ends_when_the_vfs_is_dropped() {
+    let vfs = new_vfs();
+    let mut watch = vfs.watch(Path::new("/")).await.unwrap();
+    drop(vfs);
+    assert_eq!(watch.next().await, None);
 }
 
 #[tokio::test]

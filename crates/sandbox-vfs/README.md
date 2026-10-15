@@ -10,7 +10,7 @@ Working in memory, with a content-addressed commit:
 - Symlinks are followed in every path component, and in the final component for `open`, `stat`, `readdir`, and `truncate`. `readlink`, `rm`, `rename`, and `symlink` act on the link itself. Resolution is capped at 40 hops.
 - `commit` persists the tree as a Merkle directory tree and returns the root hash. `Vfs::new(root, store)` restores it. Commit is incremental: only directories on changed paths are rewritten, and untouched subtrees keep their hashes.
 - Quotas `total_bytes`, `max_file_size`, `max_path_depth`, and `inode_count` are enforced on create and write. Committed totals are cached, so a quota check costs O(changes), not O(tree).
-- `watch` returns `VfsError::Unsupported`.
+- `watch(path)` returns a `Watch`. `next()` yields `Created`, `Modified`, `Removed`, and `Renamed` events for the path and everything below it, and `Overflow` when the reader falls more than 1024 events behind. Events come from the overlay, so a watch sees changes made after it starts, and only in this process. See ADR 0005.
 
 Known limits:
 
@@ -28,7 +28,7 @@ Copy-on-write filesystem: an immutable base tree addressed by a `ContentHash` (r
 
 - `Vfs::new(root: ContentHash, store: Arc<dyn BlobStore>)` and `with_quotas(Quotas)`.
 - `SessionFs` trait (async): `open`, `read`, `write`, `stat`, `readdir`, `mkdir`, `rm`, `rename`, `symlink`, `readlink`, `truncate`, `watch`, `commit`.
-- Types: `OpenFlags`, `FileHandle`, `FileStat`, `DirEntry`, `WatchHandle`, `WatchEvent`.
+- Types: `OpenFlags`, `FileHandle`, `FileStat`, `DirEntry`, `Watch`, `WatchEvent`.
 - `Quotas` (`quota.rs`); `Node` (overlay) and `Stored` (committed index) (`node.rs`).
 - `VfsError`, `VfsResult` (`error.rs`).
 
