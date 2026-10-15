@@ -38,6 +38,7 @@ integers. The SDKs convert those arrays to bytes on their side.
 | POST | `/v1/sessions/{id}/snapshot` | `take_snapshot` | Snapshot the committed filesystem |
 | POST | `/v1/sessions/{id}/sleep` | `sleep_session` | Snapshot, then release the live session (ADR 0006) |
 | POST | `/v1/sessions/{id}/wake` | `wake_session` | Restore a sleeping session under the same ID |
+| GET | `/v1/sessions/{id}/trace` | `get_trace` | The commands the session ran, as an ADR 0007 trace (ADR 0009) |
 | POST | `/v1/snapshots/{id}/fork` | `fork_snapshot` | Start 1 to 64 sessions from a snapshot |
 | GET | `/v1/sessions/{id}/snapshots` | `list_snapshots` | Snapshots taken from a session |
 | GET | `/v1/sessions/{id}/snapshots/{snapshot_id}` | `get_snapshot` | One snapshot taken from a session |
@@ -226,6 +227,19 @@ not part of a snapshot.
 While a session sleeps, `exec`, file operations, and `snapshot` return `409` with
 code `INVALID_STATE`. `get` and `destroy` still work. Sleeping or waking in the
 wrong state returns `409`. See [ADR 0006](adr/0006-sleep-and-wake.md).
+
+### Command trace
+
+```
+GET /v1/sessions/{id}/trace
+```
+
+Response: `200`, `application/x-ndjson`, in the ADR 0007 format. Each command the
+session ran through `exec` is one run, with its argv written as a single-quoted
+script. `X-Trace-Complete` is `false` when a command could not be recorded (it had
+standard input, or an environment name is not a shell name) or when the trace is
+full (4096 runs). File writes are not recorded. Save the body and replay it with
+`sandbox replay`. See [ADR 0009](adr/0009-server-exec-traces.md).
 
 ### Fork snapshot
 
