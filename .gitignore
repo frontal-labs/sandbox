@@ -24,3 +24,6 @@ bazel-*
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+
+# Packed SDK artifacts from scripts/release
+release/

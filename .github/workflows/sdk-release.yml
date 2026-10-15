@@ -1,0 +1,134 @@
+name: SDK release
+
+# Changesets turns pending changesets into a "Version SDKs" pull request. Merging
+# that pull request publishes the new version: each SDK is packed and pushed to
+# GHCR, then the version is tagged and a GitHub release is created.
+#
+# Run it by hand with dry_run on (the default) to check the packing without
+# pushing anything.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack only. Do not push to GHCR or create a release."
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Open or update the version PR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - name: Open the version PR, or version the packages when it is merged
+        uses: changesets/action@v1
+        with:
+          version: npm run version-packages
+          commit: "chore(release): version SDKs"
+          title: "chore(release): version SDKs"
+          createGithubReleases: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish ${{ matrix.sdk }} to GHCR
+    if: >-
+      always() && !cancelled() && !failure() &&
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [ts, py, rs]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Stop while changesets are still pending
+        id: pending
+        run: |
+          pending=$(ls .changeset/*.md 2>/dev/null | grep -v README.md | wc -l | tr -d ' ')
+          echo "pending=$pending" >> "$GITHUB_OUTPUT"
+          if [ "$pending" != "0" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "Changesets are pending; the version PR has not been merged yet. Skipping."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        if: matrix.sdk == 'py' && (steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch')
+        with:
+          python-version: "3.12"
+      - name: Install packaging tools
+        if: matrix.sdk == 'py' && (steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch')
+        run: python -m pip install build
+      - uses: oras-project/setup-oras@v1
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+      - name: Log in to GHCR
+        if: (steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch') && github.event.inputs.dry_run != 'true'
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | oras login ghcr.io --username "$ACTOR" --password-stdin
+      - name: Pack and push
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
+          SDK: ${{ matrix.sdk }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            scripts/release/publish-sdk.sh "$SDK" --dry-run
+          else
+            scripts/release/publish-sdk.sh "$SDK"
+          fi
+
+  release:
+    name: Tag the release
+    needs: publish
+    if: >-
+      needs.publish.result == 'success' &&
+      (github.event_name == 'push' || github.event.inputs.dry_run == 'false')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag and create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pending=$(ls .changeset/*.md 2>/dev/null | grep -v README.md | wc -l | tr -d ' ')
+          if [ "$pending" != "0" ]; then
+            echo "Changesets are still pending. Nothing to tag yet."
+            exit 0
+          fi
+          version=$(node -p "require('./sdks/typescript/package.json').version")
+          tag="sdk-v${version}"
+          # actions/checkout does not fetch tags, so ask the remote.
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "$tag already exists; nothing to release"
+            exit 0
+          fi
+          git tag "$tag"
+          git push origin "$tag"
+          gh release create "$tag" --title "SDKs $version" --generate-notes
