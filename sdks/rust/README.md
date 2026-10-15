@@ -1,76 +1,91 @@
-# sandbox-sdk (Rust)
+# Sandbox SDK (Rust)
 
-Rust client SDK for Frontal Sandbox. The crate is `sandbox-sdk` (`sdks/rust/`).
+Rust client for `sandbox-server`. Every call is one HTTP request to the `/v1` API.
 
-**Status: scaffolding.** The public types exist, but the remote client is not implemented and the embedded mode does not execute code. See the per-method status below. Nothing here has been run against a real backend.
+**Status: early.** The client covers sessions, exec, files, snapshots, and forks. It has no retries, no streaming exec, and no WebSocket. It is not published.
 
-## Overview
+## Configuration
 
-Two modes are planned:
+`Client::from_env()` reads:
 
-1. **Remote client**: HTTP to `sandbox-server`. Not implemented yet.
-2. **Embedded mode**: in-process backend with no server, for tests and local use. Not implemented yet. The `embedded` cargo feature is declared, but the backend it is meant to enable is not wired up.
+- `SANDBOX_BASE_URL`, default `http://localhost:8080`
+- `SANDBOX_API_KEY`, sent as a bearer token. The server issues keys at startup (`sandbox serve` prints one).
 
-## API
+`Client::new(base_url, api_key)` takes both explicitly.
 
-Exports from `src/lib.rs`: `Client`, `EmbeddedSandbox`, and the modules `client` and `embedded`.
+## Methods
 
-### `Client`
+| Method | Route | Returns |
+|--------|-------|---------|
+| `create_session(SessionConfig)` | `POST /v1/sessions` | `SessionId` |
+| `exec(session, "cmd args")` | `POST /v1/sessions/{id}/exec` | `ExecResult` (text streams) |
+| `exec_request(session, ExecRequest)` | `POST /v1/sessions/{id}/exec` | `sandbox_types::ExecResult` (bytes) |
+| `read_file` / `write_file` / `delete_file` | `/v1/sessions/{id}/fs/{path}` | bytes, or `()` |
+| `snapshot(session)` | `POST /v1/sessions/{id}/snapshot` | `SnapshotId` |
+| `list_snapshots(session)` | `GET /v1/sessions/{id}/snapshots` | `Vec<Snapshot>` |
+| `get_snapshot(session, snapshot)` | `GET /v1/sessions/{id}/snapshots/{snapshot_id}` | `Snapshot` |
+| `fork(snapshot, count)` | `POST /v1/snapshots/{id}/fork` | `Vec<SessionId>` |
+| `destroy_session(session)` | `DELETE /v1/sessions/{id}` | `()` |
 
-| Method | Status | Behavior |
-|--------|--------|----------|
-| `Client::embedded()` | Works (placeholder) | Returns a client whose base URL is `embedded://`. |
-| `Client::from_env()` | Works | Reads `SANDBOX_BASE_URL` (default `http://localhost:8080`). It reads `SANDBOX_API_KEY` but does not use it. |
-| `create_session(config: SessionConfig) -> Result<SessionId, SandboxError>` | Stub | Embedded client returns a new `SessionId`. Remote client returns `UNSUPPORTED` ("HTTP client not implemented"). |
-| `exec(session_id: SessionId, command: &str) -> Result<ExecResult, SandboxError>` | Stub | Embedded client returns `ExecResult { exit_code: 0, stdout: "", stderr: "" }` without running anything. Remote client returns `UNSUPPORTED`. |
-| `snapshot(session_id: SessionId) -> Result<SnapshotId, SandboxError>` | Stub | Always returns `UNSUPPORTED`. |
-| `destroy_session(session_id: SessionId) -> Result<(), SandboxError>` | Stub | Always returns `UNSUPPORTED`. |
+`exec` splits the command on whitespace. Use `exec_request` for arguments with spaces, an environment, or stdin.
 
-### `EmbeddedSandbox`
+## Errors
 
-| Method | Status | Behavior |
-|--------|--------|----------|
-| `EmbeddedSandbox::new(config: SessionConfig) -> Result<Self, SandboxError>` | Stub | Creates an embedded client and a session ID. No backend is started. |
-| `exec(&self, command: &str) -> Result<ExecResult, SandboxError>` | Stub | Delegates to `Client::exec`, so it returns the fake success result above. |
-| `snapshot(&self) -> Result<SnapshotId, SandboxError>` | Stub | Returns `UNSUPPORTED`. |
-| `destroy(&self) -> Result<(), SandboxError>` | Stub | Returns `UNSUPPORTED`. |
-
-`ExecResult` (in `client.rs`) has public fields `exit_code: i32`, `stdout: String`, and `stderr: String`.
+A non-2xx response becomes a `SandboxError` with the server's `code` and `message`. Authentication failures are `PermissionDenied`. An unknown session, or one owned by another key, is `NotFound`. A refused setting is `Unsupported`. A server that cannot be reached is `Unavailable`.
 
 ## Example
 
-This compiles against the current signatures (not verified by a build in this refresh). Its results are placeholders today.
-
 ```rust
-use sandbox_sdk::{Client, EmbeddedSandbox};
-use sandbox_types::SessionConfig;
+use sandbox_sdk::Client;
+use sandbox_types::{SessionConfig, TenantId, TierPreference};
 
 # async fn demo() -> Result<(), sandbox_types::SandboxError> {
-// Embedded placeholder: returns exit code 0 and empty output; does not execute.
-let client = Client::embedded()?;
-let session = client.create_session(SessionConfig::default()).await?;
-let out = client.exec(session, "echo hi").await?;
-println!("{} {}", out.exit_code, out.stdout);
+let client = Client::from_env()?;
+let session = client
+    .create_session(SessionConfig {
+        tenant_id: TenantId::nil(),
+        tier_preference: TierPreference::Isolate,
+        ..SessionConfig::default()
+    })
+    .await?;
 
-let sb = EmbeddedSandbox::new(SessionConfig::default()).await?;
-let out = sb.exec("echo hi").await?;
-sb.destroy().await?; // returns UNSUPPORTED today
+let out = client.exec(session, "echo hello").await?;
+assert_eq!(out.stdout.trim(), "hello");
+
+client.write_file(session, "/notes.txt", b"saved".to_vec()).await?;
+let snapshot = client.snapshot(session).await?;
+let forks = client.fork(snapshot, 2).await?;
+assert_eq!(client.read_file(forks[0], "/notes.txt").await?, b"saved");
+
+client.destroy_session(session).await?;
 # Ok(())
 # }
 ```
 
-## Not present
+`EmbeddedSandbox` wraps one session on a client for scripts that only need one:
 
-These do not exist in the crate. Do not use them:
+```rust
+use sandbox_sdk::{Client, EmbeddedSandbox};
+# async fn demo() -> Result<(), sandbox_types::SandboxError> {
+let sandbox = EmbeddedSandbox::new(Client::from_env()?, sandbox_types::SessionConfig::default()).await?;
+let out = sandbox.exec("pwd").await?;
+sandbox.destroy().await?;
+# Ok(())
+# }
+```
 
-- `Client::create`
-- `SessionConfig::tier(...)`. Use `SessionConfig::with_tier(...)` from `sandbox-types` instead.
-- `sb.fs()`, `sb.exec_stream()`, `sb.watch()`, `snapshot.fork()`
-- `EmbeddedSandbox::new()` with no arguments
+## Tests
+
+- Unit tests in `src/` cover the path encoding and the base URL.
+- `tests/against_server.rs` starts the real router on a local port and drives every method over HTTP. It covers the file round trip, deletion, destroy, snapshots, fork, a refused key, and a session that another key cannot reach.
+
+```sh
+cargo test -p sandbox-sdk
+bazel test //sdks/rust:sandbox_sdk_unit_test //sdks/rust:sandbox_sdk_test
+```
 
 ## Related
 
-- `crates/sandbox-types/`: `SessionConfig`, `SessionId`, `SnapshotId`, and `SandboxError`.
-- `crates/sandbox-server/`: the server these methods will call. Its handlers are placeholders today.
-- `sdks/typescript/` and `sdks/python/`: the other SDKs. Their HTTP paths do not match the server (see their READMEs).
-- `PLAN.md`: target API and milestones.
+- `crates/sandbox-server/`: the server these methods call. Its routes and limits are in its README.
+- `crates/sandbox-types/`: `SessionConfig`, `SessionId`, `SnapshotId`, `Snapshot`, and `SandboxError`.
+- `sdks/typescript/` and `sdks/python/`: the other SDKs. The TypeScript SDK's camelCase schemas do not yet match the server's snake_case JSON.

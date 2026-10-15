@@ -10,23 +10,18 @@ description = "Rust SDK for the sandbox system"
 
 [dependencies]
 sandbox-types = { path = "../../crates/sandbox-types" }
-sandbox-session = { path = "../../crates/sandbox-session", optional = true }
-sandbox-runtime = { path = "../../crates/sandbox-runtime", optional = true }
-sandbox-wasm = { path = "../../crates/sandbox-wasm", optional = true }
-sandbox-shell = { path = "../../crates/sandbox-shell", optional = true }
-sandbox-cas = { path = "../../crates/sandbox-cas", optional = true }
-sandbox-vfs = { path = "../../crates/sandbox-vfs", optional = true }
-sandbox-policy = { path = "../../crates/sandbox-policy", optional = true }
-sandbox-snapshot = { path = "../../crates/sandbox-snapshot", optional = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 reqwest = { workspace = true }
 futures = { workspace = true }
 
-[features]
-default = []
-embedded = ["sandbox-session", "sandbox-runtime", "sandbox-wasm", "sandbox-shell", "sandbox-vfs", "sandbox-cas", "sandbox-policy", "sandbox-snapshot"]
+[dev-dependencies]
+axum = { workspace = true }
+sandbox-server = { path = "../../crates/sandbox-server" }
+sandbox-scheduler = { path = "../../crates/sandbox-scheduler" }
+sandbox-session = { path = "../../crates/sandbox-session" }

@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_sdk",
@@ -6,51 +6,37 @@ rust_library(
     srcs = glob(["src/**/*.rs"]),
     deps = [
         "//crates/sandbox-types:sandbox_types",
-        "//crates/sandbox-cas:sandbox_cas",
-        "//crates/sandbox-vfs:sandbox_vfs",
-        "//crates/sandbox-policy:sandbox_policy",
-        "//crates/sandbox-snapshot:sandbox_snapshot",
         "@crates//:tokio",
         "@crates//:bytes",
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:schemars",
         "@crates//:serde",
+        "@crates//:serde_json",
         "@crates//:reqwest",
         "@crates//:futures",
     ],
-    proc_macro_deps = [
-        "@crates//:async-trait",
-    ],
     visibility = ["//visibility:public"],
 )
 
-# Embedded feature - includes all optional dependencies
-rust_library(
-    name = "sandbox_sdk_embedded",
+# Unit tests in src/.
+rust_test(
+    name = "sandbox_sdk_unit_test",
+    crate = ":sandbox_sdk",
     edition = "2021",
-    srcs = glob(["src/**/*.rs"]),
-    deps = [
-        ":sandbox_sdk",
-        "//crates/sandbox-session:sandbox_session",
-        "//crates/sandbox-runtime:sandbox_runtime",
-        "//crates/sandbox-wasm:sandbox_wasm",
-        "//crates/sandbox-shell:sandbox_shell",
-        "//crates/sandbox-cas:sandbox_cas",
-        "//crates/sandbox-vfs:sandbox_vfs",
-        "//crates/sandbox-policy:sandbox_policy",
-        "//crates/sandbox-snapshot:sandbox_snapshot",
-    ],
-    visibility = ["//visibility:public"],
 )
 
-rust_library(
+# tests/against_server.rs starts the real router on a local port.
+rust_test(
     name = "sandbox_sdk_test",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    srcs = glob(["tests/**/*.rs"]),
     deps = [
         ":sandbox_sdk",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:axum",
         "@crates//:tokio",
     ],
-    testonly = True,
 )
