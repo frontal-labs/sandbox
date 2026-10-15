@@ -46,7 +46,14 @@ jobs:
       - name: Install Rust
         run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      # The ARM Linux build runs on an x86 runner, so it needs a cross toolchain.
+      - name: Install cross toolchain (aarch64 Linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Build CLI
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
         run: cargo build --release -p cli --target ${{ matrix.target }}
       - name: Package CLI binary
         shell: bash
