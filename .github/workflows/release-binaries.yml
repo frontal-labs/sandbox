@@ -32,6 +32,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://npm.pkg.github.com"
+      # sandbox-proto's build script runs protoc. Each runner installs its own.
+      - name: Install protoc (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler && protoc --version
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf && protoc --version
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y; protoc --version
       - name: Install Rust
         run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
