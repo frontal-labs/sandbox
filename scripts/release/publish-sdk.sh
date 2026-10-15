@@ -71,13 +71,14 @@ if oras manifest fetch "${image}:${version}" >/dev/null 2>&1; then
   exit 0
 fi
 
-# oras takes "file:media-type" pairs. Each file keeps its name as the title.
+# oras takes "file:media-type" pairs. It rejects absolute paths, so push from
+# the output directory with bare names. Each file keeps its name as the title.
 push_args=()
 for artifact in "${artifacts[@]}"; do
-  file="${artifact%%:*}"
+  file="$(basename "${artifact%%:*}")"
   media="${artifact#*:}"
   push_args+=("${file}:${media}")
 done
-oras push "${image}:${version}" "${push_args[@]}"
+(cd "$out" && oras push "${image}:${version}" "${push_args[@]}")
 oras tag "${image}:${version}" latest
 echo "pushed ${image}:${version} and tagged latest"
