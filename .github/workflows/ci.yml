@@ -26,3 +26,37 @@ jobs:
         run: cargo test --workspace
       - name: Bench compile check
         run: cargo bench --workspace --no-run
+
+  sdk-typescript:
+    name: TypeScript SDK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build --workspace sandbox-sdk
+      - name: Test
+        run: npm test --workspace sandbox-sdk
+      - name: Pack check
+        run: |
+          cd sdks/typescript
+          npm pack --dry-run >/dev/null
+
+  sdk-python:
+    name: Python SDK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e "sdks/python[dev]"
+      - name: Lint
+        run: ruff check sdks/python/sandbox_sdk
+      - name: Test
+        run: pytest sdks/python/tests -q
