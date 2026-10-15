@@ -130,4 +130,38 @@ describe.skipIf(!live)("live server", () => {
     const destroyed = await client.destroySession(id)
     expect(isSandboxError(destroyed)).toBe(false)
   })
+
+  it("sleeps a session, refuses work while asleep, and wakes it", async () => {
+    const client = Client.fromEnv()
+    const id = await client.createSession({
+      tenant_id: "00000000000000000000000000",
+      tier_preference: "isolate",
+      limits: {},
+      network: { default_deny: true, rules: [] },
+      env: {},
+      cwd: "/work",
+      labels: {},
+    })
+    if (isSandboxError(id)) throw id
+
+    const snapshotId = await client.sleep(id)
+    if (isSandboxError(snapshotId)) throw snapshotId
+    expect(snapshotId.length).toBeGreaterThan(0)
+    const asleep = await client.getSession(id)
+    if (isSandboxError(asleep)) throw asleep
+    expect(asleep.status).toBe("sleeping")
+
+    const refused = await client.exec(id, { argv: ["true"], env: {}, stream: false })
+    expect(isSandboxError(refused) && refused.code).toBe("INVALID_STATE")
+
+    const woken = await client.wake(id)
+    if (isSandboxError(woken)) throw woken
+    expect(woken.status).toBe("running")
+
+    const out = await client.exec(id, { argv: ["echo", "awake"], env: {}, stream: false })
+    if (isSandboxError(out)) throw out
+    expect(new TextDecoder().decode(out.stdout).trim()).toBe("awake")
+
+    await client.destroySession(id)
+  })
 })

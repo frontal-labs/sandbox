@@ -4,7 +4,8 @@
 
 use reqwest::{Method, StatusCode};
 use sandbox_types::{
-    ErrorCode, ExecRequest, SandboxError, SessionConfig, SessionId, Snapshot, SnapshotId,
+    ErrorCode, ExecRequest, SandboxError, SessionConfig, SessionId, SessionState, Snapshot,
+    SnapshotId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -155,6 +156,22 @@ impl Client {
         Ok(body.snapshot_id)
     }
 
+    /// Puts the session to sleep and returns the snapshot it wakes from. A
+    /// sleeping session holds no filesystem in memory until `wake` is called.
+    pub async fn sleep(&self, session: SessionId) -> Result<SnapshotId, SandboxError> {
+        let body: SnapshotIdBody = self
+            .send_json::<(), _>(Method::POST, &format!("/v1/sessions/{session}/sleep"), None)
+            .await?;
+        Ok(body.snapshot_id)
+    }
+
+    /// Wakes a sleeping session. Its files come back from the sleep snapshot.
+    /// Shell state starts fresh.
+    pub async fn wake(&self, session: SessionId) -> Result<SessionState, SandboxError> {
+        self.send_json::<(), _>(Method::POST, &format!("/v1/sessions/{session}/wake"), None)
+            .await
+    }
+
     /// Snapshots taken from the session.
     pub async fn list_snapshots(&self, session: SessionId) -> Result<Vec<Snapshot>, SandboxError> {
         self.send_json::<(), _>(
@@ -196,6 +213,12 @@ impl Client {
     }
 
     /// Destroys a session.
+    /// The current state of a session, sleeping or not.
+    pub async fn get_session(&self, session: SessionId) -> Result<SessionState, SandboxError> {
+        self.send_json::<(), _>(Method::GET, &format!("/v1/sessions/{session}"), None)
+            .await
+    }
+
     pub async fn destroy_session(&self, session: SessionId) -> Result<(), SandboxError> {
         self.send(
             Method::DELETE,

@@ -116,3 +116,35 @@ async fn one_key_cannot_reach_another_keys_session() {
     let err = other.exec(session, "echo nope").await.unwrap_err();
     assert_eq!(err.code, ErrorCode::NotFound);
 }
+
+#[tokio::test]
+async fn sleep_and_wake_restore_files_over_http() {
+    let client = client().await;
+    let session = client.create_session(config()).await.unwrap();
+    client
+        .write_file(session, "/kept.txt", b"before sleep".to_vec())
+        .await
+        .unwrap();
+
+    let snapshot = client.sleep(session).await.unwrap();
+    let state = client.get_session(session).await.unwrap();
+    assert_eq!(state.status, sandbox_types::SessionStatus::Sleeping);
+
+    // Asleep, the session refuses commands with a conflict.
+    let err = client.exec(session, "echo hi").await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidState);
+
+    let woken = client.wake(session).await.unwrap();
+    assert_eq!(woken.status, sandbox_types::SessionStatus::Running);
+    assert_eq!(
+        client.read_file(session, "/kept.txt").await.unwrap(),
+        b"before sleep"
+    );
+
+    // The sleep snapshot is an ordinary snapshot, so it can be forked.
+    let forks = client.fork(snapshot, 1).await.unwrap();
+    assert_eq!(
+        client.read_file(forks[0], "/kept.txt").await.unwrap(),
+        b"before sleep"
+    );
+}

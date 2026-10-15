@@ -169,6 +169,28 @@ export class Client {
     return this.getSnapshot(sessionId, taken.snapshot_id)
   }
 
+  /** Puts the session to sleep and returns the id of the snapshot it wakes from. */
+  async sleep(sessionId: string): Promise<Result<string>> {
+    const taken = await this.request(
+      `/v1/sessions/${sessionId}/sleep`,
+      { method: "POST" },
+      TakeSnapshotResponseSchema,
+    )
+    if (isSandboxError(taken)) {
+      return taken
+    }
+    return taken.snapshot_id
+  }
+
+  /** Wakes a sleeping session. Its files come back; shell state starts fresh. */
+  async wake(sessionId: string): Promise<Result<SessionState>> {
+    return this.request<SessionState>(
+      `/v1/sessions/${sessionId}/wake`,
+      { method: "POST" },
+      SessionStateSchema,
+    )
+  }
+
   async listSnapshots(sessionId: string): Promise<Result<Snapshot[]>> {
     return this.request<Snapshot[]>(
       `/v1/sessions/${sessionId}/snapshots`,

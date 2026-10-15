@@ -75,7 +75,7 @@ export const SessionStateSchema = z.object({
   tier: TierSchema,
   status: SessionStatusSchema,
   config_hash: z.string().min(1),
-  vfs_root: z.string().optional(),
+  vfs_root: z.string().nullable().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
   labels: z.record(z.string()),
