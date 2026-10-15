@@ -30,6 +30,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Compile benchmarks
         run: cargo bench --workspace --no-run
 
@@ -42,27 +44,29 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Run VFS benchmarks
-        run: cargo bench --bench vfs_bench -- --output-format=json > bench_results_vfs.json
+        run: cargo bench --bench vfs_bench
       
       - name: Run CAS benchmarks
-        run: cargo bench --bench cas_bench -- --output-format=json > bench_results_cas.json
+        run: cargo bench --bench cas_bench
       
       - name: Run Shell benchmarks
-        run: cargo bench --bench shell_bench -- --output-format=json > bench_results_shell.json
+        run: cargo bench --bench shell_bench
       
       - name: Run Runtime benchmarks
-        run: cargo bench --bench runtime_bench -- --output-format=json > bench_results_runtime.json
+        run: cargo bench --bench runtime_bench
       
       - name: Run WASM benchmarks
-        run: cargo bench --bench wasm_bench -- --output-format=json > bench_results_wasm.json
+        run: cargo bench --bench wasm_bench
       
       - name: Run Session benchmarks
-        run: cargo bench --bench session_bench -- --output-format=json > bench_results_session.json
+        run: cargo bench --bench session_bench
       
       - name: Run Promotion benchmarks
-        run: cargo bench --bench promotion_bench -- --output-format=json > bench_results_promotion.json
+        run: cargo bench --bench promotion_bench
       
       - name: Check for regressions
         run: |
@@ -154,6 +158,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Build load test binary
         run: cargo build --release -p sandbox-load
@@ -281,6 +287,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Build load test binary
         run: cargo build --release -p sandbox-load
