@@ -126,8 +126,10 @@ pub struct SessionState {
     pub config_hash: ContentHash,
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, pattern = "^[0-9a-f]{64}$"))]
     pub vfs_root: Option<ContentHash>,
+    #[serde(with = "crate::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: SystemTime,
+    #[serde(with = "crate::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: SystemTime,
     pub labels: HashMap<String, String>,
@@ -186,6 +188,7 @@ pub struct Snapshot {
     pub tier: Tier,
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, pattern = "^[0-9a-f]{64}$"))]
     pub runtime_blob: Option<ContentHash>,
+    #[serde(with = "crate::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: SystemTime,
     pub labels: HashMap<String, String>,
