@@ -1,6 +1,6 @@
 [package]
 name = "sandbox-sdk"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frontal-labs/sandbox"
@@ -9,7 +9,7 @@ title = "Sandbox Sdk"
 description = "Rust SDK for the sandbox system"
 
 [dependencies]
-sandbox-types = { path = "../../crates/sandbox-types" }
+sandbox-types = { version = "0.0.0", path = "../../crates/sandbox-types" }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
