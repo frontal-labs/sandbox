@@ -1,4 +1,4 @@
-# sandbox-sdk (TypeScript)
+# Sandbox SDK (TypeScript)
 
 TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox), the execution platform for AI agents. The npm package is `sandbox-sdk`. Source is in `sdks/typescript/`.
 
