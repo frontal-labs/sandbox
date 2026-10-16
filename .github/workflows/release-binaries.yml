@@ -162,10 +162,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: dist }
+      - name: Name each binary after its target
+        # Every platform's binary is called sandbox, so the uploads would overwrite each
+        # other. Each one is copied under its target name first.
+        run: |
+          mkdir -p release-assets
+          for dir in dist/*/; do
+            target="${dir#dist/sandbox-}"
+            target="${target%/}"
+            for file in "$dir"sandbox*; do
+              name="$(basename "$file")"
+              ext="${name#sandbox}"
+              cp "$file" "release-assets/sandbox-${target}${ext}"
+            done
+          done
+          ls -l release-assets
       - name: Create the GitHub release and attach the binaries
         # This is the only workflow that creates a release for a v* tag, so the
         # binaries and the notes land on one release.
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/**/sandbox*
+          files: release-assets/*
