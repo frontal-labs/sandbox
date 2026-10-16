@@ -8,6 +8,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default. A job that writes asks for the scope it needs.
+permissions:
+  contents: read
+
 jobs:
   title:
     name: Validate Title
