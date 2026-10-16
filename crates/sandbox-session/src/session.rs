@@ -3,6 +3,27 @@
 use async_trait::async_trait;
 use sandbox_types::hash::ContentHash;
 use sandbox_types::{ExecRequest, ExecResult, SandboxError, SessionId, Tier};
+use std::collections::HashMap;
+
+/// Everything a session needs to come back: its committed filesystem root, its
+/// working directory, and its environment. ADR 0010.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checkpoint {
+    pub root: ContentHash,
+    pub cwd: String,
+    pub env: HashMap<String, String>,
+}
+
+impl Checkpoint {
+    /// A checkpoint with a filesystem root and the default shell state.
+    pub fn root_only(root: ContentHash) -> Self {
+        Self {
+            root,
+            cwd: "/".to_string(),
+            env: HashMap::new(),
+        }
+    }
+}
 
 // The VFS is the source of truth for files (invariant 1), so sessions expose
 // the VFS trait directly rather than a second, divergent definition.
@@ -23,9 +44,9 @@ pub trait Session: Send + Sync {
     /// keeps the hash, and `restore` starts a session from it. The session
     /// keeps running. Take snapshots while the session is idle.
     async fn snapshot(&self) -> Result<ContentHash, SandboxError>;
-    /// Checkpoints the session for sleep and returns the root to wake from.
-    /// The session still runs. Its owner drops it once the root is recorded, and
-    /// frees its memory then. See ADR 0006.
-    async fn sleep(&self) -> Result<ContentHash, SandboxError>;
+    /// Commits the filesystem and captures the shell state. The session keeps
+    /// running. Its owner saves the checkpoint to bring the session back later
+    /// (ADR 0010). Sleep and durable sessions both use it.
+    async fn checkpoint(&self) -> Result<Checkpoint, SandboxError>;
     async fn destroy(self: Box<Self>) -> Result<(), SandboxError>;
 }

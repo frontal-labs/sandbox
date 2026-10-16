@@ -1,4 +1,4 @@
-use crate::session::{Session, SessionFs};
+use crate::session::{Checkpoint, Session, SessionFs};
 use async_trait::async_trait;
 use sandbox_cas::{BlobStore, MemStore};
 use sandbox_shell::{ExecutionResult, Shell, ShellConfig};
@@ -51,13 +51,23 @@ pub struct IsolateBackend {
 
 impl IsolateBackend {
     pub async fn new(_config: SessionConfig) -> Result<Self, SandboxError> {
-        Ok(Self::with_root(ContentHash::nil()))
+        Ok(Self::with_checkpoint(Checkpoint::root_only(
+            ContentHash::nil(),
+        )))
     }
 
-    /// A session whose filesystem starts at `root`, a committed snapshot root.
-    fn with_root(root: ContentHash) -> Self {
-        let fs = Arc::new(Vfs::new(root, shared_store()));
-        let shell = Shell::new(fs.clone(), ShellConfig::default());
+    /// A session that starts from a checkpoint: its filesystem root, working
+    /// directory, and environment.
+    fn with_checkpoint(checkpoint: Checkpoint) -> Self {
+        let fs = Arc::new(Vfs::new(checkpoint.root, shared_store()));
+        let shell = Shell::new(
+            fs.clone(),
+            ShellConfig {
+                cwd: checkpoint.cwd,
+                env: checkpoint.env,
+                ..ShellConfig::default()
+            },
+        );
         Self {
             id: SessionId::new(),
             tier: Tier::Isolate,
@@ -138,8 +148,16 @@ impl Session for IsolateBackend {
             .map_err(|e| SandboxError::new(ErrorCode::VfsError, e.to_string()))
     }
 
-    async fn sleep(&self) -> Result<ContentHash, SandboxError> {
-        self.snapshot().await
+    async fn checkpoint(&self) -> Result<Checkpoint, SandboxError> {
+        let root = self.snapshot().await?;
+        // The shell lock keeps a command from changing the directory or the
+        // environment while they are read.
+        let shell = self.shell.lock().await;
+        Ok(Checkpoint {
+            root,
+            cwd: shell.cwd().to_string(),
+            env: shell.env().clone(),
+        })
     }
 
     async fn destroy(self: Box<Self>) -> Result<(), SandboxError> {
@@ -150,7 +168,13 @@ impl Session for IsolateBackend {
 /// Starts a new session whose filesystem is `root`, a committed root returned
 /// by `Session::snapshot`. The caller is responsible for who may use `root`.
 pub async fn restore(root: ContentHash) -> Result<Box<dyn Session>, SandboxError> {
-    Ok(Box::new(IsolateBackend::with_root(root)))
+    restore_checkpoint(Checkpoint::root_only(root)).await
+}
+
+/// Starts a session from a checkpoint returned by `Session::checkpoint`. The
+/// caller decides who may use it.
+pub async fn restore_checkpoint(checkpoint: Checkpoint) -> Result<Box<dyn Session>, SandboxError> {
+    Ok(Box::new(IsolateBackend::with_checkpoint(checkpoint)))
 }
 
 #[cfg(test)]
@@ -299,14 +323,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sleep_checkpoints_a_root_that_wakes_with_the_files() {
+    async fn checkpoint_restores_files_and_shell_state() {
         let backend = new_backend().await;
         write_text(backend.fs(), "/keep.txt", "kept").await;
-        let root = backend.sleep().await.unwrap();
-        // Writes after sleep belong to the session that is gone, not to the wake.
+        backend
+            .fs()
+            .mkdir(std::path::Path::new("/work"), 0o755)
+            .await
+            .unwrap();
+        backend
+            .run_script("export GREETING=hello; cd /work")
+            .await
+            .unwrap();
+        let checkpoint = backend.checkpoint().await.unwrap();
+        // Writes after the checkpoint belong to the session that is gone.
         write_text(backend.fs(), "/keep.txt", "later").await;
-        let woken = restore(root).await.unwrap();
+
+        let woken = restore_checkpoint(checkpoint).await.unwrap();
         assert_eq!(read_text(woken.fs(), "/keep.txt").await, "kept");
+        let out = woken.run_script("echo $GREETING; pwd").await.unwrap();
+        assert_eq!(out.stdout, b"hello\n/work\n");
     }
 
     #[tokio::test]
