@@ -1,4 +1,4 @@
-# sandbox-sdk (Python)
+# Sandbox SDK (Python)
 
 Python client SDK for Frontal Sandbox. The distribution name is `sandbox-sdk` and the import name is `sandbox_sdk`. Source is in `sdks/python/sandbox_sdk/`.
 
