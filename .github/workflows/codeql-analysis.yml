@@ -32,7 +32,19 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
+      # Results are kept as a workflow artifact. Uploading them to code scanning
+      # needs GitHub Code Security, which this private repository does not have yet.
+      # Set upload back to true once that is enabled.
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@ce5e7eeac396d720fe2d802714996c8ce561e311 # v3
         with:
           category: "/language:${{ matrix.language }}"
+          upload: false
+          output: sarif-results
+      - name: Keep the SARIF results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: codeql-${{ matrix.language }}
+          path: sarif-results
+          if-no-files-found: warn
