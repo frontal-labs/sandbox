@@ -13,7 +13,7 @@ use axum::{
 };
 use sandbox_scheduler::Scheduler;
 use sandbox_session::session::SessionFs;
-use sandbox_session::{IsolateBackend, Session};
+use sandbox_session::{restore_checkpoint, Checkpoint, IsolateBackend, Session};
 use sandbox_trace::{outcome_of, RunRecord, Trace};
 use sandbox_types::hash::ContentHash;
 use sandbox_types::policy::{NetworkPolicy, ResourceLimits};
@@ -109,8 +109,9 @@ struct Entry {
     /// `None` while the session sleeps. Sleep drops the live session, so a
     /// sleeping session holds no VFS in memory. See ADR 0006.
     session: Option<Arc<dyn Session>>,
-    /// The committed root a sleeping session wakes from.
-    sleep_root: Option<ContentHash>,
+    /// The session's last checkpoint: what a restart or a wake brings back. Only
+    /// a durable server keeps one (ADR 0010).
+    checkpoint: Option<Checkpoint>,
     /// Commands the session ran, in order (ADR 0009).
     trace: Vec<RunRecord>,
     /// Bytes the trace holds in its scripts and outputs.
@@ -283,7 +284,7 @@ fn entry(
         owner,
         state,
         session: Some(session),
-        sleep_root: None,
+        checkpoint: None,
         trace: Vec::new(),
         trace_bytes: 0,
         trace_complete: true,
@@ -432,22 +433,48 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
             );
         }
     }
+    // Version 1 kept sleeping sessions in their own list, with no shell state.
+    let legacy = saved
+        .sleeping
+        .into_iter()
+        .map(|s| crate::persist::SavedSession {
+            owner: s.owner,
+            state: s.state,
+            root: s.sleep_root,
+            cwd: "/".to_string(),
+            env: HashMap::new(),
+            sleeping: true,
+            trace: s.trace,
+            trace_complete: s.trace_complete,
+        });
     let mut table = state.sessions.0.write().await;
-    for sleeping in saved.sleeping {
-        let trace = Trace::parse(&sleeping.trace).map_err(|e| {
-            SandboxError::internal(format!("a sleeping session's trace is damaged: {e}"))
+    for saved_session in saved.sessions.into_iter().chain(legacy) {
+        let trace = Trace::parse(&saved_session.trace).map_err(|e| {
+            SandboxError::internal(format!("a session's saved trace is damaged: {e}"))
         })?;
-        let id = sleeping.state.id;
+        let checkpoint = Checkpoint {
+            root: saved_session.root,
+            cwd: saved_session.cwd,
+            env: saved_session.env,
+        };
+        // A live session comes back running from its checkpoint. A sleeping one
+        // waits for a wake.
+        let session: Option<Arc<dyn Session>> = if saved_session.sleeping {
+            None
+        } else {
+            Some(restore_checkpoint(checkpoint.clone()).await?.into())
+        };
+        let id = saved_session.state.id;
         table.insert(
             id,
             Entry {
-                owner: KeyId::from_stored(sleeping.owner),
-                state: sleeping.state,
-                session: None,
-                sleep_root: Some(sleeping.sleep_root),
+                owner: KeyId::from_stored(saved_session.owner),
+                state: saved_session.state,
+                session,
+                checkpoint: Some(checkpoint),
                 trace_bytes: trace_size(&trace.runs),
                 trace: trace.runs,
-                trace_complete: sleeping.trace_complete,
+                trace_complete: saved_session.trace_complete,
                 gate: Arc::new(tokio::sync::Mutex::new(())),
             },
         );
@@ -457,7 +484,7 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
 
 /// The durable state as it is now.
 async fn capture(state: &AppState) -> crate::persist::Saved {
-    use crate::persist::{Saved, SavedKey, SavedSleep, SavedSnapshot};
+    use crate::persist::{Saved, SavedKey, SavedSession, SavedSnapshot};
     let keys = state
         .auth
         .export_digests()
@@ -478,15 +505,20 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
             })
             .collect()
     };
-    let sleeping = {
+    let sessions = {
         let table = state.sessions.0.read().await;
         table
             .values()
             .filter_map(|e| {
-                e.sleep_root.map(|root| SavedSleep {
+                // An entry without a checkpoint has no state to bring back.
+                let checkpoint = e.checkpoint.as_ref()?;
+                Some(SavedSession {
                     owner: e.owner.as_str().to_string(),
                     state: e.state.clone(),
-                    sleep_root: root,
+                    root: checkpoint.root,
+                    cwd: checkpoint.cwd.clone(),
+                    env: checkpoint.env.clone(),
+                    sleeping: e.session.is_none(),
                     trace: Trace {
                         runs: e.trace.clone(),
                     }
@@ -497,11 +529,45 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
             .collect()
     };
     Saved {
-        version: 1,
+        version: crate::persist::VERSION,
         keys,
         snapshots,
-        sleeping,
+        sleeping: Vec::new(),
+        sessions,
     }
+}
+
+/// Records the session's checkpoint on its entry, so the entry can be saved and
+/// woken. A memory-only server keeps none, so it skips the cost.
+async fn stamp(
+    state: &AppState,
+    entry: &mut Entry,
+    session: &Arc<dyn Session>,
+) -> Result<(), ApiError> {
+    if state.store.is_some() {
+        entry.checkpoint = Some(session.checkpoint().await?);
+    }
+    Ok(())
+}
+
+/// Saves a session after a change, so a restart brings it back as it is now
+/// (ADR 0010). The caller holds the session's gate.
+async fn save_session(
+    state: &AppState,
+    id: SessionId,
+    session: &Arc<dyn Session>,
+) -> Result<(), ApiError> {
+    if state.store.is_none() {
+        return Ok(());
+    }
+    let checkpoint = session.checkpoint().await?;
+    {
+        let mut table = state.sessions.0.write().await;
+        if let Some(entry) = table.get_mut(&id) {
+            entry.checkpoint = Some(checkpoint);
+        }
+    }
+    persist(state).await
 }
 
 /// Saves the durable state, if this server has a store. Call it after the change
@@ -573,7 +639,8 @@ pub async fn create_session(
         None => Arc::new(IsolateBackend::new(config).await?),
     };
     let id = session.id();
-    let entry = entry(owner.clone(), session, tenant_id, labels);
+    let mut entry = entry(owner.clone(), session.clone(), tenant_id, labels);
+    stamp(&state, &mut entry, &session).await?;
     admit_session(&state, &owner, entry).await?;
     Ok((
         StatusCode::CREATED,
@@ -663,6 +730,7 @@ pub async fn exec_command(
     let session = own.session;
     let result = session.exec(request.clone()).await;
     record_exec(&state, own.state.id, &request, &result).await;
+    save_session(&state, own.state.id, &session).await?;
     Ok(Json(result?))
 }
 
@@ -904,6 +972,7 @@ pub async fn write_file(
     let written = write_all(fs, &handle, &body).await;
     fs.close(&handle);
     written.map_err(vfs_error)?;
+    save_session(&state, own.state.id, &session).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -951,6 +1020,7 @@ pub async fn delete_file(
     let session = own.session;
     let target = vfs_path(&path)?;
     session.fs().rm(&target, false).await.map_err(vfs_error)?;
+    save_session(&state, own.state.id, &session).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1069,7 +1139,8 @@ pub async fn sleep_session(
     };
 
     let _admit = admit_snapshot(&state, &owner).await?;
-    let root = session.sleep().await?;
+    let checkpoint = session.checkpoint().await?;
+    let root = checkpoint.root;
     let snapshot_id = store_snapshot(&state, owner, &live_state, root).await;
 
     let mut table = state.sessions.0.write().await;
@@ -1077,7 +1148,7 @@ pub async fn sleep_session(
         // Dropping the live session here releases its VFS once no other handle
         // to it remains.
         entry.session = None;
-        entry.sleep_root = Some(root);
+        entry.checkpoint = Some(checkpoint);
         entry.state.status = SessionStatus::Sleeping;
         entry.state.updated_at = SystemTime::now();
     }
@@ -1118,12 +1189,12 @@ pub async fn wake_session(
     if entry.session.is_some() {
         return Err(SandboxError::new(ErrorCode::InvalidState, "the session is not asleep").into());
     }
-    let root = entry
-        .sleep_root
-        .ok_or_else(|| SandboxError::internal("a sleeping session has no wake root"))?;
-    let session: Arc<dyn Session> = sandbox_session::restore(root).await?.into();
+    let checkpoint = entry
+        .checkpoint
+        .clone()
+        .ok_or_else(|| SandboxError::internal("a sleeping session has no checkpoint"))?;
+    let session: Arc<dyn Session> = restore_checkpoint(checkpoint).await?.into();
     entry.session = Some(session);
-    entry.sleep_root = None;
     entry.state.status = SessionStatus::Running;
     entry.state.updated_at = SystemTime::now();
     let woken = entry.state.clone();
@@ -1167,7 +1238,13 @@ pub async fn fork_snapshot(
     for _ in 0..request.count {
         let session: Arc<dyn Session> = sandbox_session::restore(record.root).await?.into();
         let session_id = session.id();
-        let entry = entry(owner.clone(), session, TenantId::nil(), HashMap::new());
+        let mut entry = entry(
+            owner.clone(),
+            session.clone(),
+            TenantId::nil(),
+            HashMap::new(),
+        );
+        stamp(&state, &mut entry, &session).await?;
         admit_session(&state, &owner, entry).await?;
         session_ids.push(session_id);
     }

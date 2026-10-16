@@ -124,6 +124,30 @@ async fn keys_sleeping_sessions_and_snapshots_survive_a_restart() {
     let (status, body) = call(&app, "POST", "/v1/sessions", &key, Some(config())).await;
     assert_eq!(status, StatusCode::CREATED);
     let live = json_of(&body)["session_id"].as_str().unwrap().to_string();
+    // The live session has a file, a shell variable, and a command in its history.
+    let (status, body) = call_bytes(
+        &app,
+        "PUT",
+        &format!("/v1/sessions/{live}/fs/live.txt"),
+        &key,
+        b"live bytes",
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{live}/exec"),
+        &key,
+        Some(json!({"argv": ["echo", "live"], "env": {"GREETING": "hello"}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
 
     let (status, body) = call(
         &app,
@@ -161,9 +185,36 @@ async fn keys_sleeping_sessions_and_snapshots_survive_a_restart() {
     let trace = String::from_utf8(body).unwrap();
     assert!(trace.contains("'echo' 'before'"), "{trace}");
 
-    // A live session does not survive the restart, and its owner gets not-found.
-    let (status, _) = call(&app, "GET", &format!("/v1/sessions/{live}"), &key, None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    // The live session survives the restart, running, with its file and shell state.
+    let (status, body) = call(&app, "GET", &format!("/v1/sessions/{live}"), &key, None).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(json_of(&body)["status"], "running");
+    let (status, body) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{live}/fs/live.txt"),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"live bytes");
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{live}/exec"),
+        &key,
+        Some(json!({"argv": ["echo", "again"], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(json_of(&body)["stdout"].as_array().unwrap().len(), 6);
+    // The saved state holds the shell variable the live session set.
+    let saved = std::fs::read_to_string(dir.join("state.json")).unwrap();
+    assert!(
+        saved.contains("GREETING") && saved.contains("hello"),
+        "{saved}"
+    );
 
     // The sleep snapshot forks into a running session with the same contents.
     let (status, body) = call(

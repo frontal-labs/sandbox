@@ -18,7 +18,7 @@ The server kept every key, snapshot record, and sleeping session in memory, so a
   - Sleeping sessions: the session state, the sleep root, and the trace (see ADR 0009).
 - On start, the keys, snapshots, and sleeping sessions are loaded. A sleeping session wakes from its stored root under its old ID. Its owner's key still works.
 - The first start of a durable server creates one key and prints it. Later starts print nothing, because the key from the first start is still valid.
-- Live sessions are not persisted. A running session is lost on restart, and its owner gets `not_found`. A session that should survive a restart must sleep first.
+- Live sessions were not persisted. Superseded by ADR 0010: each live session is saved with its checkpoint after every change, and it comes back running after a restart.
 - Trust: `state.json` contains digests, not secrets, and it holds no content beyond the snapshot roots. The server creates the directory with mode 0700 and the state file with mode 0600, so only the server's user can read them. This is Unix-only; other platforms get the default permissions.
 
 ## Consequences
@@ -29,4 +29,4 @@ The server kept every key, snapshot record, and sleeping session in memory, so a
 ### Negative
 - The state file is rewritten in full on each change. That is simple and correct, but it does not scale to many thousands of snapshots. A log-structured store would replace it.
 - A process-wide blob store is installed once, so a process cannot switch data directories after it has created a session.
-- Live sessions and their warm shell state are not durable.
+- Live sessions were not durable. Superseded by ADR 0010.
