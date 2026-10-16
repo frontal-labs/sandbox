@@ -823,6 +823,9 @@ async fn a_trace_stops_recording_at_its_byte_budget_and_says_so() {
     )
     .unwrap();
     let recorded = text.lines().count() - 1;
-    assert!(recorded < 9, "the budget should stop recording: {recorded} runs");
+    assert!(
+        recorded < 9,
+        "the budget should stop recording: {recorded} runs"
+    );
     assert!(recorded * 1024 * 1024 <= MAX_TRACE_BYTES);
 }

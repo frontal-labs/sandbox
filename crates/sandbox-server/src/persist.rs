@@ -11,7 +11,6 @@ use sandbox_types::hash::ContentHash;
 use sandbox_types::{SandboxError, SessionId, SessionState, SnapshotId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -70,12 +69,11 @@ impl Store {
     /// Opens the data directory, installs its blob store, and reads the saved
     /// state, which is empty for a new directory.
     pub fn open(dir: &Path) -> Result<(Self, Saved), SandboxError> {
-        // Owner-only, because the state holds key digests and snapshot roots.
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir.join("blobs"))
-            .map_err(|e| SandboxError::internal(format!("cannot create {}: {e}", dir.display())))?;
+        let to_error = |e: std::io::Error| {
+            SandboxError::internal(format!("cannot create {}: {e}", dir.display()))
+        };
+        create_private_dir(dir).map_err(to_error)?;
+        create_private_dir(&dir.join("blobs")).map_err(to_error)?;
         install_blob_store_once(dir)?;
 
         let path = dir.join(FILE);
@@ -135,12 +133,14 @@ impl Store {
         let path = self.path.clone();
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
             use std::io::Write;
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&tmp)?;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&tmp)?;
             file.write_all(&bytes)?;
             file.sync_all()?;
             std::fs::rename(&tmp, &path)
@@ -149,6 +149,22 @@ impl Store {
         .map_err(|e| SandboxError::internal(format!("state write task failed: {e}")))?
         .map_err(|e| SandboxError::internal(format!("cannot save state: {e}")))
     }
+}
+
+/// Creates `path` and its parents. A directory this call creates is owner-only on
+/// Unix, because the state holds key digests and snapshot roots. A directory that
+/// already exists keeps its permissions.
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
 }
 
 /// Installs the disk store for `dir` once per process. Reopening the same

@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Runs the real `sandbox` binary as a gRPC worker over a Unix socket.
 
 use sandbox_types::{ErrorCode, ExecRequest};

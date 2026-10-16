@@ -57,6 +57,8 @@ pub enum Commands {
     },
 
     /// Internal: serve one session as gRPC on a Unix socket, for a worker host.
+    /// Unix only, because the socket is a Unix domain socket.
+    #[cfg(unix)]
     #[command(hide = true)]
     Worker {
         /// Socket path to listen on. The host creates its directory with mode 0700.
@@ -108,6 +110,7 @@ impl Cli {
                 let rt = runtime()?;
                 rt.block_on(crate::bench::run(name.as_deref()))
             }
+            #[cfg(unix)]
             Commands::Worker { socket } => {
                 let rt = runtime()?;
                 rt.block_on(sandbox_worker::serve(socket))?;

@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Worker processes for the sandbox system. Each worker runs one session in a
 //! child process, served as gRPC over a private Unix socket. See [`worker`].
 

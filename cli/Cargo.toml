@@ -20,7 +20,6 @@ path = "src/main.rs"
 sandbox-sdk = { path = "../sdks/rust" }
 sandbox-types = { path = "../crates/sandbox-types" }
 sandbox-session = { path = "../crates/sandbox-session" }
-sandbox-worker = { path = "../crates/sandbox-worker" }
 sandbox-server = { path = "../crates/sandbox-server" }
 sandbox-scheduler = { path = "../crates/sandbox-scheduler" }
 sandbox-trace = { path = "../crates/sandbox-trace" }
@@ -39,3 +38,6 @@ serde_json = { workspace = true }
 
 [features]
 default = []
+# The worker serves gRPC over a Unix socket, so only Unix builds have it.
+[target.'cfg(unix)'.dependencies]
+sandbox-worker = { path = "../crates/sandbox-worker" }
