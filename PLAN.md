@@ -20,7 +20,7 @@ This document is the full spec for a coding agent to build `sandbox` in Rust. Wo
 
 - Windows or macOS guests.
 - GPU workloads.
-- Persisting running process state across sleep or promotion. Sessions keep their files, working directory, and environment across sleep and restart, but not running processes.
+- Persisting running process state across sleep or promotion. Sessions keep their files and working directory across sleep and restart, but not their environment (its values are often secrets) or running processes.
 - Full bash compatibility (target the 95% agents actually use).
 - Multi-region replication.
 
@@ -423,7 +423,7 @@ This section records what the code does today against the plan above. Update it 
 
 - **Isolate tier, shell, and VFS (M1 part):** overlay VFS with commit to a Merkle tree and quotas. Builtin shell with pipes, redirects, and variables. Runs over the VFS in process.
 - **Sessions:** create, exec, file read, write, and delete, snapshot, fork, sleep, and wake (ADRs 0004, 0006).
-- **Durable state (§4.15, §4.8):** `serve --data-dir` keeps keys (as digests), snapshots, and every session with its checkpoint: files, working directory, and environment. Live sessions come back running after a restart, and sleeping sessions wait for a wake (ADRs 0008, 0010).
+- **Durable state (§4.15, §4.8):** `serve --data-dir` keeps keys (as digests), snapshots, and every session with its checkpoint: files and working directory. The environment is kept in memory only, because its values are often secrets. Live sessions come back running after a restart, and sleeping sessions wait for a wake (ADRs 0008, 0010).
 - **Traces (§4.12):** commands are recorded per session and served as JSON Lines. `sandbox replay` re-runs a trace and reports divergences (ADRs 0007, 0009). File writes are not recorded yet, which is the M2 requirement "trace shows every file change".
 - **Watch (§4.4):** the VFS delivers change events for a path, with an overflow signal (ADR 0005).
 - **API keys and limits (§4.15):** per-key session and snapshot limits, owner-only access, and keys stored as digests.

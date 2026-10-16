@@ -13,11 +13,11 @@ Re-exported from `src/lib.rs`: `IsolateBackend`, `Session`, `restore`.
 - `IsolateBackend::new(SessionConfig)` starts a session. `exec` refuses streaming, timeouts, and an empty argv, rather than ignoring them.
 - `snapshot()` returns the committed root. The session keeps running. The server records the root and owns the snapshot (ADR 0004).
 - `sleep()` checkpoints the root, as `snapshot` does. The owner drops the session to release it (ADR 0006).
-- `checkpoint()` commits the filesystem and returns a `Checkpoint` (root, working directory, environment). `restore_checkpoint` starts a session from one. `restore(root)` starts a session from a root with the default shell state. Blobs live in a process-wide store, which is never freed (ADR 0010).
+- `checkpoint()` commits the filesystem and returns a `Checkpoint` (root, working directory, environment). The server never writes the environment to disk. `restore_checkpoint` starts a session from one. `restore(root)` starts a session from a root with the default shell state. Blobs live in a process-wide store, which is never freed (ADR 0010).
 
 ## Limits
 
-- A snapshot records only the filesystem root, so a session restored from a snapshot starts with fresh shell state. A checkpoint keeps the working directory and environment.
+- A snapshot records only the filesystem root, so a session restored from a snapshot starts with fresh shell state. A checkpoint keeps the working directory and the environment in memory. The saved state keeps only the directory.
 - Session state is in memory. The server saves checkpoints to disk when it runs with `--data-dir`.
 - Exec timeouts and streaming exec are refused (`UNSUPPORTED`) until they are implemented.
 

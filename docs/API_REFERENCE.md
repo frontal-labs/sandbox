@@ -221,7 +221,8 @@ memory. Response: `200` with `{ "snapshot_id": "..." }`. The session's status is
 
 Wake restores the session from the checkpoint that sleep recorded. Response:
 `200` with the session state, status `running`. The session keeps its ID. Files,
-the working directory, and the environment come back (ADR 0010).
+and the working directory come back. The environment does not, because its values
+often hold secrets (ADR 0010).
 
 While a session sleeps, `exec`, file operations, and `snapshot` return `409` with
 code `INVALID_STATE`. `get` and `destroy` still work. Sleeping or waking in the

@@ -209,11 +209,12 @@ async fn keys_sleeping_sessions_and_snapshots_survive_a_restart() {
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     assert_eq!(json_of(&body)["stdout"].as_array().unwrap().len(), 6);
-    // The saved state holds the shell variable the live session set.
+    // The environment value the live session set is a secret candidate, so it is
+    // never written to disk.
     let saved = std::fs::read_to_string(dir.join("state.json")).unwrap();
     assert!(
-        saved.contains("GREETING") && saved.contains("hello"),
-        "{saved}"
+        !saved.contains("hello"),
+        "an environment value reached the state file"
     );
 
     // The sleep snapshot forks into a running session with the same contents.

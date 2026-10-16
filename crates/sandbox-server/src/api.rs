@@ -517,7 +517,9 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
                     state: e.state.clone(),
                     root: checkpoint.root,
                     cwd: checkpoint.cwd.clone(),
-                    env: checkpoint.env.clone(),
+                    // Environment values are often secrets, so they are never written
+                    // to disk. A restored session starts with an empty environment (ADR 0010).
+                    env: HashMap::new(),
                     sleeping: e.session.is_none(),
                     trace: Trace {
                         runs: e.trace.clone(),
@@ -803,28 +805,20 @@ async fn record_exec(
     entry.trace.push(run);
 }
 
-/// The script that runs `request` in a shell: its environment, its directory,
-/// then its argv, with every word single-quoted so the arguments keep their
-/// meaning. `None` when an environment name cannot be written as a shell name.
+/// The script that runs `request` in a shell: its directory, then its argv, with
+/// every word single-quoted so the arguments keep their meaning. `None` when the
+/// request sets environment variables, because their values are not recorded.
 fn script_for(request: &ExecRequest) -> Option<String> {
     fn quote(text: &str) -> String {
         format!("'{}'", text.replace('\'', r"'\''"))
     }
-    fn is_shell_name(name: &str) -> bool {
-        let mut chars = name.chars();
-        matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
-            && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
-    }
 
-    let mut parts = Vec::new();
-    let mut env: Vec<(&String, &String)> = request.env.iter().collect();
-    env.sort();
-    for (name, value) in env {
-        if !is_shell_name(name) {
-            return None;
-        }
-        parts.push(format!("export {name}={}", quote(value)));
+    // Environment values are often secrets, so a command that sets them is not
+    // recorded. Its trace is marked incomplete instead, and no value is written.
+    if !request.env.is_empty() {
+        return None;
     }
+    let mut parts = Vec::new();
     if let Some(cwd) = &request.cwd {
         parts.push(format!("cd {}", quote(cwd)));
     }

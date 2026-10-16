@@ -14,6 +14,7 @@ Traces (ADR 0007) were recorded only by the local CLI. The server ran commands, 
 - Failed commands are recorded too, as `error` runs.
 - `GET /v1/sessions/{id}/trace` returns the trace as JSON Lines in the ADR 0007 format, with content type `application/x-ndjson`. It is readable by the session's owner only, like the rest of the session.
 - A trace holds at most 4096 runs. Later runs are not recorded, and the response carries `X-Trace-Truncated: true`. Exec still succeeds, so a long session never fails because of its trace.
+- A command that sets environment variables is not recorded, because the values are often secrets. The trace is marked incomplete instead, and no value is written.
 - The trace is kept with the session. A sleeping session keeps its trace, and it is persisted with the sleeping session (ADR 0008). A destroyed session's trace is discarded.
 - File writes through the filesystem API are not recorded. A trace is a list of commands, not a file history.
 
