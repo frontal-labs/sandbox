@@ -129,12 +129,18 @@ impl Store {
     async fn write_locked(&self, saved: &Saved) -> Result<(), SandboxError> {
         let bytes = serde_json::to_vec_pretty(saved)
             .map_err(|e| SandboxError::internal(format!("cannot encode state: {e}")))?;
-        let tmp = self.path.with_extension("json.tmp");
+        // A unique name, created exclusively, so a file planted at a predictable
+        // path cannot be followed or overwritten.
+        let tmp = self.path.with_file_name(format!(
+            "{FILE}.{}.{}.tmp",
+            std::process::id(),
+            sandbox_types::SessionId::new()
+        ));
         let path = self.path.clone();
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
             use std::io::Write;
             let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
+            options.write(true).create_new(true);
             #[cfg(unix)]
             {
                 use std::os::unix::fs::OpenOptionsExt;
@@ -155,16 +161,16 @@ impl Store {
 /// Unix, because the state holds key digests and snapshot roots. A directory that
 /// already exists keeps its permissions.
 fn create_private_dir(path: &Path) -> std::io::Result<()> {
-    if path.is_dir() {
-        return Ok(());
-    }
-    std::fs::create_dir_all(path)?;
+    // The mode is applied when the directory is created, so there is no window in
+    // which it exists with default permissions. An existing directory is left alone.
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
     }
-    Ok(())
+    builder.create(path)
 }
 
 /// Installs the disk store for `dir` once per process. Reopening the same
