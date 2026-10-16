@@ -176,5 +176,5 @@ implement any of them.
 
 ## Security Assumptions
 
-- The server has API-key auth, but no key provisioning, TLS, or rate limiting, and sessions live in process memory. Do not expose it.
+- The server has API-key auth, but no TLS or rate limiting. Sessions live in process memory, and with `--data-dir` they are also saved after each change (ADR 0010). Do not expose it.
 - See [SECURITY_MODEL.md](SECURITY_MODEL.md) for the model under design.

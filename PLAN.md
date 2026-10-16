@@ -20,7 +20,7 @@ This document is the full spec for a coding agent to build `sandbox` in Rust. Wo
 
 - Windows or macOS guests.
 - GPU workloads.
-- Persisting running process state across sleep or promotion (files only).
+- Persisting running process state across sleep or promotion. Sessions keep their files, working directory, and environment across sleep and restart, but not running processes.
 - Full bash compatibility (target the 95% agents actually use).
 - Multi-region replication.
 
@@ -414,3 +414,33 @@ Rule: justify every new dependency in the PR description; prefer well-maintained
 - Benchmarks meet section 6 targets on reference hardware.
 - Security review complete with no open high-severity findings.
 - Three working examples (coding agent, data agent, browser agent) and a one-page quickstart that gets a user to a running `exec` in under two minutes.
+
+## 14. Status and open items (2026-10-16)
+
+This section records what the code does today against the plan above. Update it when a milestone changes state.
+
+### Done
+
+- **Isolate tier, shell, and VFS (M1 part):** overlay VFS with commit to a Merkle tree and quotas. Builtin shell with pipes, redirects, and variables. Runs over the VFS in process.
+- **Sessions:** create, exec, file read, write, and delete, snapshot, fork, sleep, and wake (ADRs 0004, 0006).
+- **Durable state (§4.15, §4.8):** `serve --data-dir` keeps keys (as digests), snapshots, and every session with its checkpoint: files, working directory, and environment. Live sessions come back running after a restart, and sleeping sessions wait for a wake (ADRs 0008, 0010).
+- **Traces (§4.12):** commands are recorded per session and served as JSON Lines. `sandbox replay` re-runs a trace and reports divergences (ADRs 0007, 0009). File writes are not recorded yet, which is the M2 requirement "trace shows every file change".
+- **Watch (§4.4):** the VFS delivers change events for a path, with an overflow signal (ADR 0005).
+- **API keys and limits (§4.15):** per-key session and snapshot limits, owner-only access, and keys stored as digests.
+- **CLI and SDKs (§4.16):** `run`, `shell`, `replay`, `bench`, `serve`, `snapshot`, and `fork`. TypeScript, Python, and Rust clients cover sessions, exec, snapshots, sleep, and wake.
+- **Security scanning:** CodeQL uploads results to code scanning. Dependabot alerts are fixed. Secret scanning and push protection are enabled.
+- **Releases:** `v0.1.0` and `v0.1.1` publish CLI binaries for five platforms, and an npm wrapper that runs the matching binary (`@frontal-labs/sandbox-cli`).
+
+### Open, and planned in the milestones above
+
+- **VM tier (§4.10, §4.11), Firecracker, promotion, guest agent:** M4.
+- **Worker isolation (§4.13, §5):** seccomp, cgroups, namespaces, and the jailer. Until these exist, the isolate runs in the server process and is not a security boundary. M3 and M4.
+- **V8 runtime (§4.5) and WASM tools (§4.6):** not in the build. ADR 0003 removed the unused Deno dependencies. M1 and M2.
+- **Streaming exec and exec timeouts (§4.15):** refused with `UNSUPPORTED` until implemented. The milestones don't assign them a date. Proposed for M3.
+- **Idle sleep and metering (§4.14):** M3.
+- **Garbage collection of checkpoints and snapshot blobs (§4.2, M5):** not implemented, so the disk store grows.
+- **Log-structured durable store:** the state file is rewritten in full on each change (ADR 0010). M5 with the clustered scheduler.
+
+### Blocked on the operator
+
+- **Package visibility:** the GHCR SDK packages (`sandbox-sdk-ts`, `-py`, `-rs`) and the npm packages (`@frontal-labs/sandbox-cli` and its platform packages) are published as `internal`. GitHub provides no API or GraphQL mutation for changing organization package visibility, so an organization owner must change it in the web UI before anonymous pulls and installs work.

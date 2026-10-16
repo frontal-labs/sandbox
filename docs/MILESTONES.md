@@ -101,7 +101,7 @@ Last reviewed against the source tree on 2026-10-13.
 ### Acceptance Criteria
 - [ ] Snapshot/fork under 5 ms
 - [ ] 1,000 concurrent sessions on one node in load test
-- [x] Sleeping sessions hold no VFS in memory (ADR 0006). With `serve --data-dir` they, their snapshots, and the keys survive a restart (ADR 0008). Live sessions do not.
+- [x] Sleeping sessions hold no VFS in memory (ADR 0006). With `serve --data-dir`, live and sleeping sessions, their shell state, their traces, their snapshots, and the keys survive a restart (ADRs 0008, 0010).
 - [ ] Escape test suite passes
 - [ ] TS SDK generated from OpenAPI (current TS SDK is hand-written)
 

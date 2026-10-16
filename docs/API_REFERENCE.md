@@ -36,7 +36,7 @@ integers. The SDKs convert those arrays to bytes on their side.
 | PUT | `/v1/sessions/{id}/fs/{path}` | `write_file` | Write a file |
 | DELETE | `/v1/sessions/{id}/fs/{path}` | `delete_file` | Delete a file |
 | POST | `/v1/sessions/{id}/snapshot` | `take_snapshot` | Snapshot the committed filesystem |
-| POST | `/v1/sessions/{id}/sleep` | `sleep_session` | Snapshot, then release the live session (ADR 0006) |
+| POST | `/v1/sessions/{id}/sleep` | `sleep_session` | Checkpoint, then release the live session (ADRs 0006, 0010) |
 | POST | `/v1/sessions/{id}/wake` | `wake_session` | Restore a sleeping session under the same ID |
 | GET | `/v1/sessions/{id}/trace` | `get_trace` | The commands the session ran, as an ADR 0007 trace (ADR 0009) |
 | POST | `/v1/snapshots/{id}/fork` | `fork_snapshot` | Start 1 to 64 sessions from a snapshot |
@@ -219,10 +219,9 @@ key, and releases the live session, so a sleeping session holds no filesystem in
 memory. Response: `200` with `{ "snapshot_id": "..." }`. The session's status is
 `sleeping`.
 
-Wake restores the session from the root that sleep recorded. Response: `200`
-with the session state, status `running`. The session keeps its ID. Files come
-back. The working directory and environment start fresh, because shell state is
-not part of a snapshot.
+Wake restores the session from the checkpoint that sleep recorded. Response:
+`200` with the session state, status `running`. The session keeps its ID. Files,
+the working directory, and the environment come back (ADR 0010).
 
 While a session sleeps, `exec`, file operations, and `snapshot` return `409` with
 code `INVALID_STATE`. `get` and `destroy` still work. Sleeping or waking in the
