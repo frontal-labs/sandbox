@@ -54,7 +54,14 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-        run: cargo build --release -p cli --target ${{ matrix.target }}
+        run: |
+          # `sandbox --version` reports the release version, taken from the tag.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export SANDBOX_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            export SANDBOX_VERSION="0.0.0-dryrun"
+          fi
+          cargo build --release -p cli --target ${{ matrix.target }}
       - name: Release version and publish mode
         shell: bash
         run: |

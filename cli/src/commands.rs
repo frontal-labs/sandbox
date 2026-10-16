@@ -5,8 +5,15 @@ use sandbox_types::{ErrorCode, ExecResult, SandboxError, SessionConfig};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
+/// The version the binary reports. Release builds set SANDBOX_VERSION from the git
+/// tag, so `sandbox --version` matches the release. Other builds use the crate version.
+const VERSION: &str = match option_env!("SANDBOX_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Parser)]
-#[command(name = "sandbox", version, about = "Frontal Sandbox CLI")]
+#[command(name = "sandbox", version = VERSION, about = "Frontal Sandbox CLI")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
