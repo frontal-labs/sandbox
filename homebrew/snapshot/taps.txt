@@ -1,0 +1,7 @@
+# brew tap snapshot
+homebrew/bundle https://github.com/Homebrew/homebrew-bundle
+homebrew/core https://github.com/Homebrew/homebrew-core
+homebrew/cask https://github.com/Homebrew/homebrew-cask
+homebrew/services https://github.com/Homebrew/homebrew-services
+coder/coder https://github.com/coder/homebrew-coder
+stainless-api/tap https://github.com/stainless-api/homebrew-tap

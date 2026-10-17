@@ -1,0 +1,8 @@
+# brew cask versions snapshot
+# NOTE: stainless-api/tap cask (stl) is excluded here because the tap is untrusted.
+# Trust it via `brew trust --tap stainless-api/tap` if desired, then reinclude.
+1password <version>
+ghostty <version>
+visual-studio-code <version>
+docker <version>
+rectangle <version>

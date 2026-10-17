@@ -1,0 +1,19 @@
+# brew config snapshot
+# macOS 26.6.2 arm64, prefix /opt/homebrew, Homebrew 7.0.9
+
+HOMEBREW_VERSION: 7.0.9
+ORIGIN: https://github.com/Homebrew/brew
+HEAD: <commit>
+Last commit: <date>
+Core tap ORIGIN: https://github.com/Homebrew/homebrew-core
+Core tap HEAD: <commit>
+Core tap last commit: <date>
+HOMEBREW_PREFIX: /opt/homebrew
+HOMEBREW_CELLAR: /opt/homebrew/Cellar
+HOMEBREW_REPOSITORY: /opt/homebrew
+HOMEBREW_LIBRARY_PATH: /opt/homebrew/Library
+HOMEBREW_CASK_OPTS: --no-quarantine
+HOMEBREW_NO_ANALYTICS: 1
+HOMEBREW_NO_AUTO_UPDATE: 1
+HOMEBREW_NO_INSTALL_CLEANUP: 1
+HOMEBREW_INSTALL_FROM_API: 1
