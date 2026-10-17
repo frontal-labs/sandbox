@@ -315,8 +315,8 @@ fn serve(addr: &str, data_dir: Option<&Path>) -> Result<i32, SandboxError> {
     Ok(0)
 }
 
-fn client() -> Result<sandbox_sdk::Client, SandboxError> {
-    sandbox_sdk::Client::from_env()
+fn client() -> Result<frontal_sandbox_sdk::Client, SandboxError> {
+    frontal_sandbox_sdk::Client::from_env()
 }
 
 fn snapshot(session_id: &str) -> Result<i32, SandboxError> {
@@ -349,7 +349,8 @@ mod tests {
 
     #[test]
     fn replay_refuses_a_missing_trace_as_invalid_argument() {
-        let replay = Cli::try_parse_from(["frontal-sandbox", "replay", "no-such-trace.jsonl"]).unwrap();
+        let replay =
+            Cli::try_parse_from(["frontal-sandbox", "replay", "no-such-trace.jsonl"]).unwrap();
         assert_eq!(
             replay.execute().unwrap_err().code,
             sandbox_types::ErrorCode::InvalidArgument
