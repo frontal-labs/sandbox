@@ -1,0 +1,27 @@
+[Unit]
+Description=Frontal Sandbox HTTP API server
+Documentation=file:/etc/sandbox/config.toml
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=sandbox
+Group=sandbox
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/sandbox /tmp /var/run/sandbox
+PrivateTmp=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ExecStart=/usr/local/bin/sandbox serve --config /etc/sandbox/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+StartLimitIntervalSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
