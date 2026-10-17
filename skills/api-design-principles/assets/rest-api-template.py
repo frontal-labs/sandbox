@@ -178,5 +178,7 @@ async def delete_user(user_id: str):
     return None
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Bind to loopback by default; set HOST=0.0.0.0 explicitly when running in a container.
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=8000)

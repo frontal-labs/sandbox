@@ -47,6 +47,8 @@ spec:
 
     spec:
       serviceAccountName: <app-name>
+      # Only mount the API token if the app needs to call the Kubernetes API.
+      automountServiceAccountToken: false
 
       # Pod-level security context
       securityContext:
@@ -110,6 +112,7 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+            ephemeral-storage: "1Gi"
 
         # Startup probe (for slow-starting apps)
         startupProbe:

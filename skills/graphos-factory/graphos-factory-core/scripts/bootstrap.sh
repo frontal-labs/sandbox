@@ -83,8 +83,8 @@ TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 # own timeout: an API call or the HEAD probe 15 s, the archive 90 s, each with
 # a 10 s connect timeout. A download makes at most three API calls and the
 # archive, 135 s in all.
-CURL_API=(--connect-timeout 10 --max-time 15)
-CURL_GET=(--connect-timeout 10 --max-time 90)
+CURL_API=(--proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 15)
+CURL_GET=(--proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 90)
 
 installed_version() {
   if [ -x "$BIN" ]; then "$BIN" version 2>/dev/null | sed -n 's/^[a-z][a-z0-9-]* \([0-9][^ ]*\).*/\1/p'; fi

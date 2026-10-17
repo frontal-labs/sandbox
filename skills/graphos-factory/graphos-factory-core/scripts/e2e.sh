@@ -161,7 +161,7 @@ WIREMOCK_JAR="$CACHE/wiremock-standalone-$WIREMOCK_VERSION.jar"
 ROUTER_BIN="$CACHE/router-$ROUTER_VERSION"
 if [ ! -f "$WIREMOCK_JAR" ]; then
   echo "e2e: downloading WireMock $WIREMOCK_VERSION"
-  curl -sfL "https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/$WIREMOCK_VERSION/wiremock-standalone-$WIREMOCK_VERSION.jar" -o "$WIREMOCK_JAR"
+  curl -sfL --proto '=https' --proto-redir '=https' "https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/$WIREMOCK_VERSION/wiremock-standalone-$WIREMOCK_VERSION.jar" -o "$WIREMOCK_JAR"
 fi
 # The Router is ELv2-licensed too: this download sits after elv2_require.
 if [ ! -x "$ROUTER_BIN" ]; then
@@ -173,7 +173,7 @@ if [ ! -x "$ROUTER_BIN" ]; then
     Darwin-x86_64) platform="x86_64-apple-darwin" ;;
     *) echo "e2e: unsupported platform $(uname -s)-$(uname -m)" >&2; exit 127 ;;
   esac
-  curl -sfL "https://github.com/apollographql/router/releases/download/v$ROUTER_VERSION/router-v$ROUTER_VERSION-$platform.tar.gz" \
+  curl -sfL --proto '=https' --proto-redir '=https' "https://github.com/apollographql/router/releases/download/v$ROUTER_VERSION/router-v$ROUTER_VERSION-$platform.tar.gz" \
     | tar xzf - -C "$OUT" --strip-components=1 dist/router
   mv "$OUT/router" "$ROUTER_BIN"
   chmod +x "$ROUTER_BIN"
