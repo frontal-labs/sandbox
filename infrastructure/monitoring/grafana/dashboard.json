@@ -1,0 +1,63 @@
+{
+  "title": "Frontal Sandbox",
+  "panels": [
+    {
+      "title": "Session starts (per minute)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "job:sandbox_session_starts:rate1m", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "title": "Exec latency p99",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "job:sandbox_exec_latency:histogram_quantile_p99", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "title": "Promotion rate",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(sandbox_promotion_total[5m])", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "title": "Policy denials",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(sandbox_policy_denials_total[5m])", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "title": "CAS hit rate",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "job:sandbox_cas_hit_rate", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "title": "Warm pool depth",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sandbox_pool_depth", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "title": "Idle sessions",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sandbox_idle_sessions", "legendFormat": "{{job}}" }
+      ]
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s"
+}
