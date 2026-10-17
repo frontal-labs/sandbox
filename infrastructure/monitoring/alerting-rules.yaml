@@ -1,0 +1,38 @@
+groups:
+  - name: sandbox.rules
+    rules:
+      - alert: SandboxDown
+        expr: up{job="sandbox-server"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sandbox server scrape failing"
+          description: "The sandbox-server job has been down for 2 minutes."
+
+      - alert: SandboxHighOOMKills
+        expr: increase(sandbox_oom_kills_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High OOM kill rate"
+          description: "More than 5 OOM kills in the last 5 minutes."
+
+      - alert: SandboxPoolExhausted
+        expr: sandbox_pool_depth == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Warm pool exhausted"
+          description: "The isolate warm pool has been empty for 5 minutes."
+
+      - alert: SandboxDiskNearlyFull
+        expr: node_filesystem_avail_bytes{mountpoint="/var/lib/sandbox"} / node_filesystem_size_bytes{mountpoint="/var/lib/sandbox"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "State disk nearly full"
+          description: "Less than 15% free on the sandbox state volume."
