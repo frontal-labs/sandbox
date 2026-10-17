@@ -1,6 +1,6 @@
 # Limits and Quotas
 
-This page lists the resource limits defined in code today, where they live, and whether anything enforces them yet. Target performance numbers are in [PERFORMANCE.md](PERFORMANCE.md) and PLAN.md section 6. Quota tiers, billing, and scheduler metering are planned and are not described with numbers here.
+This page lists the resource limits defined in code today, where they live, and whether anything enforces them yet. Target performance numbers are in [PERFORMANCE.md](PERFORMANCE.md) and plans/PLAN.md section 6. Quota tiers, billing, and scheduler metering are planned and are not described with numbers here.
 
 ## Status summary
 
@@ -55,7 +55,7 @@ Source: `crates/sandbox-types/src/policy.rs`.
 - `NetworkPolicy::allow_all()` disables the default-deny check. Use it only for tests.
 - Rules match by host pattern: `*` matches any host, `*.suffix` matches by suffix, and anything else matches exactly. Port lists are optional for TCP rules.
 
-Request and response size caps, connection counts, and request timeouts are not defined in code yet. The HTTP client that would enforce them is planned (PLAN.md section 4.7).
+Request and response size caps, connection counts, and request timeouts are not defined in code yet. The HTTP client that would enforce them is planned (plans/PLAN.md section 4.7).
 
 ## Error reporting
 
@@ -63,11 +63,11 @@ Limit violations are reported with `ErrorCode::ResourceExhausted` (`crates/sandb
 
 ## Planned limits
 
-These appear in PLAN.md and are not defined in code:
+These appear in plans/PLAN.md and are not defined in code:
 
-- Scheduler quotas per API key, tier-based session and CPU budgets, and metering (PLAN.md sections 4.14 and 4.15).
-- Hard, non-configurable ceilings on session lifetime, snapshot depth, fork count, and trace size. No values are fixed in code or in PLAN.md.
-- Capacity targets for a single host (PLAN.md section 6, for example "10,000+ idle sessions per 64 GB host").
+- Scheduler quotas per API key, tier-based session and CPU budgets, and metering (plans/PLAN.md sections 4.14 and 4.15).
+- Hard, non-configurable ceilings on session lifetime, snapshot depth, fork count, and trace size. No values are fixed in code or in plans/PLAN.md.
+- Capacity targets for a single host (plans/PLAN.md section 6, for example "10,000+ idle sessions per 64 GB host").
 
 Add concrete values to this file when the matching code exists, and cite the source line.
 

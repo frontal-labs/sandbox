@@ -1,7 +1,7 @@
 # Architecture
 
 > **Status:** the design below is the target architecture from
-> [PLAN.md](../PLAN.md). Most components are scaffolds or stubs today. The
+> [plans/PLAN.md](../plans/PLAN.md). Most components are scaffolds or stubs today. The
 > "Current state" section lists what exists. Treat everything else as planned.
 
 ## Overview
@@ -44,7 +44,7 @@ Client (Rust SDK / TypeScript SDK / Python SDK / CLI)
 
 ## Core Invariants
 
-These come from PLAN.md section 2 and the project working principles. Code
+These come from plans/PLAN.md section 2 and the project working principles. Code
 changes must preserve them.
 
 1. **VFS is the source of truth.** Every backend mounts the same virtual
@@ -105,7 +105,7 @@ sdks/
 cli/                    # Crate `cli`, binary `frontal-sandbox`
 ```
 
-Dependency direction (PLAN.md section 11): `sandbox-types` and `sandbox-cas` at
+Dependency direction (plans/PLAN.md section 11): `sandbox-types` and `sandbox-cas` at
 the bottom, `sandbox-server` and `cli` at the top, with no cycles.
 
 ## Data Flow (target)

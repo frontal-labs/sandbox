@@ -20,7 +20,7 @@ ADR 0002 patched seven Deno crates to clear advisories in their upstream pins. T
 - The build needs no network access to private or public Git sources, and the Bazel `.bazelrc` git settings are gone.
 
 ### Negative
-- `PLAN.md` section 4.5 lists `deno_fetch` and `deno_crypto` as planned runtime extensions (web fetch and WebCrypto). Adding them back means pulling upstream crates again. Upstream still pins the vulnerable versions, so the patch approach in 0002 would return with them, or the releases must be newer by then. Revisit before enabling those extensions.
+- `plans/PLAN.md` section 4.5 lists `deno_fetch` and `deno_crypto` as planned runtime extensions (web fetch and WebCrypto). Adding them back means pulling upstream crates again. Upstream still pins the vulnerable versions, so the patch approach in 0002 would return with them, or the releases must be newer by then. Revisit before enabling those extensions.
 - Runtime `fetch()` and `crypto.subtle` are unavailable until then. The sandbox has never exposed them.
 
 ## Alternatives considered

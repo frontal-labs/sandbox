@@ -91,7 +91,7 @@ sandbox/
 │   └── python/             # Package `sandbox_sdk` (pyproject.toml)
 ├── benchmarks/             # Benchmark sources and load tests (not a workspace member)
 ├── docs/                   # This directory
-├── PLAN.md                 # Forward-looking spec
+├── plans/PLAN.md                 # Forward-looking spec
 ├── package.json            # Root scripts (Biome, Bazel wrappers)
 ├── MODULE.bazel, BUILD.bazel, .bazelrc
 └── .github/workflows/      # CI workflows
@@ -104,7 +104,7 @@ sandbox/
 - **Members** are listed in the root `Cargo.toml`. A new crate must be added
   there.
 - **No cycles**: dependencies flow from `sandbox-types` and `sandbox-cas` up to
-  `sandbox-server` and `cli` (PLAN.md section 11).
+  `sandbox-server` and `cli` (plans/PLAN.md section 11).
 - **Lints**: `clippy.toml` and `rustfmt.toml` are committed. CI runs clippy with
   `-D warnings`.
 - **Shared dependencies** use `workspace = true` (see `[workspace.dependencies]`
@@ -118,12 +118,12 @@ sandbox/
 2. Add the path to `[workspace] members` in the root `Cargo.toml`.
 3. Define public traits and types in `src/lib.rs`.
 4. Write tests alongside the implementation (see [TESTING.md](TESTING.md)).
-5. Add a `README.md` with purpose, invariants, and an example (PLAN.md section 11).
+5. Add a `README.md` with purpose, invariants, and an example (plans/PLAN.md section 11).
 6. Update [ARCHITECTURE.md](ARCHITECTURE.md) if the architecture changes.
 
 ## Coding Standards
 
-- No `unwrap()` outside tests and `main` (PLAN.md section 11).
+- No `unwrap()` outside tests and `main` (plans/PLAN.md section 11).
 - Use `?` with error types from `sandbox-types` (`SandboxError`, `ErrorCode`).
 - Every `unsafe` block needs a `// SAFETY:` comment and a test.
 - Public API changes need an ADR in `docs/adr/` (see
@@ -167,7 +167,7 @@ command.
 
 ## Documentation
 
-- **Every crate**: a README with purpose, invariants, and example (PLAN.md section 11).
+- **Every crate**: a README with purpose, invariants, and example (plans/PLAN.md section 11).
 - **Public API changes**: ADR in `docs/adr/NNNN-title.md`.
 - **Benchmark decisions**: record in `docs/decisions/`.
 - **Architecture changes**: update `docs/ARCHITECTURE.md`.

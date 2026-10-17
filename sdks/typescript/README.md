@@ -66,7 +66,7 @@ if (isSandboxError(result)) {
 - `serverPath` in `EmbeddedSandboxConfig` is accepted and ignored.
 - `exec(command)` splits the command on whitespace into argv and runs it through the remote `Client`. Quoting is not interpreted, and the isolate shell has no `sh`.
 
-Local in-process execution is planned. See `PLAN.md`.
+Local in-process execution is planned. See `plans/PLAN.md`.
 
 ```typescript
 import { EmbeddedSandbox, isSandboxError } from "@frontal-labs/sandbox-sdk"

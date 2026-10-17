@@ -48,4 +48,4 @@ Not compiled in this pass. Checked against `src/capability.rs`, `src/network.rs`
 
 ## Spec
 
-See [PLAN.md](../../PLAN.md) section 4.7. Planned: per-session capability sets, trace events on deny, secrets injection on egress, and a shared `ResourceLimits` with the fields in the PLAN.
+See [plans/PLAN.md](../../plans/PLAN.md) section 4.7. Planned: per-session capability sets, trace events on deny, secrets injection on egress, and a shared `ResourceLimits` with the fields in the PLAN.

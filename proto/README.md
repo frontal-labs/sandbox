@@ -5,7 +5,7 @@ Versioned wire contracts for the sandbox. Packages mirror directories: `sandbox/
 - `types/`: shared messages (IDs, hashes, session and exec messages, policy, events, errors). No services.
 - `api/`: client-facing gRPC services. The REST API is specified separately, from Rust, in `openapi/`. These services define the gRPC contract, but no gRPC server serves them yet.
 - `worker/`: scheduler to worker. Served over a private Unix socket (`sandbox-worker`).
-- `guest/`: host to in-VM agent (PLAN.md section 4.10). Schema only, until the VM tier can run.
+- `guest/`: host to in-VM agent (plans/PLAN.md section 4.10). Schema only, until the VM tier can run.
 
 ## Checks
 

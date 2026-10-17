@@ -1,6 +1,6 @@
 # Milestones
 
-Based on [PLAN.md](../PLAN.md) section 9. A box is ticked only when the code
+Based on [plans/PLAN.md](../plans/PLAN.md) section 9. A box is ticked only when the code
 clearly implements the item and a test exists for it. Items that are scaffolded
 but not working, or implemented without tests, stay unticked and are marked
 **Partial**. Acceptance criteria are not ticked unless they were demonstrated,
@@ -118,7 +118,7 @@ Last reviewed against the source tree on 2026-10-13.
 - [ ] **Partial.** `sandbox-guest`: agent and protocol scaffolding
 - [ ] Base + browser rootfs images
 - [ ] `export_ext4` for promotion
-- [ ] `sandbox-promote`: stub. Needs a Linux host with KVM (see PLAN.md M4).
+- [ ] `sandbox-promote`: stub. Needs a Linux host with KVM (see plans/PLAN.md M4).
 - [ ] VM warm pool, Firecracker snapshots
 
 ### Acceptance Criteria

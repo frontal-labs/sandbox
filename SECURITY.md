@@ -21,4 +21,4 @@ reporter.
 Sandbox sessions follow a capability-based model. Network access is denied by
 default, host access is mediated by policy checks, and isolate sessions are not
 treated as a security boundary without the worker and microVM layers described
-in [PLAN.md](PLAN.md).
+in [plans/PLAN.md](plans/PLAN.md).
