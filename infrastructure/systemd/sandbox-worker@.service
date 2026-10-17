@@ -1,0 +1,32 @@
+[Unit]
+Description=Frontal Sandbox worker for %i (per-tenant process)
+Documentation=file:/etc/sandbox/config.toml
+After=network-online.target sandbox-scheduler.service
+Wants=network-online.target
+
+# Tier 2 needs KVM; the host must grant the worker access to /dev/kvm.
+# On systems with udev rules, add the sandbox user to the kvm group.
+
+[Service]
+Type=notify
+User=sandbox
+Group=sandbox
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/sandbox /tmp /var/run/sandbox /dev/kvm
+PrivateTmp=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Each instance serves one tenant; TENANT_ID is injected via drop-in or env.
+EnvironmentFile=-/etc/sandbox/worker-%i.env
+ExecStart=/usr/local/bin/sandbox worker --config /etc/sandbox/config.toml --tenant-id %i
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+StartLimitIntervalSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
