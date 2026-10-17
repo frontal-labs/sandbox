@@ -1,0 +1,76 @@
+# =============================================================================
+# Frontal Sandbox — local stack
+# =============================================================================
+# Usage (from the repository root):
+#   cp docker/.env.example docker/.env      # optional: override defaults
+#   docker compose -f docker/compose.yaml up -d --build --wait
+#   docker compose -f docker/compose.yaml logs sandbox | grep 'API key'
+#
+# The compose project directory is docker/, so docker/.env is read automatically.
+# See docker/README.md for the security model and operating notes.
+# =============================================================================
+
+name: frontal-sandbox
+
+services:
+  sandbox:
+    build:
+      # The build context must be the repository root, because the workspace
+      # Cargo.toml and every member crate are needed to compile `cli`.
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        RUST_VERSION: ${RUST_VERSION:-1.95}
+        DEBIAN_SUITE: ${DEBIAN_SUITE:-bookworm}
+    image: ${SANDBOX_IMAGE:-frontal-sandbox:local}
+    # No `init: true`: the image's ENTRYPOINT already runs tini as PID 1.
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    # Host exposure. Loopback by default. To reach the server from other hosts,
+    # set SANDBOX_HOST_BIND=0.0.0.0 and put TLS and auth in front of it. The API
+    # has no TLS and no rate limiting yet (docs/DEPLOYMENT.md).
+    ports:
+      - "${SANDBOX_HOST_BIND:-127.0.0.1}:${SANDBOX_PORT:-8080}:8080"
+
+    environment:
+      # Std reads this for panic backtraces. The CLI installs no tracing
+      # subscriber, so the container emits no request logs today.
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+
+    volumes:
+      # Keys (as digests), snapshots, and sleeping sessions. Named, so it
+      # survives `docker compose down` and is removed only by `down -v`.
+      - sandbox-state:/var/lib/sandbox
+
+    # Hardening. The server writes only to its state volume and to /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: ${SANDBOX_PIDS_LIMIT:-512}
+    mem_limit: ${SANDBOX_MEM_LIMIT:-2g}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/openapi.json"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  sandbox-state:
+    name: ${SANDBOX_STATE_VOLUME:-frontal-sandbox-state}
