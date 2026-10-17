@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sandbox scheduler config",
+  "type": "object",
+  "properties": {
+    "addr": {
+      "type": "string",
+      "default": "0.0.0.0:50051",
+      "description": "gRPC listen address for the scheduler"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["redb", "postgres"],
+          "default": "redb",
+          "description": "Metadata store backend (single node vs clustered)"
+        },
+        "dsn": {
+          "type": "string",
+          "description": "Postgres connection string (required when backend is postgres)"
+        }
+      },
+      "required": ["backend"],
+      "additionalProperties": false
+    },
+    "cas": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["disk", "tiered", "object"],
+          "default": "disk",
+          "description": "Content-addressed store backend"
+        },
+        "path": {
+          "type": "string",
+          "default": "/var/lib/sandbox/cas",
+          "description": "Local disk path for disk/tiered backends"
+        },
+        "bucket": {
+          "type": "string",
+          "description": "Object-store bucket name (required for object/tiered backends)"
+        },
+        "cache_path": {
+          "type": "string",
+          "default": "/var/lib/sandbox/cas-cache",
+          "description": "Local cache path for tiered backend"
+        }
+      },
+      "required": ["backend"],
+      "additionalProperties": false
+    },
+    "pools": {
+      "type": "object",
+      "properties": {
+        "isolate_warm_pool_size": {
+          "type": "integer",
+          "default": 64,
+          "minimum": 0,
+          "description": "Pre-warmed isolate sessions kept ready"
+        },
+        "vm_warm_pool_size": {
+          "type": "integer",
+          "default": 4,
+          "minimum": 0,
+          "description": "Pre-booted Firecracker VMs kept ready (Tier 2)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "idle": {
+      "type": "object",
+      "properties": {
+        "sleep_after_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 0,
+          "description": "Seconds of inactivity before a session is snapshotted and freed"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metering": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "export_interval_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 10,
+          "description": "How often usage events are emitted to the durable queue"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

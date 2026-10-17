@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sandbox server config",
+  "type": "object",
+  "required": [],
+  "properties": {
+    "addr": {
+      "type": "string",
+      "description": "HTTP listen address for the axum server",
+      "default": "0.0.0.0:8080",
+      "examples": ["0.0.0.0:8080", "127.0.0.1:8080"]
+    },
+    "data_dir": {
+      "type": "string",
+      "description": "Directory for keys (as digests), snapshots, and sleeping sessions",
+      "default": "/var/lib/sandbox",
+      "examples": ["/var/lib/sandbox", "/mnt/data/sandbox"]
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "api_key_hash": {
+          "type": "string",
+          "description": "BLAKE3 digest of the initial API key (hex). Omitted => a key is generated on first start.",
+          "examples": ["a1b2c3d4..."]
+        },
+        "rate_limit_rps": {
+          "type": "integer",
+          "description": "Requests per second per API key; 0 disables",
+          "default": 0,
+          "minimum": 0,
+          "examples": [0, 100]
+        }
+      },
+      "additionalProperties": false
+    },
+    "tls": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "cert_file": { "type": "string" },
+        "key_file": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "metrics_addr": {
+          "type": "string",
+          "default": "0.0.0.0:9090",
+          "description": "Prometheus metrics listen address"
+        },
+        "otlp_endpoint": {
+          "type": "string",
+          "description": "OpenTelemetry collector endpoint (optional)"
+        },
+        "service_name": {
+          "type": "string",
+          "default": "sandbox-server",
+          "examples": ["sandbox-server", "sandbox-server-staging"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "scheduler": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "default": "127.0.0.1:50051",
+          "description": "gRPC address of the scheduler"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

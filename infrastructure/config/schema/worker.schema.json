@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sandbox worker config",
+  "type": "object",
+  "properties": {
+    "addr": {
+      "type": "string",
+      "default": "127.0.0.1:50052",
+      "description": "gRPC listen address for the worker"
+    },
+    "tenant_id": {
+      "type": "string",
+      "description": "Tenant this worker serves (one process per tenant)"
+    },
+    "scheduler_addr": {
+      "type": "string",
+      "default": "127.0.0.1:50051",
+      "description": "gRPC address of the scheduler"
+    },
+    "isolation": {
+      "type": "object",
+      "properties": {
+        "seccomp": { "type": "boolean", "default": true },
+        "cgroups_v2": { "type": "boolean", "default": true },
+        "namespaces": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "memory_limit_bytes": {
+          "type": "integer",
+          "default": 4294967296,
+          "minimum": 1,
+          "description": "Per-session memory cap in bytes (4 GiB default)"
+        },
+        "cpu_limit_ms": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 1,
+          "description": "Per-session CPU budget in milliseconds per second"
+        },
+        "pids_limit": {
+          "type": "integer",
+          "default": 512,
+          "minimum": 1,
+          "description": "Maximum PIDs per session"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tier2": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "kvm_device": {
+          "type": "string",
+          "default": "/dev/kvm",
+          "description": "KVM device node (Tier 2 requires this)"
+        },
+        "firecracker_binary": {
+          "type": "string",
+          "default": "/usr/local/bin/firecracker",
+          "description": "Path to the Firecracker binary"
+        },
+        "socket_dir": {
+          "type": "string",
+          "default": "/var/run/sandbox/firecracker",
+          "description": "Directory for Firecracker Unix-socket APIs"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["tenant_id"],
+  "additionalProperties": false
+}

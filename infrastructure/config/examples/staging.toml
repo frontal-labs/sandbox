@@ -1,0 +1,40 @@
+# Staging environment. Mirrors production shape without KVM/Tier 2.
+# Secrets (api_key_hash, otlp_endpoint) must be injected by the operator;
+# do not commit real values here.
+
+[server]
+addr = "0.0.0.0:8080"
+data_dir = "/var/lib/sandbox"
+
+[server.auth]
+api_key_hash = "<REPLACE_WITH_BLAKE3_HEX_DIGEST>"
+rate_limit_rps = 100
+
+[server.tls]
+enabled = false   # fronted by a TLS termination proxy in staging
+cert_file = ""
+key_file = ""
+
+[server.telemetry]
+metrics_addr = "0.0.0.0:9090"
+otlp_endpoint = "http://otel-collector.staging:4317"
+service_name = "sandbox-server-staging"
+
+[server.scheduler]
+address = "127.0.0.1:50051"
+
+[scheduler]
+addr = "0.0.0.0:50051"
+metadata = { backend = "redb", dsn = "" }
+cas = { backend = "tiered", path = "/var/lib/sandbox/cas", bucket = "sandbox-cas-staging", cache_path = "/var/lib/sandbox/cas-cache" }
+pools = { isolate_warm_pool_size = 32, vm_warm_pool_size = 0 }
+idle = { sleep_after_seconds = 300 }
+metering = { enabled = true, export_interval_seconds = 300 }
+
+[worker]
+addr = "127.0.0.1:50052"
+tenant_id = "staging"
+scheduler_addr = "127.0.0.1:50051"
+isolation = { seccomp = true, cgroups_v2 = true, namespaces = true }
+resources = { memory_limit_bytes = 8589934592, cpu_limit_ms = 10000, pids_limit = 512 }
+tier2 = { enabled = false }
