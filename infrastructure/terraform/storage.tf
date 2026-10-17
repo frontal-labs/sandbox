@@ -24,7 +24,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "cas" {
     id     = "expire-incomplete-multipart-uploads"
     status = "Enabled"
 
-    abort_incomplete_multipart_upload_days = 7
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
