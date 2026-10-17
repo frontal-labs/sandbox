@@ -1,0 +1,28 @@
+[Unit]
+Description=Frontal Sandbox worker for %i (per-tenant process)
+Documentation=file:/etc/sandbox/config.toml
+After=network-online.target sandbox-scheduler.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=sandbox
+Group=sandbox
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/sandbox /tmp /var/run/sandbox /dev/kvm
+PrivateTmp=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+EnvironmentFile=-/etc/sandbox/worker-%i.env
+ExecStart=/usr/local/bin/sandbox worker --config /etc/sandbox/config.toml --tenant-id %i
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+StartLimitIntervalSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

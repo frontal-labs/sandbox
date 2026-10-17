@@ -1,0 +1,40 @@
+# Example operator configuration for Frontal Sandbox.
+# Copy to /etc/sandbox/config.toml and adjust for your environment.
+# Never commit real secrets here; inject them at deploy time.
+
+[server]
+addr = "0.0.0.0:8080"
+data_dir = "/var/lib/sandbox"
+
+[server.auth]
+api_key_hash = "<REPLACE_WITH_BLAKE3_HEX_DIGEST>"
+rate_limit_rps = 100
+
+[server.tls]
+enabled = true
+cert_file = "/etc/sandbox/tls/server.crt"
+key_file = "/etc/sandbox/tls/server.key"
+
+[server.telemetry]
+metrics_addr = "0.0.0.0:9090"
+otlp_endpoint = ""
+service_name = "sandbox-server"
+
+[server.scheduler]
+address = "127.0.0.1:50051"
+
+[scheduler]
+addr = "0.0.0.0:50051"
+metadata = { backend = "redb", dsn = "" }
+cas = { backend = "disk", path = "/var/lib/sandbox/cas", bucket = "", cache_path = "/var/lib/sandbox/cas-cache" }
+pools = { isolate_warm_pool_size = 64, vm_warm_pool_size = 0 }
+idle = { sleep_after_seconds = 300 }
+metering = { enabled = true, export_interval_seconds = 300 }
+
+[worker]
+addr = "127.0.0.1:50052"
+tenant_id = "<TENANT_ID>"
+scheduler_addr = "127.0.0.1:50051"
+isolation = { seccomp = true, cgroups_v2 = true, namespaces = true }
+resources = { memory_limit_bytes = 17179869184, cpu_limit_ms = 20000, pids_limit = 512 }
+tier2 = { enabled = false, kvm_device = "/dev/kvm", firecracker_binary = "/usr/local/bin/firecracker", socket_dir = "/var/run/sandbox/firecracker" }

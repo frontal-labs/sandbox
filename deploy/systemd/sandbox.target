@@ -1,0 +1,7 @@
+[Unit]
+Description=Frontal Sandbox target (server + scheduler + all workers)
+Wants=sandbox-server.service sandbox-scheduler.service
+After=sandbox-server.service sandbox-scheduler.service
+
+[Install]
+WantedBy=multi-user.target
