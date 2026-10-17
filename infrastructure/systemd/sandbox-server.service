@@ -1,0 +1,32 @@
+[Unit]
+Description=Frontal Sandbox HTTP API server
+Documentation=file:/etc/sandbox/config.toml
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+# Run as an unprivileged user; the binary drops no privileges itself.
+User=sandbox
+Group=sandbox
+# Hardening mirrors docker/compose.yaml.
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/sandbox /tmp /var/run/sandbox
+PrivateTmp=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+# The server listens on 8080; no capabilities needed.
+ExecStart=/usr/local/bin/sandbox serve --config /etc/sandbox/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+# Rate limit restarts to avoid a tight crash loop.
+StartLimitBurst=5
+StartLimitIntervalSec=30
+# Logs go to journald; structured JSON from the server.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
