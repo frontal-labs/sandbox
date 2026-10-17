@@ -1,0 +1,17 @@
+# =============================================================================
+# Per-machine Bazel settings (copy to bazel/config/user.bazelrc)
+# =============================================================================
+# bazel/config/user.bazelrc is git-ignored and imported by the root .bazelrc.
+# Put settings here that differ between machines, such as a cache address or
+# a local output directory. Do not put secrets here.
+#   cp bazel/config/user.bazelrc.example bazel/config/user.bazelrc
+
+# Point every --config=remote-cache build at a different cache.
+# build:remote-cache --remote_cache=grpc://cache.internal.example:8980
+
+# Use the remote cache on every build, without passing --config each time.
+# build --config=remote-cache
+
+# Keep a local disk cache outside the output base. .bazelrc does not expand
+# $HOME or ~, so use an absolute path.
+# build --disk_cache=/Users/you/.cache/bazel-disk

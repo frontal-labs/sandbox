@@ -1,0 +1,32 @@
+# =============================================================================
+# Bazel pipeline
+# =============================================================================
+# Uploaded by bootstrap.yml. Each phase is one script, so the Bazel flags and
+# the target sets live in bazel/tools/buildkite/ci.sh and bazel/config/ci.bazelrc.
+#
+# Agents need the queue below, a macOS agent (the build targets
+# x86_64-apple-darwin; see bazel/README.md), bazelisk on PATH as `bazel` (so the
+# root .bazelversion is honored), and BUILDBARN_CACHE_URL in their environment.
+# =============================================================================
+
+steps:
+  - label: ":bazel: build"
+    key: build
+    command: bazel/tools/buildkite/ci.sh build
+    agents:
+      queue: macos
+    timeout_in_minutes: 180
+    retry:
+      automatic:
+        - exit_status: -1 # agent lost
+          limit: 2
+
+  - label: ":bazel: test"
+    key: test
+    depends_on: build
+    command: bazel/tools/buildkite/ci.sh test
+    agents:
+      queue: macos
+    timeout_in_minutes: 180
+    artifact_paths:
+      - "bazel-testlogs/**/test.log"

@@ -71,7 +71,7 @@ Notes:
   `//sdks/typescript:lint`, but `sdks/typescript/BUILD.bazel` defines only
   `tsconfig`, `sandbox_sdk`, `sandbox_sdk_test`, `test`, and `all`. Verify the
   lint target before relying on it.
-- `.bazelrc` sets `build --platforms=//:x86_64_apple_darwin`, so Bazel builds
+- `.bazelrc` sets `build --platforms=//bazel/platforms:x86_64_apple_darwin`, so Bazel builds
   target x86_64 macOS by default. On Apple Silicon or Linux, override it with
   `--platforms=` (or remove the line locally) before building.
 
