@@ -1,0 +1,9 @@
+# Example terraform.tfvars — copy and edit per environment.
+# Never commit real secrets here.
+
+aws_region     = "us-east-1"
+instance_type  = "m6i.large"
+instance_count = 1
+ssh_key_name   = "<YOUR_SSH_KEY_NAME>"
+enable_tier2   = true
+cas_bucket     = "sandbox-cas-production"
