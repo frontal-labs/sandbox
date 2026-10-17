@@ -1,0 +1,22 @@
+# brew formulae versions snapshot
+git <version>
+gh <version>
+jq <version>
+curl <version>
+wget <version>
+ripgrep <version>
+fd <version>
+fzf <version>
+bat <version>
+eza <version>
+starship <version>
+zoxide <version>
+mise <version>
+tmux <version>
+neovim <version>
+docker <version>
+docker-compose <version>
+terraform <version>
+kubectl <version>
+helm <version>
+coder-desktop <version>

@@ -1,0 +1,2 @@
+# brew services snapshot
+# No services currently managed by Homebrew on this machine.

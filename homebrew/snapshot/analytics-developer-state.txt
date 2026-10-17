@@ -1,0 +1,5 @@
+# Homebrew analytics / developer state snapshot
+Analytics: disabled
+Developer commands: enabled
+Auto-update: disabled
+Cleanup on install: disabled
