@@ -1,0 +1,30 @@
+{
+  "$schema": "https://frontal.dev/schemas/frontal-code/settings.local.json",
+  "comment": "Local runtime overrides for this workspace. Not committed to version control. Overrides .frontal-code/settings.json.",
+  "runtime": {
+    "default_provider": "frontal",
+    "permission_mode": "workspace-write",
+    "log_level": "debug"
+  },
+  "features": {
+    "enable_telemetry": false,
+    "enable_tracing": true,
+    "enable_hot_reload": true
+  },
+  "ui": {
+    "theme": "dark",
+    "enable_colors": true,
+    "show_progress_bars": true,
+    "confirm_dangerous_operations": true
+  },
+  "sandbox": {
+    "enable_docker": true,
+    "docker_image": "busybox:1.36",
+    "default_shell": "/bin/bash",
+    "max_execution_time_seconds": 600
+  },
+  "experimental": {
+    "enable_new_features": true,
+    "beta_features": ["new_ui", "enhanced_sandbox"]
+  }
+}
