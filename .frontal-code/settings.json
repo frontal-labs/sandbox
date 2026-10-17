@@ -1,0 +1,69 @@
+{
+  "$schema": "https://frontal.dev/schemas/frontal-code/settings.json",
+  "comment": "Frontal Code runtime configuration for this workspace. See https://github.com/frontal-labs/code/blob/main/CONFIGURATION.md",
+  "project": {
+    "name": "sandbox",
+    "version": "0.1.0",
+    "description": "Frontal Code sandbox workspace"
+  },
+  "runtime": {
+    "default_provider": "frontal",
+    "providers": {
+      "anthropic": {
+        "enabled": true,
+        "default_model": "claude-opus-5-5"
+      },
+      "openai": {
+        "enabled": true,
+        "default_model": "gpt-6.1-sol"
+      },
+      "xai": {
+        "enabled": true,
+        "default_model": "grok-4.7"
+      }
+    },
+    "permission_mode": "workspace-write",
+    "log_level": "info",
+    "max_concurrent_requests": 10,
+    "request_timeout_seconds": 30
+  },
+  "paths": {
+    "config_home": "~/.frontal-code",
+    "home": "~/.frontal-code",
+    "cache_dir": "~/.frontal-code/cache",
+    "logs_dir": "~/.frontal-code/logs"
+  },
+  "features": {
+    "auto_compaction_threshold": 100,
+    "enable_telemetry": true,
+    "enable_plugins": true,
+    "enable_caching": true,
+    "enable_metrics": true,
+    "enable_tracing": false,
+    "enable_hot_reload": false,
+    "max_file_size_mb": 100,
+    "max_memory_usage_mb": 2048
+  },
+  "ui": {
+    "theme": "default",
+    "enable_colors": true,
+    "show_progress_bars": true,
+    "confirm_dangerous_operations": true
+  },
+  "services": {
+    "memory": {
+      "cache_size_mb": 512,
+      "namespace": "default"
+    }
+  },
+  "sandbox": {
+    "enable_docker": false,
+    "docker_image": "busybox:1.36",
+    "default_shell": "/bin/bash",
+    "max_execution_time_seconds": 300
+  },
+  "experimental": {
+    "enable_new_features": false,
+    "beta_features": []
+  }
+}
