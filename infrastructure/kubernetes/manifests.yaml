@@ -1,0 +1,358 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox
+    app.kubernetes.io/part-of: frontal-sandbox
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sandbox-config
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox
+data:
+  config.toml: |
+    [server]
+    addr = "0.0.0.0:8080"
+    data_dir = "/var/lib/sandbox"
+
+    [server.auth]
+    api_key_hash = ""
+    rate_limit_rps = 100
+
+    [server.tls]
+    enabled = false
+
+    [server.telemetry]
+    metrics_addr = "0.0.0.0:9090"
+    otlp_endpoint = "http://otel-collector.monitoring.svc:4317"
+    service_name = "sandbox-server"
+
+    [server.scheduler]
+    address = "sandbox-scheduler.sandbox.svc.cluster.local:50051"
+
+    [scheduler]
+    addr = "0.0.0.0:50051"
+    metadata = { backend = "postgres", dsn = "postgres://sandbox:$(SANDBOX_DB_PASSWORD)@postgres.sandbox.svc:5432/sandbox?sslmode=require" }
+    cas = { backend = "object", path = "", bucket = "sandbox-cas", cache_path = "/var/lib/sandbox/cas-cache" }
+    pools = { isolate_warm_pool_size = 64, vm_warm_pool_size = 16 }
+    idle = { sleep_after_seconds = 300 }
+    metering = { enabled = true, export_interval_seconds = 300 }
+
+    [worker]
+    addr = "0.0.0.0:50052"
+    tenant_id = ""
+    scheduler_addr = "sandbox-scheduler.sandbox.svc.cluster.local:50051"
+    isolation = { seccomp = true, cgroups_v2 = true, namespaces = true }
+    resources = { memory_limit_bytes = 17179869184, cpu_limit_ms = 20000, pids_limit = 512 }
+    tier2 = { enabled = true, kvm_device = "/dev/kvm", firecracker_binary = "/usr/local/bin/firecracker", socket_dir = "/var/run/sandbox/firecracker" }
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sandbox-secrets
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox
+type: Opaque
+stringData:
+  db_password: "<REPLACE>"
+  api_key_hash: "<REPLACE_WITH_BLAKE3_HEX_DIGEST>"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-server
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox-server
+    app.kubernetes.io/part-of: frontal-sandbox
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sandbox-server
+    spec:
+      containers:
+        - name: server
+          image: ghcr.io/frontal-labs/frontal-sandbox:{{VERSION}}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", "/etc/sandbox/config.toml"]
+          envFrom:
+            - secretRef:
+                name: sandbox-secrets
+          env:
+            - name: SANDBOX_CONFIG
+              value: /etc/sandbox/config.toml
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9090
+              name: metrics
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sandbox/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/sandbox
+            - name: tls
+              mountPath: /etc/sandbox/tls
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /v1/openapi.json
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /v1/openapi.json
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: sandbox-config
+        - name: state
+          emptyDir: {}
+        - name: tls
+          secret:
+            secretName: sandbox-tls
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-scheduler
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox-scheduler
+    app.kubernetes.io/part-of: frontal-sandbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-scheduler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sandbox-scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: ghcr.io/frontal-labs/frontal-sandbox:{{VERSION}}
+          args: ["scheduler", "--config", "/etc/sandbox/config.toml"]
+          env:
+            - name: SANDBOX_CONFIG
+              value: /etc/sandbox/config.toml
+          ports:
+            - containerPort: 50051
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sandbox/config.toml
+              subPath: config.toml
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: sandbox-config
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sandbox-worker
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox-worker
+    app.kubernetes.io/part-of: frontal-sandbox
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sandbox-worker
+    spec:
+      # Runs on KVM-capable nodes only. Add a nodeSelector / taint for /dev/kvm hosts.
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        sandbox.tier2: "true"
+      containers:
+        - name: worker
+          image: ghcr.io/frontal-labs/frontal-sandbox:{{VERSION}}
+          args: ["worker", "--config", "/etc/sandbox/config.toml", "--tenant-id", "$(POD_NAME)"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SANDBOX_CONFIG
+              value: /etc/sandbox/config.toml
+          ports:
+            - containerPort: 50052
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sandbox/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: kvm
+              mountPath: /dev/kvm
+            - name: firecracker-sockets
+              mountPath: /var/run/sandbox/firecracker
+          resources:
+            requests:
+              cpu: 1
+              memory: 2Gi
+            limits:
+              cpu: 4
+              memory: 8Gi
+          securityContext:
+            privileged: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_ADMIN", "SYS_ADMIN"] # Firecracker tap device + jailer
+      volumes:
+        - name: config
+          configMap:
+            name: sandbox-config
+        - name: kvm
+          hostPath:
+            path: /dev/kvm
+        - name: firecracker-sockets
+          hostPath:
+            path: /var/run/sandbox/firecracker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-server
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox-server
+spec:
+  selector:
+    app.kubernetes.io/name: sandbox-server
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http
+    - port: 9090
+      targetPort: 9090
+      name: metrics
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-scheduler
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox-scheduler
+spec:
+  selector:
+    app.kubernetes.io/name: sandbox-scheduler
+  ports:
+    - port: 50051
+      targetPort: 50051
+  type: ClusterIP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sandbox
+  namespace: sandbox
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.sandbox.example.com
+      secretName: sandbox-tls
+  rules:
+    - host: api.sandbox.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sandbox-server
+                port:
+                  number: 80
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sandbox-server
+  namespace: sandbox
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sandbox-server
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sandbox-server
+  namespace: sandbox
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-server
