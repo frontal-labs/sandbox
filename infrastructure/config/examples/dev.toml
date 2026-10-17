@@ -1,0 +1,37 @@
+# Development environment. Single node, Tier 1 only, everything in one process.
+# Copy to /etc/sandbox/config.toml or pass --config on the command line.
+
+[server]
+addr = "127.0.0.1:8080"
+data_dir = "~/.local/state/sandbox/dev"
+
+[server.auth]
+api_key_hash = ""
+rate_limit_rps = 0
+
+[server.tls]
+enabled = false
+
+[server.telemetry]
+metrics_addr = "127.0.0.1:9090"
+otlp_endpoint = ""
+service_name = "sandbox-server-dev"
+
+[server.scheduler]
+address = "127.0.0.1:50051"
+
+[scheduler]
+addr = "127.0.0.1:50051"
+metadata = { backend = "redb", dsn = "" }
+cas = { backend = "disk", path = "~/.local/state/sandbox/dev/cas", bucket = "", cache_path = "~/.local/state/sandbox/dev/cas-cache" }
+pools = { isolate_warm_pool_size = 8, vm_warm_pool_size = 0 }
+idle = { sleep_after_seconds = 300 }
+metering = { enabled = false, export_interval_seconds = 300 }
+
+[worker]
+addr = "127.0.0.1:50052"
+tenant_id = "dev"
+scheduler_addr = "127.0.0.1:50051"
+isolation = { seccomp = false, cgroups_v2 = false, namespaces = false }
+resources = { memory_limit_bytes = 4294967296, cpu_limit_ms = 5000, pids_limit = 512 }
+tier2 = { enabled = false }

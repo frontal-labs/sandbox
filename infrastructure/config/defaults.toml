@@ -1,0 +1,69 @@
+# Built-in defaults for the Frontal Sandbox server.
+# Embedded by crates/sandbox-server. Overridden by /etc/sandbox/config.toml,
+# then by SANDBOX_* environment variables.
+
+[server]
+addr = "0.0.0.0:8080"
+data_dir = "/var/lib/sandbox"
+
+[server.auth]
+api_key_hash = ""
+rate_limit_rps = 0
+
+[server.tls]
+enabled = false
+cert_file = ""
+key_file = ""
+
+[server.telemetry]
+metrics_addr = "0.0.0.0:9090"
+otlp_endpoint = ""
+service_name = "sandbox-server"
+
+[server.scheduler]
+address = "127.0.0.1:50051"
+
+[scheduler]
+addr = "0.0.0.0:50051"
+
+[scheduler.metadata]
+backend = "redb"
+dsn = ""
+
+[scheduler.cas]
+backend = "disk"
+path = "/var/lib/sandbox/cas"
+bucket = ""
+cache_path = "/var/lib/sandbox/cas-cache"
+
+[scheduler.pools]
+isolate_warm_pool_size = 64
+vm_warm_pool_size = 4
+
+[scheduler.idle]
+sleep_after_seconds = 300
+
+[scheduler.metering]
+enabled = false
+export_interval_seconds = 300
+
+[worker]
+addr = "127.0.0.1:50052"
+tenant_id = ""
+scheduler_addr = "127.0.0.1:50051"
+
+[worker.isolation]
+seccomp = true
+cgroups_v2 = true
+namespaces = true
+
+[worker.resources]
+memory_limit_bytes = 4294967296
+cpu_limit_ms = 5000
+pids_limit = 512
+
+[worker.tier2]
+enabled = false
+kvm_device = "/dev/kvm"
+firecracker_binary = "/usr/local/bin/firecracker"
+socket_dir = "/var/run/sandbox/firecracker"

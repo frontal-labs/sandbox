@@ -1,0 +1,40 @@
+# Production environment. KVM-capable host with Tier 1 + Tier 2 (Firecracker).
+# Secrets must be injected by the operator (Secrets Manager / env vars); do
+# not commit real api_key_hash, TLS private keys, or Postgres credentials.
+
+[server]
+addr = "0.0.0.0:8080"
+data_dir = "/var/lib/sandbox"
+
+[server.auth]
+api_key_hash = "<REPLACE_WITH_BLAKE3_HEX_DIGEST>"
+rate_limit_rps = 100
+
+[server.tls]
+enabled = true
+cert_file = "/etc/sandbox/tls/server.crt"
+key_file = "/etc/sandbox/tls/server.key"
+
+[server.telemetry]
+metrics_addr = "0.0.0.0:9090"
+otlp_endpoint = "http://otel-collector.production:4317"
+service_name = "sandbox-server-production"
+
+[server.scheduler]
+address = "127.0.0.1:50051"
+
+[scheduler]
+addr = "0.0.0.0:50051"
+metadata = { backend = "postgres", dsn = "postgres://sandbox:<PASSWORD>@db.internal:5432/sandbox?sslmode=require" }
+cas = { backend = "tiered", path = "/var/lib/sandbox/cas", bucket = "sandbox-cas-production", cache_path = "/var/lib/sandbox/cas-cache" }
+pools = { isolate_warm_pool_size = 128, vm_warm_pool_size = 16 }
+idle = { sleep_after_seconds = 300 }
+metering = { enabled = true, export_interval_seconds = 300 }
+
+[worker]
+addr = "127.0.0.1:50052"
+tenant_id = "<TENANT_ID>"
+scheduler_addr = "127.0.0.1:50051"
+isolation = { seccomp = true, cgroups_v2 = true, namespaces = true }
+resources = { memory_limit_bytes = 17179869184, cpu_limit_ms = 20000, pids_limit = 512 }
+tier2 = { enabled = true, kvm_device = "/dev/kvm", firecracker_binary = "/usr/local/bin/firecracker", socket_dir = "/var/run/sandbox/firecracker" }
