@@ -6,7 +6,7 @@ use sandbox_worker::{Worker, MAX_MESSAGE_BYTES};
 use std::os::unix::fs::PermissionsExt;
 
 async fn spawn() -> Worker {
-    Worker::spawn(env!("CARGO_BIN_EXE_sandbox"))
+    Worker::spawn(env!("CARGO_BIN_EXE_frontal-sandbox"))
         .await
         .expect("worker starts and answers Health")
 }

@@ -1,6 +1,6 @@
 # Sandbox SDK (TypeScript)
 
-TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox), the execution platform for AI agents. The npm package is `sandbox-sdk`. Source is in `sdks/typescript/`.
+TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox), the execution platform for AI agents. The npm package is `@frontal-labs/sandbox-sdk`. Source is in `sdks/typescript/`.
 
 **Status: early.** The client covers sessions, exec, snapshots, and forks over the server's `/v1` API. Field names and byte encodings match the server's wire format, and the tests check that against server-shaped responses and against a live server. Streaming exec is refused with `UNSUPPORTED`. "Embedded" mode is a wrapper over a remote server, not a local backend.
 
@@ -10,7 +10,7 @@ Releases are pushed to GHCR as an OCI artifact, `ghcr.io/frontal-labs/sandbox-sd
 
 ```bash
 oras pull ghcr.io/frontal-labs/sandbox-sdk-ts:0.1.0
-npm install ./sandbox-sdk-0.1.0.tgz
+npm install ./frontal-labs-sandbox-sdk-0.1.0.tgz
 ```
 
 If the package is private, run `oras login ghcr.io` first. To build from source instead:
@@ -28,7 +28,7 @@ Requires Node.js 20+ (per `engines` in `package.json`).
 This shows the usage against a running server.
 
 ```typescript
-import { Client, isSandboxError } from "sandbox-sdk"
+import { Client, isSandboxError } from "@frontal-labs/sandbox-sdk"
 
 // Explicit configuration
 const client = new Client({
@@ -69,7 +69,7 @@ if (isSandboxError(result)) {
 Local in-process execution is planned. See `PLAN.md`.
 
 ```typescript
-import { EmbeddedSandbox, isSandboxError } from "sandbox-sdk"
+import { EmbeddedSandbox, isSandboxError } from "@frontal-labs/sandbox-sdk"
 
 const sandbox = await EmbeddedSandbox.new({ tenant_id: "local-dev" })
 if (isSandboxError(sandbox)) throw sandbox
@@ -184,14 +184,14 @@ See "Embedded Mode" above.
 
 ### Types
 
-Zod schemas and inferred types are exported from `sandbox-sdk/types` (and re-exported from the root). Examples: `SessionConfigSchema`, `ExecRequestSchema`, `ExecResultSchema`, `SessionStateSchema`, `SnapshotSchema`, `TierSchema`, `TierPreferenceSchema`, and the `ResourceLimits`, `NetworkPolicy`, `NetworkPolicyRule`, `SecretsConfig`, and `SecretEntry` types. See `sdks/typescript/src/types/index.ts`.
+Zod schemas and inferred types are exported from `@frontal-labs/sandbox-sdk/types` (and re-exported from the root). Examples: `SessionConfigSchema`, `ExecRequestSchema`, `ExecResultSchema`, `SessionStateSchema`, `SnapshotSchema`, `TierSchema`, `TierPreferenceSchema`, and the `ResourceLimits`, `NetworkPolicy`, `NetworkPolicyRule`, `SecretsConfig`, and `SecretEntry` types. See `sdks/typescript/src/types/index.ts`.
 
 ### Errors
 
 Errors are returned as values, not thrown. `Result<T>` is `T | SandboxError`. `SandboxError` is an interface extending `Error` with a `code` field.
 
 ```typescript
-import { isSandboxError, SandboxErrorCodes, type Result, type SandboxError } from "sandbox-sdk/errors"
+import { isSandboxError, SandboxErrorCodes, type Result, type SandboxError } from "@frontal-labs/sandbox-sdk/errors"
 ```
 
 `ErrorCode` values: `INTERNAL`, `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `TIMEOUT`, `CANCELLED`, `INVALID_STATE`, `UNSUPPORTED`, `POLICY_DENIED`, `PROMOTION_FAILED`, `SNAPSHOT_FAILED`, `VM_BOOT_FAILED`, `NETWORK_ERROR`, `CAS_ERROR`, `VFS_ERROR`, `SHELL_ERROR`, `RUNTIME_ERROR`, `WASM_ERROR`.

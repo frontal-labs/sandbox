@@ -15,7 +15,7 @@ env:
 
 jobs:
   cli:
-    name: sandbox CLI ${{ matrix.target }}
+    name: frontal-sandbox CLI ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -56,7 +56,7 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
         run: |
-          # `sandbox --version` reports the release version, taken from the tag.
+          # `frontal-sandbox --version` reports the release version, taken from the tag.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             export SANDBOX_VERSION="${GITHUB_REF_NAME#v}"
           else
@@ -77,8 +77,8 @@ jobs:
       - name: Package CLI binary
         shell: bash
         run: |
-          EXE=sandbox
-          if [ "${{ matrix.os_name }}" = "win32" ]; then EXE=sandbox.exe; fi
+          EXE=frontal-sandbox
+          if [ "${{ matrix.os_name }}" = "win32" ]; then EXE=frontal-sandbox.exe; fi
           BIN="target/${{ matrix.target }}/release/$EXE"
           PKG_DIR="target/npm-pkg/${{ matrix.target }}"
           mkdir -p "$PKG_DIR"
@@ -88,9 +88,9 @@ jobs:
           node -e '
             const [pkgDir, target, osName, arch, exe, version] = process.argv.slice(1)
             const pkg = {
-              name: `@frontal-labs/sandbox-cli-${target}`,
+              name: `@frontal-labs/frontal-sandbox-${target}`,
               version,
-              description: `sandbox CLI binary for ${target}`,
+              description: `frontal-sandbox CLI binary for ${target}`,
               os: [osName],
               cpu: [arch],
               files: [exe],
@@ -102,7 +102,7 @@ jobs:
           ' "$PKG_DIR" "${{ matrix.target }}" "${{ matrix.os_name }}" "${{ matrix.arch }}" "$EXE" "$VERSION"
       - uses: actions/upload-artifact@v4
         with:
-          name: sandbox-${{ matrix.target }}
+          name: frontal-sandbox-${{ matrix.target }}
           path: target/npm-pkg/${{ matrix.target }}
 
   publish-npm:
@@ -138,13 +138,13 @@ jobs:
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the sandbox-cli wrapper
+      - name: Publish the frontal-sandbox wrapper
         # The wrapper lists each platform package in optionalDependencies at the
         # same version, so it is published after them.
         run: |
           VERSION="$RELEASE_VERSION"
-          WRAP="$RUNNER_TEMP/sandbox-cli"
-          rm -rf "$WRAP" && cp -r npm/sandbox-cli "$WRAP"
+          WRAP="$RUNNER_TEMP/frontal-sandbox"
+          rm -rf "$WRAP" && cp -r npm/frontal-sandbox "$WRAP"
           node -e '
             const fs = require("fs")
             const dir = process.argv[1], version = process.argv[2]
@@ -171,20 +171,27 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: dist }
       - name: Name each binary after its target
-        # Every platform's binary is called sandbox, so the uploads would overwrite each
+        # Every platform's binary is called frontal-sandbox, so the uploads would overwrite each
         # other. Each one is copied under its target name first.
         run: |
           mkdir -p release-assets
           for dir in dist/*/; do
-            target="${dir#dist/sandbox-}"
+            target="${dir#dist/frontal-sandbox-}"
             target="${target%/}"
-            for file in "$dir"sandbox*; do
+            for file in "$dir"frontal-sandbox*; do
               name="$(basename "$file")"
-              ext="${name#sandbox}"
-              cp "$file" "release-assets/sandbox-${target}${ext}"
+              ext="${name#frontal-sandbox}"
+              cp "$file" "release-assets/frontal-sandbox-${target}${ext}"
             done
           done
           ls -l release-assets
+      - name: Write SHA-256 checksums
+        # One file for all binaries, in the format `sha256sum -c` reads. Homebrew and
+        # manual installs can verify a download against it.
+        run: |
+          cd release-assets
+          sha256sum frontal-sandbox-* > SHA256SUMS
+          cat SHA256SUMS
       - name: Create the GitHub release and attach the binaries
         # This is the only workflow that creates a release for a v* tag, so the
         # binaries and the notes land on one release.

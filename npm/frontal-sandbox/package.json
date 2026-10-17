@@ -1,11 +1,11 @@
 {
-  "name": "@frontal-labs/sandbox-cli",
+  "name": "@frontal-labs/frontal-sandbox",
   "version": "0.0.0",
   "description": "Command-line client for Frontal Sandbox. Installs the binary for this platform.",
   "license": "Apache-2.0",
   "repository": "https://github.com/frontal-labs/sandbox",
   "bin": {
-    "sandbox": "bin/sandbox.js"
+    "frontal-sandbox": "bin/frontal-sandbox.js"
   },
   "files": [
     "bin"

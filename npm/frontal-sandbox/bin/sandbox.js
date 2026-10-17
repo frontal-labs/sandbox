@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs the sandbox binary from the platform package that matches this machine.
+// Runs the frontal-sandbox binary from the platform package that matches this machine.
 // Each platform package is listed in optionalDependencies, and npm installs only
 // the one whose os and cpu fields match.
 "use strict";
@@ -17,24 +17,24 @@ const TARGETS = {
 const key = `${process.platform}-${process.arch}`;
 const target = TARGETS[key];
 if (!target) {
-  console.error(`sandbox: no prebuilt binary for ${key}`);
+  console.error(`frontal-sandbox: no prebuilt binary for ${key}`);
   process.exit(1);
 }
 
-const exe = process.platform === "win32" ? "sandbox.exe" : "sandbox";
+const exe = process.platform === "win32" ? "frontal-sandbox.exe" : "frontal-sandbox";
 let binary;
 try {
-  binary = require.resolve(`@frontal-labs/sandbox-cli-${target}/${exe}`);
+  binary = require.resolve(`@frontal-labs/frontal-sandbox-${target}/${exe}`);
 } catch {
   console.error(
-    `sandbox: the binary package @frontal-labs/sandbox-cli-${target} is not installed. Reinstall without --omit=optional.`,
+    `frontal-sandbox: the binary package @frontal-labs/frontal-sandbox-${target} is not installed. Reinstall without --omit=optional.`,
   );
   process.exit(1);
 }
 
 const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
 if (result.error) {
-  console.error(`sandbox: ${result.error.message}`);
+  console.error(`frontal-sandbox: ${result.error.message}`);
   process.exit(1);
 }
 process.exit(result.status ?? 1);

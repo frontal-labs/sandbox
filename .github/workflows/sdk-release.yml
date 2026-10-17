@@ -50,7 +50,10 @@ jobs:
           title: "chore(release): version SDKs"
           createGithubReleases: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PRs opened with GITHUB_TOKEN do not trigger pull_request workflows, so the
+          # version PR would get no CI. A token from a PAT or GitHub App fixes that.
+          # Without the secret, this falls back to GITHUB_TOKEN.
+          GITHUB_TOKEN: ${{ secrets.SDK_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   publish:
     name: Publish ${{ matrix.sdk }} to GHCR

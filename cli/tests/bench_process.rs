@@ -3,7 +3,7 @@
 use std::process::Command;
 
 fn sandbox() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_sandbox"))
+    Command::new(env!("CARGO_BIN_EXE_frontal-sandbox"))
 }
 
 #[test]

@@ -13,11 +13,11 @@ name = "cli_lib"
 path = "src/lib.rs"
 
 [[bin]]
-name = "sandbox"
+name = "frontal-sandbox"
 path = "src/main.rs"
 
 [dependencies]
-sandbox-sdk = { path = "../sdks/rust" }
+frontal-sandbox-sdk = { path = "../sdks/rust" }
 sandbox-types = { path = "../crates/sandbox-types" }
 sandbox-session = { path = "../crates/sandbox-session" }
 sandbox-server = { path = "../crates/sandbox-server" }

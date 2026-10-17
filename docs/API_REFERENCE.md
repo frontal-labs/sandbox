@@ -9,7 +9,7 @@
 
 ## Base URL
 
-The intended bind address is `0.0.0.0:8080` (the default of `sandbox serve
+The intended bind address is `0.0.0.0:8080` (the default of `frontal-sandbox serve
 --addr` in `cli/src/commands.rs`), but no process currently serves these
 routes (see the CLI section). Routes are mounted under `/v1`.
 
@@ -239,7 +239,7 @@ session ran through `exec` is one run, with its argv written as a single-quoted
 script. `X-Trace-Complete` is `false` when a command could not be recorded (it had
 standard input, or an environment name is not a shell name) or when the trace is
 full (4096 runs). File writes are not recorded. Save the body and replay it with
-`sandbox replay`. See [ADR 0009](adr/0009-server-exec-traces.md).
+`frontal-sandbox replay`. See [ADR 0009](adr/0009-server-exec-traces.md).
 
 ### Fork snapshot
 
@@ -261,17 +261,17 @@ yet. The `middleware.rs` module only adds a request ID.
 
 ## CLI
 
-The `sandbox` binary (crate `cli`) runs commands in an in-process isolate
+The `frontal-sandbox` binary (crate `cli`) runs commands in an in-process isolate
 session, records and replays traces, and times the local runtime. `snapshot`
 and `fork` call a server named by `SANDBOX_BASE_URL`. See
 [cli/README.md](../cli/README.md) for every command.
 
 ```bash
-sandbox run --trace one.jsonl "echo hi | cat > /a && cat /a"  # exit code = the script's
-sandbox shell --trace session.jsonl                           # one script per stdin line
-sandbox replay one.jsonl                                      # exit 1 on any divergence
-sandbox bench --name exec_echo                                # one JSON line per case
-sandbox serve --addr 127.0.0.1:8080                           # prints one API key to stderr
-SANDBOX_BASE_URL=... SANDBOX_API_KEY=... sandbox snapshot <session-id>
-SANDBOX_BASE_URL=... SANDBOX_API_KEY=... sandbox fork <snapshot-id> --count 3
+frontal-sandbox run --trace one.jsonl "echo hi | cat > /a && cat /a"  # exit code = the script's
+frontal-sandbox shell --trace session.jsonl                           # one script per stdin line
+frontal-sandbox replay one.jsonl                                      # exit 1 on any divergence
+frontal-sandbox bench --name exec_echo                                # one JSON line per case
+frontal-sandbox serve --addr 127.0.0.1:8080                           # prints one API key to stderr
+SANDBOX_BASE_URL=... SANDBOX_API_KEY=... frontal-sandbox snapshot <session-id>
+SANDBOX_BASE_URL=... SANDBOX_API_KEY=... frontal-sandbox fork <snapshot-id> --count 3
 ```

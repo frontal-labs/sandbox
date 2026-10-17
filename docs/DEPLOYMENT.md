@@ -13,11 +13,11 @@ cargo build --workspace
 
 The toolchain is pinned in `rust-toolchain.toml` (Rust 1.95).
 
-The TypeScript SDK (`sdks/typescript`, npm package `sandbox-sdk`) and the Python SDK (`sdks/python`) are built separately. The root `package.json` scripts `ts:build`, `ts:test`, and `ts:lint` run through Bazel (`BUILD.bazel`, `MODULE.bazel`).
+The TypeScript SDK (`sdks/typescript`, npm package `@frontal-labs/sandbox-sdk`) and the Python SDK (`sdks/python`) are built separately. The root `package.json` scripts `ts:build`, `ts:test`, and `ts:lint` run through Bazel (`BUILD.bazel`, `MODULE.bazel`).
 
 ### CLI
 
-The `sandbox` binary is built from the `cli` crate (`cli/src/main.rs`). `run` and `shell` execute builtin commands in an in-process isolate session. `record` with `--trace`, `replay`, and `bench` work on the local runtime. `snapshot` and `fork` call a server named by `SANDBOX_BASE_URL`, and `serve` starts it in the foreground (`cli/src/commands.rs`).
+The `frontal-sandbox` binary is built from the `cli` crate (`cli/src/main.rs`). `run` and `shell` execute builtin commands in an in-process isolate session. `record` with `--trace`, `replay`, and `bench` work on the local runtime. `snapshot` and `fork` call a server named by `SANDBOX_BASE_URL`, and `serve` starts it in the foreground (`cli/src/commands.rs`).
 
 ```bash
 cargo run -p cli -- run "echo hi"   # prints "hi"
@@ -25,7 +25,7 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 
 ### Server
 
-`crates/sandbox-server` defines routes in `src/api.rs`, and every `/v1` route except `/v1/openapi.json` requires a valid API key. The server runs through the CLI: `sandbox serve --addr <addr> [--data-dir <dir>]` (`cli/src/commands.rs`). With `--data-dir`, keys, snapshots, and sleeping sessions persist across restarts. Without it, state is in memory and a new key is printed on each start. The first durable start prints one API key to stderr. There is no config file loader, no separate health endpoint (`/v1/openapi.json` serves as the liveness probe), and no metrics endpoint. Do not expose the server to untrusted networks: it has no TLS and no rate limiting.
+`crates/sandbox-server` defines routes in `src/api.rs`, and every `/v1` route except `/v1/openapi.json` requires a valid API key. The server runs through the CLI: `frontal-sandbox serve --addr <addr> [--data-dir <dir>]` (`cli/src/commands.rs`). With `--data-dir`, keys, snapshots, and sleeping sessions persist across restarts. Without it, state is in memory and a new key is printed on each start. The first durable start prints one API key to stderr. There is no config file loader, no separate health endpoint (`/v1/openapi.json` serves as the liveness probe), and no metrics endpoint. Do not expose the server to untrusted networks: it has no TLS and no rate limiting.
 
 ### Container image
 
@@ -38,9 +38,7 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 | `.github/workflows/ci.yml` | `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `cargo bench --no-run`, using the `rust-toolchain.toml` pin | Runs without Nix. Not verified to pass in this refresh. |
 | `.github/workflows/pr-checks.yml` | Conventional-commit PR title, semver label, size warning, auto-assign | Active |
 | `.github/workflows/benchmarks.yml` | Criterion and load-test runs, baseline comparison | Runs, but see [PERFORMANCE.md](PERFORMANCE.md). `benchmarks/baselines/` is empty, so no regression check compares against recorded data. |
-| `.github/workflows/release.yml` | Tag build with `cargo build --release --workspace`, attaches `target/release/sandbox*` to a GitHub release | Runs without Nix. Not verified in this refresh. |
-| `.github/workflows/release-binaries.yml` | Tag build of the `cli` crate (binary `sandbox`) for five targets, npm platform packages to the GitHub npm registry, attaches to release | Builds `-p cli`. Windows copies `sandbox.exe`. Not verified in this refresh. |
-| `.github/workflows/update-flake.yml` | Weekly `nix flake update` PR | Deleted (staged). The flake it updated was removed. |
+| `.github/workflows/release-binaries.yml` | Tag build of the `cli` crate (binary `frontal-sandbox`) for five targets, npm platform packages and the `@frontal-labs/frontal-sandbox` wrapper to npmjs, `SHA256SUMS` attached to the release | Builds `-p cli`. Windows copies `frontal-sandbox.exe`. |
 | `.github/workflows/codeql-analysis.yml` | CodeQL analysis | Not reviewed in this refresh |
 
 `.devcontainer/Dockerfile` builds a development container (Rust and Bun). It is not a deployment image.

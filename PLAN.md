@@ -84,9 +84,9 @@ sandbox/
 │   └── sandbox-server/           # axum API
 ├── sdks/
 │   ├── rust/                  # Rust client SDK (crate: sandbox-sdk)
-│   ├── typescript/            # TS client SDK (npm: sandbox-sdk)
+│   ├── typescript/            # TS client SDK (npm: @frontal-labs/sandbox-sdk)
 │   └── python/                # Python client SDK (package: sandbox_sdk)
-├── cli/                       # `sandbox` binary (crate: cli)
+├── cli/                       # `frontal-sandbox` binary (crate: cli)
 ├── benchmarks/                # criterion benches + load tests
 ├── tools/                     # build scripts: tools to WASM, rootfs images (planned)
 ├── images/                    # Tier 2 rootfs recipes (planned)
@@ -274,7 +274,7 @@ Be explicit in docs: running processes do not survive promotion. Include a `prom
 - Generate an OpenAPI spec from types (`utoipa` or `schemars`); CI fails if the committed spec drifts.
 - Rate limiting, request IDs, structured logs, Prometheus metrics, OpenTelemetry traces.
 
-### 4.16 `sandbox-sdk` and `cli` (binary `sandbox`)
+### 4.16 `sandbox-sdk` and `cli` (binary `frontal-sandbox`)
 
 ```rust
 let client = sandbox::from_env()?;
@@ -287,7 +287,7 @@ let forks = snap.fork(3).await?;
 ```
 
 - SDK also exposes a streaming `exec_stream`, `watch(path)`, and an in-process mode (`sandbox::embedded()`) that runs the isolate backend with no server, for tests and local use.
-- CLI: `sandbox run <cmd>`, `sandbox shell` (interactive), `sandbox snapshot`, `sandbox fork`, `sandbox replay <trace>`, `sandbox serve`, `sandbox bench`.
+- CLI: `frontal-sandbox run <cmd>`, `frontal-sandbox shell` (interactive), `frontal-sandbox snapshot`, `frontal-sandbox fork`, `frontal-sandbox replay <trace>`, `frontal-sandbox serve`, `frontal-sandbox bench`.
 - TS SDK generated from OpenAPI, then hand-polished for streaming.
 
 ## 5. Security model
@@ -326,7 +326,7 @@ Benchmarks live in `bench/`: `criterion` for micro (VFS, shell parse, op dispatc
 ## 7. Testing strategy
 
 - **Unit and property tests** per crate (`proptest` for VFS, shell expansion, CAS).
-- **Conformance suite** in `tests/`: a corpus of shell scripts run against both `sandbox` and real `bash`/GNU coreutils in a container, diffing stdout, stderr, exit code, and resulting file tree.
+- **Conformance suite** in `tests/`: a corpus of shell scripts run against both `frontal-sandbox` and real `bash`/GNU coreutils in a container, diffing stdout, stderr, exit code, and resulting file tree.
 - **Agent transcript replay:** collect real agent command traces (Claude Code, Aider, SWE-agent style) and run them as regression tests. Track the pass rate as the headline compatibility metric.
 - **Integration:** server + worker + SDK in-process with `tokio::test`; Tier 2 tests gated behind a feature and run on KVM-enabled CI runners.
 - **Chaos:** kill workers mid-exec, corrupt a blob, fill disk; sessions must fail cleanly and recover from snapshot.
@@ -347,8 +347,8 @@ Rule: justify every new dependency in the PR description; prefer well-maintained
 
 ### M1: Isolate + VFS + shell core (weeks 2-5)
 
-- `sandbox-vfs` (overlay, commit, quotas), `sandbox-runtime` (deno\_core, startup snapshot, limits), `sandbox-shell` (parser, pipes, redirects, 20 builtins), `sandbox-session` IsolateBackend, `sandbox-sdk` embedded mode, `sandbox run`.
-- **Accept:** `sandbox run "echo hi | cat > /a && cat /a"` works; `node -e` and a `.ts` script run against the VFS; cold start < 5 ms from warm pool in `bench/`; 200+ shell conformance cases pass.
+- `sandbox-vfs` (overlay, commit, quotas), `sandbox-runtime` (deno\_core, startup snapshot, limits), `sandbox-shell` (parser, pipes, redirects, 20 builtins), `sandbox-session` IsolateBackend, `sandbox-sdk` embedded mode, `frontal-sandbox run`.
+- **Accept:** `frontal-sandbox run "echo hi | cat > /a && cat /a"` works; `node -e` and a `.ts` script run against the VFS; cold start < 5 ms from warm pool in `bench/`; 200+ shell conformance cases pass.
 
 ### M2: WASM tools + Node compat + trace (weeks 6-9)
 
@@ -372,7 +372,7 @@ Rule: justify every new dependency in the PR description; prefer well-maintained
 
 ### M6: Developer experience (ongoing)
 
-- Interactive PTY shell, `sandbox replay`, VS Code/MCP server exposing `exec` and `fs` as tools, docs site, examples, templates (snapshot images like "node-20", "python-3.12").
+- Interactive PTY shell, `frontal-sandbox replay`, VS Code/MCP server exposing `exec` and `fs` as tools, docs site, examples, templates (snapshot images like "node-20", "python-3.12").
 
 ## 10. Observability and operations
 
@@ -424,12 +424,12 @@ This section records what the code does today against the plan above. Update it 
 - **Isolate tier, shell, and VFS (M1 part):** overlay VFS with commit to a Merkle tree and quotas. Builtin shell with pipes, redirects, and variables. Runs over the VFS in process.
 - **Sessions:** create, exec, file read, write, and delete, snapshot, fork, sleep, and wake (ADRs 0004, 0006).
 - **Durable state (§4.15, §4.8):** `serve --data-dir` keeps keys (as digests), snapshots, and every session with its checkpoint: files and working directory. The environment is kept in memory only, because its values are often secrets. Live sessions come back running after a restart, and sleeping sessions wait for a wake (ADRs 0008, 0010).
-- **Traces (§4.12):** commands are recorded per session and served as JSON Lines. `sandbox replay` re-runs a trace and reports divergences (ADRs 0007, 0009). File writes are not recorded yet, which is the M2 requirement "trace shows every file change".
+- **Traces (§4.12):** commands are recorded per session and served as JSON Lines. `frontal-sandbox replay` re-runs a trace and reports divergences (ADRs 0007, 0009). File writes are not recorded yet, which is the M2 requirement "trace shows every file change".
 - **Watch (§4.4):** the VFS delivers change events for a path, with an overflow signal (ADR 0005).
 - **API keys and limits (§4.15):** per-key session and snapshot limits, owner-only access, and keys stored as digests.
 - **CLI and SDKs (§4.16):** `run`, `shell`, `replay`, `bench`, `serve`, `snapshot`, and `fork`. TypeScript, Python, and Rust clients cover sessions, exec, snapshots, sleep, and wake.
 - **Security scanning:** CodeQL uploads results to code scanning. Dependabot alerts are fixed. Secret scanning and push protection are enabled.
-- **Releases:** `v0.1.0` and `v0.1.1` publish CLI binaries for five platforms, and an npm wrapper that runs the matching binary (`@frontal-labs/sandbox-cli`).
+- **Releases:** `v0.1.0` and `v0.1.1` publish CLI binaries for five platforms, and an npm wrapper that runs the matching binary (`@frontal-labs/frontal-sandbox`).
 
 ### Open, and planned in the milestones above
 
@@ -443,4 +443,4 @@ This section records what the code does today against the plan above. Update it 
 
 ### Blocked on the operator
 
-- **Package visibility:** the GHCR SDK packages (`sandbox-sdk-ts`, `-py`, `-rs`) and the npm packages (`@frontal-labs/sandbox-cli` and its platform packages) are published as `internal`. GitHub provides no API or GraphQL mutation for changing organization package visibility, so an organization owner must change it in the web UI before anonymous pulls and installs work.
+- **Package visibility:** the GHCR SDK packages (`sandbox-sdk-ts`, `-py`, `-rs`) and the npm packages (`@frontal-labs/frontal-sandbox` and its platform packages) are published as `internal`. GitHub provides no API or GraphQL mutation for changing organization package visibility, so an organization owner must change it in the web UI before anonymous pulls and installs work.

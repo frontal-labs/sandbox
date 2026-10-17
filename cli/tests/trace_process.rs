@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 fn sandbox() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_sandbox"))
+    Command::new(env!("CARGO_BIN_EXE_frontal-sandbox"))
 }
 
 fn scratch(name: &str) -> PathBuf {

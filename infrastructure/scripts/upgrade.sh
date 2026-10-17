@@ -32,7 +32,7 @@ echo "upgrade: stop $UNIT"
 systemctl stop "$UNIT"
 
 echo "upgrade: install binary"
-install -m 0755 "$BINARY" /usr/local/bin/sandbox
+install -m 0755 "$BINARY" /usr/local/bin/frontal-sandbox
 
 echo "upgrade: start $UNIT"
 systemctl start "$UNIT"

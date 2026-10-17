@@ -1,4 +1,4 @@
-# sandbox-sdk
+# @frontal-labs/sandbox-sdk
 
 ## 0.1.0
 

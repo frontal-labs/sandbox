@@ -13,7 +13,7 @@ const VERSION: &str = match option_env!("SANDBOX_VERSION") {
 };
 
 #[derive(Parser)]
-#[command(name = "sandbox", version = VERSION, about = "Frontal Sandbox CLI")]
+#[command(name = "frontal-sandbox", version = VERSION, about = "Frontal Sandbox CLI")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn replay_refuses_a_missing_trace_as_invalid_argument() {
-        let replay = Cli::try_parse_from(["sandbox", "replay", "no-such-trace.jsonl"]).unwrap();
+        let replay = Cli::try_parse_from(["frontal-sandbox", "replay", "no-such-trace.jsonl"]).unwrap();
         assert_eq!(
             replay.execute().unwrap_err().code,
             sandbox_types::ErrorCode::InvalidArgument
@@ -358,16 +358,16 @@ mod tests {
 
     #[test]
     fn run_returns_the_script_exit_code() {
-        let ok = Cli::try_parse_from(["sandbox", "run", "true"]).unwrap();
+        let ok = Cli::try_parse_from(["frontal-sandbox", "run", "true"]).unwrap();
         assert_eq!(ok.execute().unwrap(), 0);
 
-        let failed = Cli::try_parse_from(["sandbox", "run", "false"]).unwrap();
+        let failed = Cli::try_parse_from(["frontal-sandbox", "run", "false"]).unwrap();
         assert_eq!(failed.execute().unwrap(), 1);
     }
 
     #[test]
     fn run_reports_syntax_errors() {
-        let cli = Cli::try_parse_from(["sandbox", "run", "echo", "'unterminated"]).unwrap();
+        let cli = Cli::try_parse_from(["frontal-sandbox", "run", "echo", "'unterminated"]).unwrap();
         assert_eq!(
             cli.execute().unwrap_err().code,
             sandbox_types::ErrorCode::ShellError
