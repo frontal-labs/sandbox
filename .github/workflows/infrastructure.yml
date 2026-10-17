@@ -25,21 +25,24 @@ jobs:
         with:
           tofu_version: "1.8"
 
+      - name: Install schema validation dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-jsonschema
+
       - name: Validate TOML examples against JSON schemas
         run: |
           python3 - <<'EOF'
-          import json, tomllib, glob, sys
-          try:
-              import jsonschema
-          except ImportError:
-              import subprocess, sys
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "jsonschema"])
-              import jsonschema
+          import json, tomllib, glob
+          import jsonschema
+          # Each example is one environment with a table per component. Validate
+          # each table against that component's schema (the file names differ).
+          COMPONENTS = ["server", "scheduler", "worker"]
           for path in sorted(glob.glob("infrastructure/config/examples/*.toml")):
-              name = path.split("/")[-1].removesuffix(".toml")
-              schema = json.load(open(f"infrastructure/config/schema/{name}.schema.json"))
               data = tomllib.load(open(path, "rb"))
-              jsonschema.validate(data, schema)
+              for component in COMPONENTS:
+                  if component not in data:
+                      continue
+                  schema = json.load(open(f"infrastructure/config/schema/{component}.schema.json"))
+                  jsonschema.validate(data[component], schema)
               print(f"OK {path}")
           EOF
 

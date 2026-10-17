@@ -28,13 +28,18 @@ jobs:
       - name: Validate TOML examples against schemas
         run: |
           python3 - <<'EOF'
-          import json, tomllib, glob, sys
+          import json, tomllib, glob
           import jsonschema
-          for path in glob.glob("infrastructure/config/examples/*.toml"):
-              name = path.split("/")[-1].replace(".toml", "")
-              schema = json.load(open(f"infrastructure/config/schema/{name}.schema.json"))
+          # Each example is one environment with a table per component. Validate
+          # each table against that component's schema (the file names differ).
+          COMPONENTS = ["server", "scheduler", "worker"]
+          for path in sorted(glob.glob("infrastructure/config/examples/*.toml")):
               data = tomllib.load(open(path, "rb"))
-              jsonschema.validate(data, schema)
+              for component in COMPONENTS:
+                  if component not in data:
+                      continue
+                  schema = json.load(open(f"infrastructure/config/schema/{component}.schema.json"))
+                  jsonschema.validate(data[component], schema)
               print(f"OK {path}")
           EOF
 
