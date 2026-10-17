@@ -15,7 +15,7 @@ test --flaky_test_attempts=3
 test --keep_going
 
 # Platform configuration - use x86_64 for Intel Mac
-build --platforms=//:x86_64_apple_darwin
+build --platforms=//bazel/platforms:x86_64_apple_darwin
 
 # Release configuration
 build:release --compilation_mode=opt
@@ -41,6 +41,13 @@ query --order_output=no
 # Test configuration
 test --test_summary=detailed
 test --noverbose_failures
+
+# Shared settings live in bazel/config. try-import skips a missing file, so
+# a fresh checkout still builds. Per-machine settings go in user.bazelrc, which
+# is git-ignored.
+try-import %workspace%/bazel/config/ci.bazelrc
+try-import %workspace%/bazel/config/remote-cache.bazelrc
+try-import %workspace%/bazel/config/user.bazelrc
 
 # Coverage
 coverage --combined_report=lcov

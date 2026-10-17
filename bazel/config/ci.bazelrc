@@ -1,0 +1,18 @@
+# =============================================================================
+# CI defaults (Buildkite)
+# =============================================================================
+# Applied by bazel/tools/buildkite/ci.sh through --config=ci. Keep them out
+# of the default build so local runs keep their interactive output.
+# =============================================================================
+
+# Plain logs. A CI log viewer shows no cursor, so progress bars become noise.
+build:ci --color=no
+build:ci --curses=no
+build:ci --noshow_progress
+
+# Print the failing action's full command when something breaks. The log is
+# then enough to reproduce the failure locally.
+build:ci --verbose_failures
+
+test:ci --test_output=errors
+test:ci --test_summary=short

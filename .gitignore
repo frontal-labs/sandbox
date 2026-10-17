@@ -27,3 +27,6 @@ __pycache__/
 
 # Packed SDK artifacts from scripts/release
 /release/
+
+# Per-machine Bazel settings (see bazel/config/user.bazelrc.example)
+bazel/config/user.bazelrc

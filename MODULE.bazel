@@ -60,4 +60,4 @@ use_repo(rust, "rust_toolchains")
 use_repo(crate, "crates")
 # The repo builds for the x86_64 Mac platform in .bazelrc. Registering it as an
 # execution platform lets rules_rust tests resolve their test toolchain on it.
-register_execution_platforms("//:x86_64_apple_darwin")
+register_execution_platforms("//bazel/platforms:x86_64_apple_darwin")

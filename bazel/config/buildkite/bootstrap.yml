@@ -1,0 +1,11 @@
+# =============================================================================
+# Bootstrap pipeline
+# =============================================================================
+# Point the Buildkite pipeline's "Steps" setting at this file, or commit the
+# same content as .buildkite/pipeline.yml. It only uploads bazel/config/buildkite/pipeline.yml,
+# so the real pipeline stays in this directory.
+# =============================================================================
+
+steps:
+  - label: ":pipeline: upload bazel pipeline"
+    command: buildkite-agent pipeline upload bazel/config/buildkite/pipeline.yml

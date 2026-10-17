@@ -1,0 +1,28 @@
+# =============================================================================
+# Remote cache (Buildbarn)
+# =============================================================================
+# Activate with --config=remote-cache. The endpoint is deliberately not set
+# here, so one checkout can use a laptop cache and a CI cache. Pass it on the
+# command line, where it overrides the default below:
+#
+#   bazel build --config=remote-cache --remote_cache=grpc://cache.example:8980 //cli:sandbox
+#
+# The default targets the local stack in bazel/tools/buildbarn (docker compose).
+#
+# This config is cache-only. Remote execution is not configured, because the
+# toolchains here target x86_64-apple-darwin and Buildbarn workers run Linux.
+# See bazel/README.md.
+# =============================================================================
+
+build:remote-cache --remote_cache=grpc://localhost:8980
+
+# Upload what this machine built, so the next run on any machine can reuse it.
+build:remote-cache --remote_upload_local_results=true
+
+# Seconds before one remote call is abandoned, so a hung connection cannot
+# stall the build.
+build:remote-cache --remote_timeout=60
+
+# Download only the outputs the build needs, not every intermediate file.
+# This cuts transfer time on cache hits.
+build:remote-cache --remote_download_minimal
