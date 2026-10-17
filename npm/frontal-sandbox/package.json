@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "repository": "https://github.com/frontal-labs/sandbox",
   "bin": {
-    "sandbox": "bin/sandbox.js"
+    "sandbox": "bin/frontal-sandbox.js"
   },
   "files": [
     "bin"
