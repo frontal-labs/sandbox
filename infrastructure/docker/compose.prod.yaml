@@ -1,0 +1,70 @@
+# Production compose overlay.
+#
+# Extends docker/compose.yaml with TLS, rate limiting, metrics, and a
+# reverse proxy. Deploy with:
+#
+#   docker compose -f docker/compose.yaml -f infrastructure/docker/compose.prod.yaml up -d
+#
+# This overlay is NOT a substitute for the Kubernetes deployment (M5) on
+# multi-node clusters; it is a single-node production-ish stack.
+
+name: frontal-sandbox-prod
+
+services:
+  sandbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        RUST_VERSION: ${RUST_VERSION:-1.95}
+        DEBIAN_SUITE: ${DEBIAN_SUITE:-bookworm}
+    image: ${SANDBOX_IMAGE:-frontal-sandbox:prod}
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    ports:
+      - "${SANDBOX_HOST_BIND:-0.0.0.0}:${SANDBOX_PORT:-8080}:8080"
+      - "${METRICS_HOST_BIND:-127.0.0.1}:${METRICS_PORT:-9090}:9090"
+
+    environment:
+      SANDBOX_CONFIG: /etc/sandbox/config.toml
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+
+    volumes:
+      - sandbox-state:/var/lib/sandbox
+      - ./config:/etc/sandbox:ro
+      - sandbox-tls:/etc/sandbox/tls:ro
+
+    command: ["serve", "--config", "/etc/sandbox/config.toml"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: ${SANDBOX_PIDS_LIMIT:-512}
+    mem_limit: ${SANDBOX_MEM_LIMIT:-8g}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/openapi.json"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  sandbox-state:
+    name: ${SANDBOX_STATE_VOLUME:-frontal-sandbox-state-prod}
+  sandbox-tls:
+    name: ${SANDBOX_TLS_VOLUME:-frontal-sandbox-tls-prod}
