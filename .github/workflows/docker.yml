@@ -1,0 +1,148 @@
+name: Docker image
+
+on:
+  # No paths filter on push: a v* tag must always publish. Master pushes rebuild
+  # from the GHA layer cache, which keeps that cheap.
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+    paths:
+      - "docker/**"
+      - "cli/**"
+      - "crates/**"
+      - "sdks/rust/**"
+      - "proto/**"
+      - "benchmarks/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. The publish job asks for the packages scope it needs.
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/frontal-sandbox
+
+jobs:
+  build:
+    name: Build and probe the image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Rust build fills the default runner disk, as in the ci.yml jobs.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android && df -h /
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: frontal-sandbox:ci
+          # GitHub Actions cache keeps the layers and the cargo cache mounts
+          # between runs on the same branch.
+          cache-from: type=gha,scope=docker-image
+          cache-to: type=gha,scope=docker-image,mode=max
+
+      # Probe the image the way compose runs it: read-only root, dropped
+      # capabilities, no-new-privileges, and a state volume for the durable mode.
+      - name: Start the container
+        run: |
+          docker volume create sandbox-ci-state
+          docker run -d --name sandbox-ci \
+            --read-only --tmpfs /tmp:size=256m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            -p 127.0.0.1:8080:8080 \
+            -v sandbox-ci-state:/var/lib/sandbox \
+            frontal-sandbox:ci
+
+      - name: Wait for the health check
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' sandbox-ci)
+            if [ "$status" = "healthy" ]; then
+              echo "container healthy"
+              exit 0
+            fi
+            if [ "$status" = "unhealthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+          echo "::error::container did not become healthy (status: $status)"
+          docker logs sandbox-ci
+          exit 1
+
+      - name: Check the auth boundary
+        run: |
+          # /v1/openapi.json is public. Every other /v1 route must refuse a
+          # request with no key.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v1/openapi.json)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' -d '{}' \
+            http://127.0.0.1:8080/v1/sessions)" = "401"
+
+      - name: Server log
+        if: always()
+        run: docker logs sandbox-ci || true
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f sandbox-ci || true
+
+  publish:
+    name: Publish to GHCR
+    # Tags only. A branch push or a PR is built and probed, but not published.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android && df -h /
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=docker-image
+          cache-to: type=gha,scope=docker-image,mode=max

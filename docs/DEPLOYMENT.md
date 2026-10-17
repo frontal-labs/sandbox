@@ -25,7 +25,11 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 
 ### Server
 
-`crates/sandbox-server` defines routes in `src/api.rs`, and every `/v1` route requires a valid API key. Session, exec, and filesystem handlers run against in-memory sessions. Snapshot and fork answer `501 Not Implemented`. There is no server `main` in the repository, no key-provisioning path, no config file loader, no health endpoint, and no metrics endpoint. Do not expose a server built from this code.
+`crates/sandbox-server` defines routes in `src/api.rs`, and every `/v1` route except `/v1/openapi.json` requires a valid API key. The server runs through the CLI: `sandbox serve --addr <addr> [--data-dir <dir>]` (`cli/src/commands.rs`). With `--data-dir`, keys, snapshots, and sleeping sessions persist across restarts. Without it, state is in memory and a new key is printed on each start. The first durable start prints one API key to stderr. There is no config file loader, no separate health endpoint (`/v1/openapi.json` serves as the liveness probe), and no metrics endpoint. Do not expose the server to untrusted networks: it has no TLS and no rate limiting.
+
+### Container image
+
+`docker/` holds a container setup for local and development use: a two-stage `Dockerfile` (Rust 1.95 builder, `debian:bookworm-slim` runtime, non-root, tini), `compose.yaml` with a named state volume, a loopback-only port, a health check, and hardening, and `smoke-test.sh`, which checks health, auth, session creation, and restart persistence. See [docker/README.md](../docker/README.md). The image is not a production deployment: it has no TLS or rate limiting, and it needs network access at build time to fetch the prebuilt V8 archive used by `deno_core`.
 
 ### Continuous integration and releases
 
@@ -62,7 +66,7 @@ These are the targets from PLAN.md. Versions are not pinned in the repository.
 
 ## Planned: single node
 
-PLAN.md section 10 calls for a single static binary with a systemd unit, a container image, and Terraform for cloud hosts. None of these exist. Config schema, the worker config file, and the admin CLI are not designed yet.
+PLAN.md section 10 calls for a single static binary with a systemd unit, a container image, and Terraform for cloud hosts. A local container image exists (see [Container image](#container-image)). The systemd unit and Terraform do not exist. Config schema, the worker config file, and the admin CLI are not designed yet.
 
 ## Planned: clustered
 

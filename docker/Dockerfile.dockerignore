@@ -1,0 +1,65 @@
+# Build-context exclusions for docker/Dockerfile.
+# BuildKit reads this file automatically because it sits next to the Dockerfile.
+# Keep every Cargo workspace member and build.rs input (proto/, benchmarks/,
+# sdks/rust, cli/) in the context, because cargo resolves the whole workspace.
+
+# Version control and local tooling
+.git
+.github
+.devcontainer
+.claude
+.cursor
+.vscode
+.zed
+.conductor
+.changeset
+.bazelrc
+.bazelignore
+.pre-commit-config.yaml
+.ruff_cache
+.DS_Store
+**/.DS_Store
+
+# Build outputs and caches
+target
+**/target
+node_modules
+**/node_modules
+dist
+**/dist
+release
+bazel-*
+**/*.tsbuildinfo
+**/__pycache__
+**/.pytest_cache
+
+# Bazel and non-Rust build inputs the image does not use
+BUILD.bazel
+**/BUILD.bazel
+MODULE.bazel
+MODULE.bazel.lock
+third_party
+homebrew
+npm
+bun.lock
+package.json
+package-lock.json
+tsconfig*.json
+turbo.json
+vitest.config.ts
+biome.json
+bunfig.toml
+
+# Secrets and local environment. Never send these to the daemon.
+.env
+.env.*
+!.env.example
+docker/.env
+**/*.pem
+**/*.key
+
+# Documentation and this directory's own files
+docs
+*.md
+!README.md
+docker
