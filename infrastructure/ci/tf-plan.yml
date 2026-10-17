@@ -1,0 +1,57 @@
+name: infrastructure
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "infrastructure/**"
+  pull_request:
+    branches: [master]
+    paths:
+      - "infrastructure/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate infrastructure
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.8"
+
+      - name: Validate TOML examples against schemas
+        run: |
+          python3 - <<'EOF'
+          import json, tomllib, glob, sys
+          import jsonschema
+          for path in glob.glob("infrastructure/config/examples/*.toml"):
+              name = path.split("/")[-1].replace(".toml", "")
+              schema = json.load(open(f"infrastructure/config/schema/{name}.schema.json"))
+              data = tomllib.load(open(path, "rb"))
+              jsonschema.validate(data, schema)
+              print(f"OK {path}")
+          EOF
+
+      - name: Lint shell scripts
+        run: |
+          shellcheck infrastructure/scripts/*.sh
+
+      - name: Terraform/OpenTofu init + validate
+        working-directory: infrastructure/terraform
+        run: |
+          tofu init -backend=false
+          tofu validate
+
+      - name: Kubernetes manifest lint (kubeconform)
+        run: |
+          if command -v kubeconform >/dev/null 2>&1; then
+            kubeconform infrastructure/kubernetes/manifests.yaml
+          else
+            echo "kubeconform not installed; skipping manifest lint"
+          fi
