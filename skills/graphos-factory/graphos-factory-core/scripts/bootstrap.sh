@@ -85,7 +85,6 @@ TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 # archive, 135 s in all.
 CURL_API=(--proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 15)
 CURL_GET=(--proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 90)
-
 installed_version() {
   if [ -x "$BIN" ]; then "$BIN" version 2>/dev/null | sed -n 's/^[a-z][a-z0-9-]* \([0-9][^ ]*\).*/\1/p'; fi
   true

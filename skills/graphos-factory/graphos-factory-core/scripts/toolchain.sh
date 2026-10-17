@@ -91,8 +91,7 @@ if have_rover; then
   echo "rover $ROVER_VERSION already installed"
 else
   echo "installing rover $ROVER_VERSION"
-  curl -fsSL --proto '=https' --proto-redir '=https' "https://rover.apollo.dev/nix/v${ROVER_VERSION}" | sh -s -- --force
-fi
+  curl -fsSL --proto '=https' --proto-redir '=https' "https://rover.apollo.dev/nix/v${ROVER_VERSION}" | sh -s -- --force  curl -fsSL "https://rover.apollo.dev/nix/v${ROVER_VERSION}" | sh -s -- --forcefi
 
 # What the user's missing ELv2 acceptance held back, explained once at the end.
 held=""
@@ -125,8 +124,7 @@ else
   echo "caching Apollo Router $ROUTER_VERSION ($platform)"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL --proto '=https' --proto-redir '=https' "https://github.com/apollographql/router/releases/download/v${ROUTER_VERSION}/router-v${ROUTER_VERSION}-${platform}.tar.gz" \
-    | tar xzf - -C "$tmp" --strip-components=1 dist/router
+  curl -fsSL --proto '=https' --proto-redir '=https' "https://github.com/apollographql/router/releases/download/v${ROUTER_VERSION}/router-v${ROUTER_VERSION}-${platform}.tar.gz" \  curl -fsSL "https://github.com/apollographql/router/releases/download/v${ROUTER_VERSION}/router-v${ROUTER_VERSION}-${platform}.tar.gz" \    | tar xzf - -C "$tmp" --strip-components=1 dist/router
   mv "$tmp/router" "$ROUTER" && chmod +x "$ROUTER"
 fi
 
@@ -134,8 +132,7 @@ if have_wiremock; then
   echo "WireMock $WIREMOCK_VERSION already cached"
 else
   echo "caching WireMock $WIREMOCK_VERSION"
-  curl -fsSL --proto '=https' --proto-redir '=https' "https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/${WIREMOCK_VERSION}/wiremock-standalone-${WIREMOCK_VERSION}.jar" \
-    -o "$WIREMOCK_JAR"
+  curl -fsSL --proto '=https' --proto-redir '=https' "https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/${WIREMOCK_VERSION}/wiremock-standalone-${WIREMOCK_VERSION}.jar" \  curl -fsSL "https://repo1.maven.org/maven2/org/wiremock/wiremock-standalone/${WIREMOCK_VERSION}/wiremock-standalone-${WIREMOCK_VERSION}.jar" \    -o "$WIREMOCK_JAR"
 fi
 
 note=""
