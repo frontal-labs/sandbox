@@ -107,7 +107,7 @@
   },
   "overrides": [
     {
-      "includes": ["packages/sdk-ts/**"],
+      "includes": ["sdks/typescript/**"],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
     },
     {

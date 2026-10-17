@@ -1,0 +1,125 @@
+{
+  "$schema": "https://ultracite.dev/schemas/0.1.0/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "master"
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["sdks/typescript/src/**/*.ts", "sdks/typescript/tests/**/*.ts"],
+    "excludes": [
+      "node_modules",
+      "dist",
+      "out",
+      ".next",
+      ".source",
+      ".turbo",
+      ".vercel",
+      "coverage",
+      "target",
+      "*.gen.ts",
+      "next-env.d.ts"
+    ]
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": { "organizeImports": "on" }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        "noBannedTypes": "error",
+        "noExtraBooleanCast": "error",
+        "noUselessCatch": "error",
+        "noUselessConstructor": "error",
+        "noUselessLoneBlockStatements": "error",
+        "noUselessRename": "error",
+        "noUselessSwitchCase": "error",
+        "noUselessTernary": "error",
+        "noVoid": "error",
+        "useFlatMap": "error",
+        "useLiteralKeys": "error",
+        "useOptionalChain": "error",
+        "useSimplifiedLogicExpression": "error"
+      },
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error",
+        "noUnusedFunctionParameters": "error",
+        "noPrecisionLoss": "error",
+        "useExhaustiveDependencies": "warn"
+      },
+      "performance": {
+        "noAccumulatingSpread": "error",
+        "noDelete": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "warn",
+        "noParameterAssign": "error",
+        "useConst": "error",
+        "useTemplate": "error",
+        "useShorthandAssign": "error",
+        "useEnumInitializers": "error",
+        "useNodejsImportProtocol": "error",
+        "useNumberNamespace": "error",
+        "useAsConstAssertion": "error",
+        "useDefaultParameterLast": "error"
+      },
+      "suspicious": {
+        "noConsole": "warn",
+        "noDebugger": "error",
+        "noDoubleEquals": "error",
+        "noExplicitAny": "error",
+        "noArrayIndexKey": "error",
+        "useAwait": "warn",
+        "useDefaultSwitchClauseLast": "error",
+        "noConfusingVoidType": "error"
+      },
+      "typescript": {
+        "noExplicitAny": "error",
+        "noUnusedTypeParameters": "error",
+        "noUnusedTypeArguments": "error",
+        "preferInterface": "warn",
+        "preferTypeAlias": "warn",
+        "consistentTypeAssertions": "error",
+        "noDuplicateTypeArguments": "error",
+        "noDuplicateTypeParameters": "error"
+      }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all",
+      "semicolons": "asNeeded",
+      "arrowParentheses": "always",
+      "bracketSameLine": false,
+      "bracketSpacing": true
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["sdks/typescript/tests/**/*.ts", "**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": { "noNonNullAssertion": "off" },
+          "suspicious": { "noExplicitAny": "off", "noConsole": "off" }
+        }
+      }
+    }
+  ]
+}
