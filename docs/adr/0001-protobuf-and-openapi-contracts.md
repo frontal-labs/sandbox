@@ -7,7 +7,7 @@ Accepted
 2026-10-14
 
 ## Context
-The sandbox had no formal wire contract. The scheduler-to-worker channel was a JSON-lines protocol on a child process's stdout, which shared a stream with guest output. The REST API had no spec. PLAN.md section 4.13 calls for gRPC between scheduler and worker, section 4.10 for protobuf frames to the guest agent, and section 4.15 for a generated OpenAPI spec.
+The sandbox had no formal wire contract. The scheduler-to-worker channel was a JSON-lines protocol on a child process's stdout, which shared a stream with guest output. The REST API had no spec. plans/PLAN.md section 4.13 calls for gRPC between scheduler and worker, section 4.10 for protobuf frames to the guest agent, and section 4.15 for a generated OpenAPI spec.
 
 ## Decision
 - Internal and gRPC contracts are protobuf, in `proto/sandbox/v1/{types,api,worker,guest}/`, compiled by `crates/sandbox-proto`. `buf` lints them.

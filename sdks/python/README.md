@@ -63,7 +63,7 @@ Errors are returned as values, not raised. Check each result with `is_sandbox_er
 - `server_path` on `EmbeddedSandboxConfig` is accepted but not used.
 - `exec(command)` runs `sh -c <command>` through the remote `Client`, so it needs a running server.
 
-Local in-process execution is planned. See `PLAN.md`.
+Local in-process execution is planned. See `plans/PLAN.md`.
 
 ```python
 import asyncio

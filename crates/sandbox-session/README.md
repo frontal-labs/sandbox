@@ -23,4 +23,4 @@ Re-exported from `src/lib.rs`: `IsolateBackend`, `Session`, `restore`.
 
 ## Spec
 
-See [PLAN.md](../../PLAN.md) section 4.8. The VM tier and the streaming `ExecHandle` in the plan are not implemented.
+See [plans/PLAN.md](../../plans/PLAN.md) section 4.8. The VM tier and the streaming `ExecHandle` in the plan are not implemented.

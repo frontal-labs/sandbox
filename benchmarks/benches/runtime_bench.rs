@@ -1,5 +1,5 @@
 //! V8 script benchmarks. Each run creates a fresh isolate (no pool yet), so
-//! these measure cold start plus execution. PLAN.md section 6 targets a warm
+//! these measure cold start plus execution. plans/PLAN.md section 6 targets a warm
 //! pool at < 5 ms p50; that path does not exist yet.
 
 use criterion::{criterion_group, criterion_main, Criterion};

@@ -35,4 +35,4 @@ Planned properties:
 
 ## Spec
 
-See [PLAN.md](../../PLAN.md) section 4.11. Performance target: promotion under 400 ms.
+See [plans/PLAN.md](../../plans/PLAN.md) section 4.11. Performance target: promotion under 400 ms.

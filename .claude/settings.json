@@ -49,7 +49,7 @@
     },
     "importantPaths": {
       "crates": "./crates/",
-      "plan": "./PLAN.md",
+      "plan": "./plans/PLAN.md",
       "docs": "./README.md"
     }
   },

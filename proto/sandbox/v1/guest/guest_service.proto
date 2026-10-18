@@ -6,7 +6,7 @@ import "google/protobuf/empty.proto";
 import "sandbox/v1/types/exec.proto";
 import "sandbox/v1/types/ids.proto";
 
-// Host <-> in-VM agent (PLAN.md section 4.10). Schema and framing only:
+// Host <-> in-VM agent (plans/PLAN.md section 4.10). Schema and framing only:
 // the VM tier cannot run in this repository's current test environment.
 service GuestService {
   rpc Ping(google.protobuf.Empty) returns (PingResponse);

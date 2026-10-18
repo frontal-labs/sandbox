@@ -33,4 +33,4 @@ use sandbox_types::{SessionConfig, TenantId, TierPreference};
 let config = SessionConfig::new(TenantId::new()).with_tier(TierPreference::Auto);
 ```
 
-See `PLAN.md` section 4.1 for the target spec.
+See `plans/PLAN.md` section 4.1 for the target spec.

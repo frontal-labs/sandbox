@@ -1,6 +1,6 @@
 //! Session micro-benchmarks for the isolate tier.
 //!
-//! PLAN.md section 6 targets: isolate session from a warm pool < 5 ms p50.
+//! plans/PLAN.md section 6 targets: isolate session from a warm pool < 5 ms p50.
 //! This measures cold creation, since there is no pool yet.
 
 use criterion::{criterion_group, criterion_main, Criterion};

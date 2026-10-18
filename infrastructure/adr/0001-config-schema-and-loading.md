@@ -36,5 +36,5 @@ machine-checkable schema.
 - Pure CLI flags: insufficient for complex nested config (pools, resources, tier2).
 
 ## References
-- PLAN.md section 4 (configuration design)
+- plans/PLAN.md section 4 (configuration design)
 - `infrastructure/config/`

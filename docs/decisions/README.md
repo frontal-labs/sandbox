@@ -39,7 +39,7 @@ No decision records exist yet. Only this README is present in
 
 ## When to Record
 
-- "Decide by benchmark" items from PLAN.md
+- "Decide by benchmark" items from plans/PLAN.md
 - Technology choices validated by measurement
 - Configuration tuning results
 - Trade-off analyses with data

@@ -1,7 +1,7 @@
 # Contributing to Frontal Sandbox
 
 Thank you for helping build Frontal Sandbox. The design and milestone
-acceptance criteria live in [PLAN.md](PLAN.md); changes should align with that
+acceptance criteria live in [plans/PLAN.md](plans/PLAN.md); changes should align with that
 document.
 
 ## Getting started
@@ -34,7 +34,7 @@ security-sensitive decisions, and add tests with each implementation milestone.
 Avoid adding ambient host access or coupling the SDK to a specific backend.
 
 Before opening a pull request, review the relevant acceptance criteria in
-`PLAN.md` and describe what was verified. Do not claim that checks were run when
+`plans/PLAN.md` and describe what was verified. Do not claim that checks were run when
 they were not.
 
 ## Reporting issues

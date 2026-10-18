@@ -48,4 +48,4 @@ Not compiled in this pass. Checked against `src/scheduler.rs` and `sandbox-types
 
 ## Spec
 
-See [PLAN.md](../../PLAN.md) section 4.14 and milestone M3. The `redb`-based `RedbMetaStore` and `SchedulerConfig` shown in earlier drafts of this README do not exist.
+See [plans/PLAN.md](../../plans/PLAN.md) section 4.14 and milestone M3. The `redb`-based `RedbMetaStore` and `SchedulerConfig` shown in earlier drafts of this README do not exist.

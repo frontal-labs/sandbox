@@ -1,4 +1,4 @@
-//! Length-prefixed frames for byte streams (the guest protocol, PLAN.md section 4.10).
+//! Length-prefixed frames for byte streams (the guest protocol, plans/PLAN.md section 4.10).
 //!
 //! A frame is a 4-byte big-endian length followed by that many payload bytes.
 //! The length is checked against [`MAX_FRAME_BYTES`] before any allocation, so a

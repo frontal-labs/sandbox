@@ -36,4 +36,4 @@ The PLAN describes length-prefixed frames over vsock with `Exec`, `Signal`, `Rea
 
 ## Spec
 
-See [PLAN.md](../../PLAN.md) section 4.10. Build and image integration (`tools/`, musl target) is not in this crate yet.
+See [plans/PLAN.md](../../plans/PLAN.md) section 4.10. Build and image integration (`tools/`, musl target) is not in this crate yet.

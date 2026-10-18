@@ -1,6 +1,6 @@
 # Security Model
 
-**Status: pre-alpha. Nothing in this repository is a security boundary yet.** The layers below describe the intended design from PLAN.md section 5. Each item is marked as:
+**Status: pre-alpha. Nothing in this repository is a security boundary yet.** The layers below describe the intended design from plans/PLAN.md section 5. Each item is marked as:
 
 - **Implemented**: code exists and is wired into a path that runs.
 - **Partial**: code exists, but it is not enforced or not reachable from the public API.
@@ -13,14 +13,14 @@ Do not run untrusted code on this codebase, and do not expose the server to untr
 These assumptions are explicit so they can be checked as the code changes.
 
 1. **Single-tenant development only today.** No tenant isolation is enforced. The `TenantId` field exists in `SessionConfig`, but nothing uses it for isolation.
-2. **Isolates are not a security boundary on their own.** PLAN.md invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, but without seccomp, cgroups, or namespaces. It isolates crashes, not hostile code.
+2. **Isolates are not a security boundary on their own.** plans/PLAN.md invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, but without seccomp, cgroups, or namespaces. It isolates crashes, not hostile code.
 3. **Untrusted code is assumed to attempt host access, network exfiltration, resource exhaustion, and sandbox escape.** Each layer below is designed against those attempts.
 4. **The host operating system and Firecracker/KVM are trusted** in the design. Tier 2 would rely on them; Tier 2 is not implemented.
 5. **Dependencies (V8 via `deno_core`, `wasmtime`) are trusted only after review and version pinning.** The workspace pins versions in `Cargo.toml`, but no CVE tracking or automated audit runs in CI.
 
 ## Defense in depth
 
-Layers, outermost first (PLAN.md section 5):
+Layers, outermost first (plans/PLAN.md section 5):
 
 | # | Layer | Status | Where |
 |---|-------|--------|-------|
@@ -72,7 +72,7 @@ Exec(tool)       Env(name)        Clock
 
 These are defects or gaps found while writing this page. Each one should be fixed or tracked before the operation is used.
 
-- **Ambient environment access.** Removed. The earlier `op_env_get`/`op_env_set` ops read and wrote the host process environment, which violated PLAN.md invariant 3. They were deleted rather than wired up. Any future host capability needs a policy check.
+- **Ambient environment access.** Removed. The earlier `op_env_get`/`op_env_set` ops read and wrote the host process environment, which violated plans/PLAN.md invariant 3. They were deleted rather than wired up. Any future host capability needs a policy check.
 - **Filesystem capabilities use the network check.** `check_fs_read` and `check_fs_write` in `crates/sandbox-policy/src/capability.rs` call `policy.check_http`. Filesystem access is not governed by the network policy.
 - **`Exec`, `Env`, and `Clock` always allow.** `check_capability` returns `true` for these.
 - **Wildcard host matching is loose.** In `crates/sandbox-types/src/policy.rs`, a pattern `*.example.com` matches any host ending in `example.com`, including `evilexample.com`, because there is no dot boundary. The second comparison, `host == &suffix[1..]`, compares against `xample.com`, which is wrong. Use a dot-anchored suffix match and test both cases.
@@ -87,7 +87,7 @@ Current state (types only):
 - `NetworkPolicy::allow_all()` disables the check. It is available to callers and is not restricted.
 - Helper policy sets for GitHub, npm, PyPI, and Docker are in `crates/sandbox-policy/src/network.rs`.
 
-Planned (PLAN.md section 4.7): an in-process HTTP client that is the only egress path, with pinned DNS, size and time limits, private and metadata range blocks, and request recording. None of this exists. `op_fetch` in `crates/sandbox-runtime/src/ops.rs` is a placeholder that returns an empty string.
+Planned (plans/PLAN.md section 4.7): an in-process HTTP client that is the only egress path, with pinned DNS, size and time limits, private and metadata range blocks, and request recording. None of this exists. `op_fetch` in `crates/sandbox-runtime/src/ops.rs` is a placeholder that returns an empty string.
 
 ### Secrets injection (planned)
 
@@ -101,7 +101,7 @@ Planned (PLAN.md section 4.7): an in-process HTTP client that is the only egress
 
 - `crates/sandbox-server/src/auth.rs`: keys are `sbx_<id>_<secret>` with 256-bit secrets from the OS RNG. Only a BLAKE3 digest of the secret is stored, and comparison uses `blake3::Hash` equality. Keys can be revoked by id.
 - `crates/sandbox-server/src/api.rs`: `require_api_key` is a `route_layer` on every `/v1` route. It returns 401 unless the bearer key validates.
-- Still planned (PLAN.md section 4.15): per-key scopes, quotas, key provisioning, and OIDC.
+- Still planned (plans/PLAN.md section 4.15): per-key scopes, quotas, key provisioning, and OIDC.
 - `crates/sandbox-server/src/middleware.rs` adds a request ID and logs requests. It does not authenticate them.
 - Settings the backend does not enforce are refused, not ignored. The crate has no server binary yet.
 
@@ -109,17 +109,17 @@ Planned (PLAN.md section 4.7): an in-process HTTP client that is the only egress
 
 - `crates/sandbox-types/src/event.rs` defines the event schema, including `PolicyDenied`, `NetRequest`, `ExecStarted`, and `FileChanged`.
 - Nothing emits these events yet. `PolicyDenied` has no emitter in the repository.
-- Planned: append-only JSONL per session with monotonic sequence numbers (PLAN.md section 4.12). The plan does not require tamper evidence, and the current design does not provide it. Do not describe the trace as tamper-evident.
+- Planned: append-only JSONL per session with monotonic sequence numbers (plans/PLAN.md section 4.12). The plan does not require tamper evidence, and the current design does not provide it. Do not describe the trace as tamper-evident.
 
 ## Dependency and supply-chain controls
 
 - Planned: `cargo-deny` (licenses and advisories) and `cargo-audit` in CI. Neither runs in `.github/workflows/ci.yml` or `pr-checks.yml`, and there is no `deny.toml` in the repository.
-- `unsafe` policy: allowed only in named modules with a `// SAFETY:` comment and a test (PLAN.md section 5). Not enforced by a lint in the repository.
-- `unwrap()`: PLAN.md section 11 forbids it outside tests and `main`. Not enforced by a lint in the repository.
+- `unsafe` policy: allowed only in named modules with a `// SAFETY:` comment and a test (plans/PLAN.md section 5). Not enforced by a lint in the repository.
+- `unwrap()`: plans/PLAN.md section 11 forbids it outside tests and `main`. Not enforced by a lint in the repository.
 
 ## Required before any public launch
 
-PLAN.md section 5 lists these. None are done.
+plans/PLAN.md section 5 lists these. None are done.
 
 - [ ] Threat model document (this page is not one)
 - [ ] External security review of the worker and VMM

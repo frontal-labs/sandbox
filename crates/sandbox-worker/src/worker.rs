@@ -7,7 +7,7 @@
 //! worker's stdout.
 //!
 //! This is process isolation only. Seccomp, cgroups, namespaces, and
-//! `PR_SET_NO_NEW_PRIVS` are not implemented; see PLAN.md section 4.13.
+//! `PR_SET_NO_NEW_PRIVS` are not implemented; see plans/PLAN.md section 4.13.
 
 use sandbox_proto::status::{from_status, to_status};
 use sandbox_proto::v1::types as pb;

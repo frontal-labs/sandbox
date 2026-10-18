@@ -7,7 +7,7 @@ Accepted
 2026-10-17
 
 ## Context
-Frontal Sandbox must run from a single laptop to a multi-node cluster. PLAN.md
+Frontal Sandbox must run from a single laptop to a multi-node cluster. plans/PLAN.md
 defines M3 (single node), M4 (cloud host with Tier 2), M5 (clustered). We need
 to decide which targets this infrastructure directory supports first and how
 they relate.
@@ -40,5 +40,5 @@ All targets share the same config schema (ADR 0001).
   hosts with KVM access for Tier 2, which serverless platforms do not provide.
 
 ## References
-- PLAN.md sections 4, 5, 6, 10
+- plans/PLAN.md sections 4, 5, 6, 10
 - docs/DEPLOYMENT.md

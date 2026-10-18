@@ -1,10 +1,10 @@
 # Performance Targets and Benchmarks
 
-**No performance result in this repository is verified.** There are no recorded benchmark results: `benchmarks/baselines/` is empty, and no document in the repo records measured numbers. The targets below are design goals from PLAN.md section 6. Do not read them as measured results or as claims that the system meets them. The benchmark suite compiles against crates that are mostly stubs, so its output does not yet measure the target paths.
+**No performance result in this repository is verified.** There are no recorded benchmark results: `benchmarks/baselines/` is empty, and no document in the repo records measured numbers. The targets below are design goals from plans/PLAN.md section 6. Do not read them as measured results or as claims that the system meets them. The benchmark suite compiles against crates that are mostly stubs, so its output does not yet measure the target paths.
 
 ## Targets
 
-Source: PLAN.md section 6. Milestone acceptance criteria are in PLAN.md section 9.
+Source: plans/PLAN.md section 6. Milestone acceptance criteria are in plans/PLAN.md section 9.
 
 | Metric | Target | Benchmark that would measure it | Status |
 |--------|--------|---------------------------------|--------|
@@ -18,7 +18,7 @@ Source: PLAN.md section 6. Milestone acceptance criteria are in PLAN.md section 
 | Idle sessions per 64 GB host | 10,000+ | `load` scenario `concurrent_sessions` | Scenario uses sleeps and is not a capacity test. |
 | Idle memory per sleeping session | 0 (on disk only) | none | Sleep releases the live session and keeps its root in server memory (ADR 0006). Nothing is written to disk, and no memory is measured. |
 
-Earlier drafts also listed p99 and capacity numbers that do not appear in PLAN.md section 6. They have been removed.
+Earlier drafts also listed p99 and capacity numbers that do not appear in plans/PLAN.md section 6. They have been removed.
 
 ## Benchmark suite
 
@@ -76,18 +76,18 @@ Standard tools apply once a benchmark runs: `cargo flamegraph`, `perf record`, a
 
 ## Planned optimizations
 
-These are design ideas from PLAN.md and earlier drafts. None are implemented, and none have measured effects.
+These are design ideas from plans/PLAN.md and earlier drafts. None are implemented, and none have measured effects.
 
-- **VFS**: mmap for CAS reads above 64 KiB; batched commits that rehash only dirty paths (PLAN.md section 4.3).
-- **CAS**: FastCDC chunking for files above 64 KiB (PLAN.md section 4.2). The code has a `chunk_if_large` flag and a `put_chunked` path, but no FastCDC implementation. Compression at zstd level 3 is in `crates/sandbox-cas/src/disk_store.rs`.
-- **Isolate**: startup snapshot pooled by bootstrap version; context recycling instead of isolate recreation (PLAN.md section 4.5).
-- **Promotion**: export cache keyed by VFS root hash; warm VM pool per image (PLAN.md sections 4.10 and 4.11).
+- **VFS**: mmap for CAS reads above 64 KiB; batched commits that rehash only dirty paths (plans/PLAN.md section 4.3).
+- **CAS**: FastCDC chunking for files above 64 KiB (plans/PLAN.md section 4.2). The code has a `chunk_if_large` flag and a `put_chunked` path, but no FastCDC implementation. Compression at zstd level 3 is in `crates/sandbox-cas/src/disk_store.rs`.
+- **Isolate**: startup snapshot pooled by bootstrap version; context recycling instead of isolate recreation (plans/PLAN.md section 4.5).
+- **Promotion**: export cache keyed by VFS root hash; warm VM pool per image (plans/PLAN.md sections 4.10 and 4.11).
 
 ## Performance testing checklist
 
 Pre-release checks that have not been done:
 
-- [ ] Each target above measured on recorded hardware, with results committed to `docs/decisions/` (PLAN.md section 11, item 8)
+- [ ] Each target above measured on recorded hardware, with results committed to `docs/decisions/` (plans/PLAN.md section 11, item 8)
 - [ ] Criterion suites run from a path the workspace can build
 - [ ] Baselines recorded in `benchmarks/baselines/`
 - [ ] Regression check verified to fail on a known regression

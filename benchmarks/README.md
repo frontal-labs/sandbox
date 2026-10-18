@@ -2,7 +2,7 @@
 
 This directory holds the Criterion micro-benchmarks and the `sandbox-load` end-to-end load driver.
 
-**Status:** the benchmarks are scaffolds. Most of the code they call is stubbed (see [ARCHITECTURE.md](../docs/ARCHITECTURE.md)), and no benchmark result has been recorded. `benchmarks/baselines/` is empty. Do not cite any number from this directory as a measurement. Targets are in [PERFORMANCE.md](../docs/PERFORMANCE.md) and PLAN.md section 6.
+**Status:** the benchmarks are scaffolds. Most of the code they call is stubbed (see [ARCHITECTURE.md](../docs/ARCHITECTURE.md)), and no benchmark result has been recorded. `benchmarks/baselines/` is empty. Do not cite any number from this directory as a measurement. Targets are in [PERFORMANCE.md](../docs/PERFORMANCE.md) and plans/PLAN.md section 6.
 
 ## Layout
 
@@ -27,7 +27,7 @@ benchmarks/
 
 | File | Criterion group(s) | Status |
 |------|--------------------|--------|
-| `benches/vfs_bench.rs` | `vfs`, `vfs_overlay` | Includes `read_4kb_cached` (target in PLAN.md section 6) |
+| `benches/vfs_bench.rs` | `vfs`, `vfs_overlay` | Includes `read_4kb_cached` (target in plans/PLAN.md section 6) |
 | `benches/cas_bench.rs` | `cas_mem`, `cas_disk` | Mem and disk store cases |
 | `benches/shell_bench.rs` | `shell_parser`, `shell_interpreter` | Builtin and pipeline cases; the parser is a stub around `brush-parser` |
 | `benches/runtime_bench.rs` | `runtime_startup`, `runtime_execution`, `runtime_ops` | Calls into `sandbox-runtime`, whose `execute_script` is unimplemented |
@@ -88,7 +88,7 @@ On master pushes the workflow copies results into `benchmarks/baselines/` on the
 1. Add `benches/<name>.rs` with a `criterion_group!` and `criterion_main!`.
 2. Add a `[[bench]]` entry with `harness = false` to `benchmarks/Cargo.toml`.
 3. Add a `rust_binary` target to `BUILD.bazel`, following the existing entries.
-4. Cite the matching target in PLAN.md section 6 in a comment. Do not add numbers you have not measured.
+4. Cite the matching target in plans/PLAN.md section 6 in a comment. Do not add numbers you have not measured.
 
 ### Load scenario
 
@@ -99,5 +99,5 @@ On master pushes the workflow copies results into `benchmarks/baselines/` on the
 ## Related documentation
 
 - [PERFORMANCE.md](../docs/PERFORMANCE.md): targets and status
-- [PLAN.md](../PLAN.md): full specification, section 6 for targets
+- [plans/PLAN.md](../plans/PLAN.md): full specification, section 6 for targets
 - [SECURITY_MODEL.md](../docs/SECURITY_MODEL.md): security status
