@@ -1,29 +1,29 @@
 {
   "scenario": "exec_throughput",
-  "duration_secs": 10.134247405,
+  "duration_secs": 10.181171712,
   "concurrency": 50,
-  "total_iterations": 16001162,
+  "total_iterations": 23120880,
   "total_errors": 0,
   "latencies": {
     "overall": {
-      "min": 431,
-      "max": 20939138,
-      "mean": 27569.02807214876,
+      "min": 340,
+      "max": 12353104,
+      "mean": 19122.87017176682,
       "percentiles": {
-        "90": 2443,
-        "50": 1853,
-        "99": 5308,
-        "95": 3004
+        "50": 1382,
+        "90": 1943,
+        "95": 2324,
+        "99": 3956
       },
-      "std_dev": 375558.0493733541,
-      "count": 16001162
+      "std_dev": 262137.74268403,
+      "count": 23120880
     }
   },
   "throughput": {
-    "overall": 1578919.6139128597
+    "overall": 2270944.9024171415
   },
   "error_rates": {
     "overall": 0.0
   },
-  "timestamp": "2026-10-18T09:56:01.620651765+00:00"
+  "timestamp": "2026-10-18T10:21:27.989016801+00:00"
 }
