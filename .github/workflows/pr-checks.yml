@@ -65,7 +65,7 @@ jobs:
         with:
           script: |
             const { execSync } = require('child_process')
-            const diff = execSync('git diff --stat origin/master...HEAD').toString()
+            const diff = execSync('git diff --stat origin/main...HEAD').toString()
             const lines = diff.trim().split('\n').pop()
             const match = lines?.match(/(\d+)/)
             const changes = match ? parseInt(match[1]) : 0

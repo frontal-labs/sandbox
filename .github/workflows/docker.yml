@@ -4,10 +4,10 @@ on:
   # No paths filter on push: a v* tag must always publish. Master pushes rebuild
   # from the GHA layer cache, which keeps that cheap.
   push:
-    branches: [master]
+    branches: [main]
     tags: ["v*"]
   pull_request:
-    branches: [master]
+    branches: [main]
     paths:
       - "docker/**"
       - "cli/**"

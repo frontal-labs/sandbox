@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Copies benchmark results into benchmarks/baselines and commits them to master.
+# Copies benchmark results into benchmarks/baselines and commits them to main.
 #
 #   scripts/bench/update_baselines.sh <results-prefix> <baseline-prefix> <name>...
 #
 # Results are read from <results-prefix><name>.json and written to
 # benchmarks/baselines/<baseline-prefix><name>.json (the prefix may be empty). A name without results is
 # skipped. The commit carries [skip ci], and a push made with GITHUB_TOKEN does
-# not start other workflows. The rebase lets two benchmark jobs update master in
+# not start other workflows. The rebase lets two benchmark jobs update main in
 # turn.
 set -euo pipefail
 
@@ -38,6 +38,6 @@ fi
 
 git add benchmarks/baselines
 git commit -q -m "chore(bench): update benchmark baselines [skip ci]"
-git pull -q --rebase origin master
-git push -q origin HEAD:master
-echo "pushed baseline update to master"
+git pull -q --rebase origin main
+git push -q origin HEAD:main
+echo "pushed baseline update to main"

@@ -2,9 +2,9 @@ name: Benchmarks
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
   schedule:
     # Run nightly at 2 AM UTC
@@ -147,15 +147,15 @@ jobs:
                   all_ok = False
           
           # Advisory until baselines are regenerated on CI hardware: committed
-          # baselines come from a different machine, so this gate fails on master too.
+          # baselines come from a different machine, so this gate fails on main too.
           if not all_ok:
               print("::warning::Benchmark regressions detected vs committed baselines (advisory)")
           else:
               print("\n✅ All benchmarks passed!")
           EOF
       
-      - name: Update baselines (on master only)
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+      - name: Update baselines (on main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: scripts/bench/update_baselines.sh bench_results_ '' vfs cas shell runtime wasm session
 
   bench-load:
@@ -274,8 +274,8 @@ jobs:
               print("\n✅ All load tests passed!")
           EOF
       
-      - name: Update load test baselines (on master only)
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+      - name: Update load test baselines (on main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: scripts/bench/update_baselines.sh load_results_ load_ concurrent throughput snapshot
 
   bench-full:
