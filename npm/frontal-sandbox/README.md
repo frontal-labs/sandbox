@@ -1,17 +1,17 @@
-# @frontal-labs/sandbox-cli
+# @frontal-labs/frontal-sandbox
 
-Command-line client for Frontal Sandbox. Installs the prebuilt `sandbox` binary for this platform.
+Command-line client for Frontal Sandbox. Installs the prebuilt `frontal-sandbox` binary for this platform.
 
 ## Install
 
 ```bash
-npm install --global @frontal-labs/sandbox-cli
+npm install --global @frontal-labs/frontal-sandbox
 ```
 
 Or from the monorepo root:
 
 ```bash
-npm install --workspace=@frontal-labs/sandbox-cli
+npm install --workspace=@frontal-labs/frontal-sandbox
 ```
 
 Requires Node.js >= 20.
@@ -19,14 +19,14 @@ Requires Node.js >= 20.
 ## Usage
 
 ```bash
-sandbox [command] [flags]
+frontal-sandbox [command] [flags]
 ```
 
-Run `sandbox --help` to see available commands.
+Run `frontal-sandbox --help` to see available commands.
 
 ## How it works
 
-This package is a thin launcher. `bin/sandbox.js` detects `process.platform` and `process.arch`, resolves the matching `@frontal-labs/sandbox-cli-<target>` platform package installed as an optional dependency, and spawns its bundled `sandbox` (or `sandbox.exe` on Windows) binary, forwarding all arguments.
+This package is a thin launcher. `bin/frontal-sandbox.js` detects `process.platform` and `process.arch`, resolves the matching `@frontal-labs/frontal-sandbox-<target>` platform package installed as an optional dependency, and spawns its bundled `frontal-sandbox` (or `frontal-sandbox.exe` on Windows) binary, forwarding all arguments.
 
 Supported targets:
 

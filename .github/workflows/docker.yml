@@ -142,6 +142,9 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
+          # The tag is the release version, so `sandbox --version` in the image matches it.
+          build-args: |
+            SANDBOX_VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=docker-image

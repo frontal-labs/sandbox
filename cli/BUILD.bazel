@@ -28,7 +28,7 @@ rust_library(
 )
 
 rust_binary(
-    name = "sandbox",
+    name = "frontal-sandbox",
     edition = "2021",
     srcs = ["src/main.rs"],
     deps = [
@@ -42,7 +42,7 @@ rust_binary(
     edition = "2021",
     srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
-        ":sandbox",
+        ":frontal-sandbox",
         "@crates//:tokio",
     ],
     testonly = True,

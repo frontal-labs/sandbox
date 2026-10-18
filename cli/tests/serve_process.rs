@@ -25,7 +25,7 @@ fn free_addr() -> String {
 /// closes what the test checks. The server prints the state directory after
 /// it starts listening, and a first run prints the key after that.
 fn start(dir: &Path, last: &str) -> (Server, Vec<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_sandbox"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_frontal-sandbox"))
         .args(["serve", "--addr", &free_addr(), "--data-dir"])
         .arg(dir)
         .stderr(Stdio::piped())

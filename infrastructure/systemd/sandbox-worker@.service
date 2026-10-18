@@ -19,7 +19,7 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 # Each instance serves one tenant; TENANT_ID is injected via drop-in or env.
 EnvironmentFile=-/etc/sandbox/worker-%i.env
-ExecStart=/usr/local/bin/sandbox worker --config /etc/sandbox/config.toml --tenant-id %i
+ExecStart=/usr/local/bin/frontal-sandbox worker --config /etc/sandbox/config.toml --tenant-id %i
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s

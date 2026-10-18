@@ -102,7 +102,7 @@ hdrhistogram = "7"
 indicatif = "0.17"
 csv = "1"
 sandbox-types = { path = "crates/sandbox-types" }
-sandbox-sdk = { path = "sdks/rust" }
+frontal-sandbox-sdk = { path = "sdks/rust" }
 
 [profile.release]
 lto = "thin"

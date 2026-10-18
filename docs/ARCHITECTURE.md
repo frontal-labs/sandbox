@@ -100,9 +100,9 @@ crates/
 └── sandbox-server      # HTTP API (axum)
 sdks/
 ├── rust/               # Crate `sandbox-sdk` (Rust client)
-├── typescript/         # npm `sandbox-sdk` (built with Bazel and Bun)
+├── typescript/         # npm `@frontal-labs/sandbox-sdk` (built with Bazel and Bun)
 └── python/             # Python package `sandbox_sdk`
-cli/                    # Crate `cli`, binary `sandbox`
+cli/                    # Crate `cli`, binary `frontal-sandbox`
 ```
 
 Dependency direction (PLAN.md section 11): `sandbox-types` and `sandbox-cas` at

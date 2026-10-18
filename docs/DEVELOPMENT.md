@@ -38,7 +38,7 @@ cargo test --workspace      # runs the tests that exist; see TESTING.md
 cargo run --bin sandbox -- --help
 ```
 
-The `sandbox` binary comes from the `cli` crate (`cli/Cargo.toml`). The crate
+The `frontal-sandbox` binary comes from the `cli` crate (`cli/Cargo.toml`). The crate
 name is `cli`, not `sandbox-cli`.
 
 ## Quick Start (TypeScript and Python)
@@ -84,10 +84,10 @@ sandbox/
 ├── Cargo.toml              # Cargo workspace root (18 members)
 ├── rust-toolchain.toml     # Rust 1.95
 ├── crates/                 # Rust crates sandbox-*
-├── cli/                    # Crate `cli`, binary `sandbox`
+├── cli/                    # Crate `cli`, binary `frontal-sandbox`
 ├── sdks/
 │   ├── rust/               # Crate `sandbox-sdk`
-│   ├── typescript/         # npm `sandbox-sdk` (Bun, Bazel, vitest)
+│   ├── typescript/         # npm `@frontal-labs/sandbox-sdk` (Bun, Bazel, vitest)
 │   └── python/             # Package `sandbox_sdk` (pyproject.toml)
 ├── benchmarks/             # Benchmark sources and load tests (not a workspace member)
 ├── docs/                   # This directory
@@ -195,7 +195,7 @@ have not run on GitHub yet, so a passing run is not confirmed.
 files under `sdks/`. The older semver-label check is still there.
 
 Other workflows in `.github/workflows/`: `benchmarks.yml`, `codeql-analysis.yml`,
-`release.yml`, and `release-binaries.yml`. The former `update-flake.yml` (weekly
+and `release-binaries.yml`. The former `update-flake.yml` (weekly
 `nix flake update`) was deleted because the flake it updated no longer exists.
 
 ## Releasing the SDKs
@@ -204,7 +204,7 @@ The three SDKs share one version. `sdks/typescript/package.json` is the source
 of truth. Changesets manages it.
 
 1. Add a changeset with `npm run changeset` on the PR that changes an SDK.
-   Use `"sandbox-sdk": minor` or `patch` (or `major`).
+   Use `"@frontal-labs/sandbox-sdk": minor` or `patch` (or `major`).
 2. When changesets land on `master`, `sdk-release.yml` opens a "version SDKs"
    PR through `npm run version-packages`. That runs `changeset version`, then
    `scripts/sync-sdk-versions.mjs`, which copies the version into
@@ -224,8 +224,8 @@ Run the publish step without pushing: `scripts/release/publish-sdk.sh <ts|py|rs>
 --dry-run`. The workflow's manual trigger also defaults to a dry run.
 
 Other workflows in `.github/workflows/`: `pr-checks.yml`, `benchmarks.yml`,
-`codeql-analysis.yml`, `release.yml`, and `release-binaries.yml`. Both
-`release.yml` and `release-binaries.yml` create GitHub releases on `v*` tags.
+`codeql-analysis.yml`, and `release-binaries.yml`. `release-binaries.yml` creates
+the GitHub release for each `v*` tag, with `SHA256SUMS` attached.
 
 ## Local Development Loop
 
@@ -236,7 +236,7 @@ cargo run --bin sandbox -- run "echo hello"
 ```
 
 There is no server binary yet. `crates/sandbox-server` is a library
-(`src/lib.rs`), and `sandbox serve` only prints a message. See
+(`src/lib.rs`), and `frontal-sandbox serve` only prints a message. See
 [API_REFERENCE.md](API_REFERENCE.md).
 
 ## Debugging

@@ -819,8 +819,8 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "clap",
+ "frontal-sandbox-sdk",
  "sandbox-scheduler",
- "sandbox-sdk",
  "sandbox-server",
  "sandbox-session",
  "sandbox-trace",
@@ -1739,6 +1739,26 @@ checksum = "e5ff35a391aef949120a0340d690269b3d9f63460a6106e99bd07b961f345ea9"
 dependencies = [
  "swc_macros_common",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "frontal-sandbox-sdk"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "bytes",
+ "futures",
+ "reqwest",
+ "sandbox-scheduler",
+ "sandbox-server",
+ "sandbox-session",
+ "sandbox-types",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4101,10 +4121,10 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
+ "frontal-sandbox-sdk",
  "futures",
  "indicatif",
  "rand 0.8.6",
- "sandbox-sdk",
  "sandbox-session",
  "sandbox-types",
  "sandbox-vfs",
@@ -4204,26 +4224,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tonic",
- "tracing",
-]
-
-[[package]]
-name = "sandbox-sdk"
-version = "0.1.0"
-dependencies = [
- "axum",
- "bytes",
- "futures",
- "reqwest",
- "sandbox-scheduler",
- "sandbox-server",
- "sandbox-session",
- "sandbox-types",
- "schemars",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
  "tracing",
 ]
 

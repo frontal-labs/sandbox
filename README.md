@@ -50,16 +50,16 @@ crates/                     Rust workspace members (crate names are sandbox-*)
 ├── sandbox-worker          Per-tenant worker process
 ├── sandbox-scheduler       Placement, pools, sleep, and metering
 └── sandbox-server          HTTP and WebSocket API
-cli/                        Command-line client (crate `cli`, binary `sandbox`)
+cli/                        Command-line client (crate `cli`, binary `frontal-sandbox`)
 sdks/
 ├── rust/                   Rust client SDK (crate `sandbox-sdk`)
-├── typescript/             TypeScript SDK (npm `sandbox-sdk`, built with Bazel)
+├── typescript/             TypeScript SDK (npm `@frontal-labs/sandbox-sdk`, built with Bazel)
 └── python/                 Python SDK (package `sandbox_sdk`)
 benchmarks/                 Criterion benches and load tests
 docs/                       Architecture, security model, API, and limits
 ```
 
-Most crates are early scaffolds or stubs. The server runs session, exec, filesystem, snapshot, and fork routes against in-memory sessions; snapshot and fork also run against in-memory sessions. `sandbox run` and `sandbox shell` are not yet implemented. See [PLAN.md](PLAN.md) for the milestone status,
+Most crates are early scaffolds or stubs. The server runs session, exec, filesystem, snapshot, and fork routes against in-memory sessions; snapshot and fork also run against in-memory sessions. `frontal-sandbox run` and `frontal-sandbox shell` are not yet implemented. See [PLAN.md](PLAN.md) for the milestone status,
 the complete design specification, and target behavior.
 
 ## Development

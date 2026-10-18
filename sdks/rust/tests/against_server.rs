@@ -1,8 +1,8 @@
 //! Runs the client against the real router on a local port, so each call goes
 //! over HTTP to the same code the server runs.
 
+use frontal_sandbox_sdk::Client;
 use sandbox_scheduler::Scheduler;
-use sandbox_sdk::Client;
 use sandbox_server::auth::AuthManager;
 use sandbox_server::create_router;
 use sandbox_types::{

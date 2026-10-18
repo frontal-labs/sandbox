@@ -50,9 +50,9 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build
-        run: npm run build --workspace sandbox-sdk
+        run: npm run build --workspace @frontal-labs/sandbox-sdk
       - name: Test
-        run: npm test --workspace sandbox-sdk
+        run: npm test --workspace @frontal-labs/sandbox-sdk
       - name: Pack check
         run: |
           cd sdks/typescript
@@ -96,10 +96,10 @@ jobs:
       - run: npm ci
       - run: python -m pip install -e "sdks/python[dev]"
       - name: Build the server
-        run: cargo build -p cli --bin sandbox
+        run: cargo build -p cli --bin frontal-sandbox
       - name: Start the server
         run: |
-          nohup ./target/debug/sandbox serve --addr 127.0.0.1:8080 > server.out 2> server.err &
+          nohup ./target/debug/frontal-sandbox serve --addr 127.0.0.1:8080 > server.out 2> server.err &
           for _ in $(seq 1 60); do
             curl -sf http://127.0.0.1:8080/v1/openapi.json > /dev/null && break
             sleep 1
@@ -110,7 +110,7 @@ jobs:
           echo "SANDBOX_API_KEY=$KEY" >> "$GITHUB_ENV"
           echo "SANDBOX_BASE_URL=http://127.0.0.1:8080" >> "$GITHUB_ENV"
       - name: TypeScript live tests
-        run: npm test --workspace sandbox-sdk
+        run: npm test --workspace @frontal-labs/sandbox-sdk
       - name: Python live tests
         run: python -m pytest sdks/python/tests -q
       - name: Server log

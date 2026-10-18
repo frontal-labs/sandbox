@@ -31,7 +31,7 @@ mkdir -p "$out"
 case "$sdk" in
   ts)
     (cd sdks/typescript && npm run build >/dev/null && npm pack --pack-destination "$out" >/dev/null)
-    artifacts=("$out/sandbox-sdk-${version}.tgz:application/vnd.npm.package.tar+gzip")
+    artifacts=("$out/frontal-labs-sandbox-sdk-${version}.tgz:application/vnd.npm.package.tar+gzip")
     ;;
   py)
     python3 -m build --outdir "$out" sdks/python >/dev/null
