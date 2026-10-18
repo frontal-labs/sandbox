@@ -21,18 +21,24 @@ if [[ "$EUID" -ne 0 ]]; then
   exit 1
 fi
 
+# shellcheck source=/dev/null
 DISTRO_ID="$(. /etc/os-release && echo "${ID}")"
 
 case "$DISTRO_ID" in
   ubuntu|debian)
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates curl tini iptables ufw \
-      "${NO_KVM}" -eq 0 && echo qemu-kvm libvirt-daemon-system || true
+      ca-certificates curl tini iptables ufw
+    if [[ "$NO_KVM" -eq 0 ]]; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        qemu-kvm libvirt-daemon-system
+    fi
     ;;
   rhel|centos|fedora|amzn)
-    dnf install -y ca-certificates curl tini iptables firewalld \
-      "${NO_KVM}" -eq 0 && echo qemu-kvm libvirt || true
+    dnf install -y ca-certificates curl tini iptables firewalld
+    if [[ "$NO_KVM" -eq 0 ]]; then
+      dnf install -y qemu-kvm libvirt
+    fi
     ;;
   *)
     echo "unsupported distro: $DISTRO_ID" >&2
