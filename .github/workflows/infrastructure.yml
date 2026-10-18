@@ -2,11 +2,11 @@ name: infrastructure
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - "infrastructure/**"
   pull_request:
-    branches: [master]
+    branches: [main]
     paths:
       - "infrastructure/**"
 

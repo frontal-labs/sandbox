@@ -178,7 +178,7 @@ See [docs/adr/README.md](adr/README.md) for the template and process.
 
 ## CI Pipeline
 
-`.github/workflows/ci.yml` (triggered on push and PR to `master`) has one job,
+`.github/workflows/ci.yml` (triggered on push and PR to `main`) has one job,
 `rust`. It runs the following with the toolchain pinned in `rust-toolchain.toml`:
 
 1. `cargo fmt --all --check`
@@ -205,7 +205,7 @@ of truth. Changesets manages it.
 
 1. Add a changeset with `npm run changeset` on the PR that changes an SDK.
    Use `"@frontal-labs/sandbox-sdk": minor` or `patch` (or `major`).
-2. When changesets land on `master`, `sdk-release.yml` opens a "version SDKs"
+2. When changesets land on `main`, `sdk-release.yml` opens a "version SDKs"
    PR through `npm run version-packages`. That runs `changeset version`, then
    `scripts/sync-sdk-versions.mjs`, which copies the version into
    `sdks/python/pyproject.toml`, `sdks/rust/Cargo.toml`, and `Cargo.lock`.

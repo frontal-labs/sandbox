@@ -66,7 +66,7 @@ Current state of that workflow:
 - `benchmarks/baselines/` is empty, so the comparison logic skips every suite with "No baseline" and passes. A pass means nothing.
 - The micro-benchmark step runs the bench targets from the repository root with `cargo bench --bench <name>`, which will not find them because the suites are outside the workspace. Verify before relying on it.
 - The `bench-report` job prints a hard-coded "Passed" for each suite, not the real job results.
-- Baseline updates on master pushes copy results into `benchmarks/baselines/` inside the CI runner. Nothing commits them, so the copies are discarded when the job ends.
+- Baseline updates on main pushes copy results into `benchmarks/baselines/` inside the CI runner. Nothing commits them, so the copies are discarded when the job ends.
 
 Until these are fixed, the workflow does not detect regressions.
 
