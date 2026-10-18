@@ -10,10 +10,11 @@ data_dir = "/var/lib/sandbox"
 api_key_hash = "<REPLACE_WITH_BLAKE3_HEX_DIGEST>"
 rate_limit_rps = 100
 
+# The server does not terminate TLS yet. API keys sent over this listener are
+# cleartext, so put a TLS-terminating proxy in front of it. Do not enable this
+# section until the server implements TLS.
 [server.tls]
-enabled = true
-cert_file = "/etc/sandbox/tls/server.crt"
-key_file = "/etc/sandbox/tls/server.key"
+enabled = false
 
 [server.telemetry]
 metrics_addr = "0.0.0.0:9090"

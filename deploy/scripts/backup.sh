@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# State archives contain keys and session data; keep new files owner-only.
+umask 077
 
 # backup.sh — back up sandbox state.
 #
