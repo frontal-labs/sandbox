@@ -26,7 +26,7 @@ Run `frontal-sandbox --help` to see available commands.
 
 ## How it works
 
-This package is a thin launcher. `bin/frontal-sandbox.js` detects `process.platform` and `process.arch`, resolves the matching `@frontal-labs/frontal-sandbox-<target>` platform package installed as an optional dependency, and spawns its bundled `frontal-sandbox` (or `frontal-sandbox.exe` on Windows) binary, forwarding all arguments.
+This package is a thin launcher. `bin/frontal-sandbox.js` detects `process.platform` and `process.arch`, resolves the matching `@frontal-labs/sandbox-cli-<target>` platform package installed as an optional dependency, and spawns its bundled `frontal-sandbox` (or `frontal-sandbox.exe` on Windows) binary, forwarding all arguments.
 
 Supported targets:
 

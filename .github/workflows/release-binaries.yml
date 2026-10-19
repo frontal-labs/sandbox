@@ -88,7 +88,7 @@ jobs:
           node -e '
             const [pkgDir, target, osName, arch, exe, version] = process.argv.slice(1)
             const pkg = {
-              name: `@frontal-labs/frontal-sandbox-${target}`,
+              name: `@frontal-labs/sandbox-cli-${target}`,
               version,
               description: `frontal-sandbox CLI binary for ${target}`,
               os: [osName],
