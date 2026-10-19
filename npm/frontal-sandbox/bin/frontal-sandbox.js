@@ -24,10 +24,10 @@ if (!target) {
 const exe = process.platform === "win32" ? "frontal-sandbox.exe" : "frontal-sandbox";
 let binary;
 try {
-  binary = require.resolve(`@frontal-labs/frontal-sandbox-${target}/${exe}`);
+  binary = require.resolve(`@frontal-labs/sandbox-cli-${target}/${exe}`);
 } catch {
   console.error(
-    `frontal-sandbox: the binary package @frontal-labs/frontal-sandbox-${target} is not installed. Reinstall without --omit=optional.`,
+    `frontal-sandbox: the binary package @frontal-labs/sandbox-cli-${target} is not installed. Reinstall without --omit=optional.`,
   );
   process.exit(1);
 }
