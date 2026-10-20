@@ -29,7 +29,12 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android && df -h /
       # sandbox-proto's build script runs protoc (see docs/DEVELOPMENT.md).
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler && protoc --version
+        run: >-
+          sudo apt-get
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=- update
+          && sudo apt-get install -y protobuf-compiler
+          && protoc --version
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -83,7 +88,12 @@ jobs:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android && df -h /
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler && protoc --version
+        run: >-
+          sudo apt-get
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=- update
+          && sudo apt-get install -y protobuf-compiler
+          && protoc --version
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4

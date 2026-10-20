@@ -35,7 +35,12 @@ jobs:
       # sandbox-proto's build script runs protoc. Each runner installs its own.
       - name: Install protoc (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler && protoc --version
+        run: >-
+          sudo apt-get
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=- update
+          && sudo apt-get install -y protobuf-compiler
+          && protoc --version
       - name: Install protoc (macOS)
         if: runner.os == 'macOS'
         run: brew install protobuf && protoc --version
