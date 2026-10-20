@@ -32,7 +32,11 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: >-
+          sudo apt-get
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=- update
+          && sudo apt-get install -y protobuf-compiler
       - name: Compile benchmarks
         run: cargo bench --workspace --no-run
 
@@ -46,7 +50,11 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: >-
+          sudo apt-get
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=- update
+          && sudo apt-get install -y protobuf-compiler
       
       - name: Run VFS benchmarks
         run: |
@@ -169,7 +177,11 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: >-
+          sudo apt-get
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=- update
+          && sudo apt-get install -y protobuf-compiler
       
       - name: Build load test binary
         run: cargo build --release -p sandbox-load
@@ -290,7 +302,11 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: >-
+          sudo apt-get
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=- update
+          && sudo apt-get install -y protobuf-compiler
       
       - name: Build load test binary
         run: cargo build --release -p sandbox-load
