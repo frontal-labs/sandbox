@@ -23,6 +23,7 @@ sandbox-session = { path = "../crates/sandbox-session" }
 sandbox-server = { path = "../crates/sandbox-server" }
 sandbox-scheduler = { path = "../crates/sandbox-scheduler" }
 sandbox-trace = { path = "../crates/sandbox-trace" }
+sandbox-runtime = { path = "../crates/sandbox-runtime" }
 sandbox-vfs = { path = "../crates/sandbox-vfs" }
 axum = { workspace = true }
 tokio = { workspace = true }
@@ -30,7 +31,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
@@ -38,6 +38,8 @@ serde_json = { workspace = true }
 
 [features]
 default = []
+# The Postgres state store (PLAN §4.8, M5). See `serve --database-url`.
+clustered = ["sandbox-server/clustered"]
 # The worker serves gRPC over a Unix socket, so only Unix builds have it.
 [target.'cfg(unix)'.dependencies]
 sandbox-worker = { path = "../crates/sandbox-worker" }

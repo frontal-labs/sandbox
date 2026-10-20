@@ -17,12 +17,14 @@ rust_library(
         "@crates//:tracing-subscriber",
         "@crates//:clap",
         "@crates//:thiserror",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:serde_json",
-    ],
+
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-runtime:sandbox_runtime",
+],
     proc_macro_deps = [
-        "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )

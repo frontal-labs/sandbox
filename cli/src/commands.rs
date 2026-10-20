@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use sandbox_session::{IsolateBackend, Session};
-use sandbox_trace::{outcome_of, replay, Outcome, RunRecord, Trace};
+use sandbox_session::{changed_since, committed_root, replay_run, IsolateBackend, Session};
+use sandbox_trace::{outcome_of, replay, FileChange, FsOp, Outcome, RunRecord, Trace};
 use sandbox_types::{ErrorCode, ExecResult, SandboxError, SessionConfig};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -71,6 +71,12 @@ pub enum Commands {
         /// Socket path to listen on. The host creates its directory with mode 0700.
         #[arg(long)]
         socket: PathBuf,
+        /// Unshare the network, IPC, UTS, and mount namespaces before serving.
+        #[arg(long)]
+        namespaces: bool,
+        /// Install the seccomp denylist before serving.
+        #[arg(long)]
+        seccomp: bool,
     },
 
     /// Start the sandbox server in the foreground. Prints one API key to stderr.
@@ -82,6 +88,19 @@ pub enum Commands {
         /// survive a restart (ADR 0008). Without it the server is in memory only.
         #[arg(long)]
         data_dir: Option<PathBuf>,
+        /// Collect unreachable blobs every this many seconds (ADR 0013). 0 turns
+        /// the schedule off, and `POST /v1/gc` remains available.
+        #[arg(long, default_value_t = 600)]
+        gc_interval_secs: u64,
+        /// Put a session to sleep after this many seconds with no request (PLAN
+        /// §4.14). A request to a sleeping session wakes it. 0 turns idle sleep off.
+        #[arg(long, default_value_t = 300)]
+        idle_sleep_secs: u64,
+        /// Keep the state in this Postgres database, shared by every node that uses
+        /// it, instead of in `--data-dir` alone (PLAN §4.8). `--data-dir` still holds
+        /// the blobs, so it must be a directory every node can reach.
+        #[arg(long, requires = "data_dir")]
+        database_url: Option<String>,
     },
 
     /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
@@ -118,12 +137,42 @@ impl Cli {
                 rt.block_on(crate::bench::run(name.as_deref()))
             }
             #[cfg(unix)]
-            Commands::Worker { socket } => {
+            Commands::Worker {
+                socket,
+                namespaces,
+                seccomp,
+            } => {
+                // Before the runtime exists: namespaces and seccomp apply to the
+                // calling thread and to threads created later.
+                let isolation = sandbox_worker::Isolation {
+                    namespaces: *namespaces,
+                    seccomp: *seccomp,
+                    cgroup: None,
+                };
+                sandbox_worker::enter(&isolation)?;
                 let rt = runtime()?;
                 rt.block_on(sandbox_worker::serve(socket))?;
                 Ok(0)
             }
-            Commands::Serve { addr, data_dir } => serve(addr, data_dir.as_deref()),
+            Commands::Serve {
+                addr,
+                data_dir,
+                gc_interval_secs,
+                idle_sleep_secs,
+                database_url,
+            } => {
+                // The URL may also come from the environment, so a secret need not be on the command line.
+                let url = database_url
+                    .clone()
+                    .or_else(|| std::env::var("SANDBOX_DATABASE_URL").ok());
+                serve(
+                    addr,
+                    data_dir.as_deref(),
+                    *gc_interval_secs,
+                    *idle_sleep_secs,
+                    url.as_deref(),
+                )
+            }
             Commands::Snapshot { session_id } => snapshot(session_id),
             Commands::Fork { snapshot_id, count } => fork(snapshot_id, *count),
         }
@@ -147,9 +196,9 @@ fn run_script_once(script: &str, trace: Option<&Path>) -> Result<i32, SandboxErr
     let rt = runtime()?;
     rt.block_on(async {
         let session = IsolateBackend::new(SessionConfig::default()).await?;
-        let result = session.run_script(script).await;
+        let (result, files) = run_traced(&session, script).await;
         if let Some(path) = trace {
-            let runs = vec![record(1, script, &result)];
+            let runs = vec![record(1, script, &result, files)];
             write_trace(path, runs)?;
         }
         let out = result?;
@@ -171,9 +220,9 @@ fn interactive_shell(trace: Option<&Path>) -> Result<i32, SandboxError> {
             break;
         }
         // A bad line reports its error and the session continues.
-        let result = rt.block_on(session.run_script(&line));
+        let (result, files) = rt.block_on(run_traced(&session, &line));
         if trace.is_some() {
-            runs.push(record(runs.len() as u64 + 1, &line, &result));
+            runs.push(record(runs.len() as u64 + 1, &line, &result, files));
         }
         match result {
             Ok(out) => print_output(&out.stdout, &out.stderr)
@@ -206,14 +255,10 @@ fn replay_trace(path: &Path) -> Result<i32, SandboxError> {
     let rt = runtime()?;
     let report = rt.block_on(async {
         let session = IsolateBackend::new(SessionConfig::default()).await?;
-        let report = replay(&trace, |script| {
+        let report = replay(&trace, |run| {
             let session = &session;
-            async move {
-                session
-                    .run_script(&script)
-                    .await
-                    .map(|out| (out.exit_code, out.stdout, out.stderr))
-            }
+            let run = run.clone();
+            async move { replay_run(session, &run).await }
         })
         .await;
         Ok::<_, SandboxError>(report)
@@ -226,15 +271,54 @@ fn replay_trace(path: &Path) -> Result<i32, SandboxError> {
     );
     for d in &report.divergences {
         // Scripts come from the trace file, so they are escaped before printing.
-        println!("run {} diverged: {}", d.seq, escaped(&d.script));
+        let what = match &d.fs {
+            Some(FsOp::Write { path, data }) => {
+                format!("write {} ({} bytes)", escaped(path), data.len())
+            }
+            Some(FsOp::Delete { path }) => format!("delete {}", escaped(path)),
+            None => escaped(&d.script),
+        };
+        println!("run {} diverged: {what}", d.seq);
         println!("  expected: {}", describe(&d.expected));
         println!("  actual:   {}", describe(&d.actual));
     }
     Ok(if report.matches() { 0 } else { 1 })
 }
 
-/// One run as the trace records it.
-fn record(seq: u64, script: &str, result: &Result<ExecResult, SandboxError>) -> RunRecord {
+/// Runs one script and returns its result with the files it changed.
+async fn run_traced(
+    session: &IsolateBackend,
+    script: &str,
+) -> (
+    Result<ExecResult, SandboxError>,
+    Result<Vec<FileChange>, SandboxError>,
+) {
+    let before = committed_root(session).await;
+    let result = session.run_script(script).await;
+    let files = match before {
+        Ok(before) => changed_since(session, before)
+            .await
+            .map(|changes| changes.into_iter().map(FileChange::from).collect()),
+        Err(e) => Err(e),
+    };
+    (result, files)
+}
+
+/// One run as the trace records it. Files that could not be read leave the run
+/// without its file list, and the error is reported on stderr.
+fn record(
+    seq: u64,
+    script: &str,
+    result: &Result<ExecResult, SandboxError>,
+    files: Result<Vec<FileChange>, SandboxError>,
+) -> RunRecord {
+    let files = files.unwrap_or_else(|e| {
+        eprintln!(
+            "Warning: the trace does not list the files this run changed: {}",
+            e.message
+        );
+        Vec::new()
+    });
     let outcome = outcome_of(
         result
             .as_ref()
@@ -244,7 +328,9 @@ fn record(seq: u64, script: &str, result: &Result<ExecResult, SandboxError>) -> 
     RunRecord {
         seq,
         script: script.to_string(),
+        fs: None,
         outcome,
+        files,
     }
 }
 
@@ -280,21 +366,80 @@ fn escaped(text: &str) -> String {
     text.escape_debug().collect()
 }
 
+/// Opens the Postgres-backed state. A build without the `clustered` feature refuses.
+#[cfg(feature = "clustered")]
+fn clustered_open(
+    rt: &tokio::runtime::Runtime,
+    scheduler: std::sync::Arc<sandbox_scheduler::Scheduler>,
+    url: &str,
+    dir: &Path,
+) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
+    rt.block_on(sandbox_server::open_clustered_with_state(
+        scheduler, url, dir,
+    ))
+}
+
+#[cfg(not(feature = "clustered"))]
+fn clustered_open(
+    _rt: &tokio::runtime::Runtime,
+    _scheduler: std::sync::Arc<sandbox_scheduler::Scheduler>,
+    _url: &str,
+    _dir: &Path,
+) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
+    Err(SandboxError::new(
+        ErrorCode::Unsupported,
+        "--database-url needs a build with the clustered feature: cargo build --features clustered",
+    ))
+}
+
 /// Runs the server until the process is stopped. The key is printed once, to
 /// stderr, because keys live in memory and nothing else can provision them.
-fn serve(addr: &str, data_dir: Option<&Path>) -> Result<i32, SandboxError> {
+fn serve(
+    addr: &str,
+    data_dir: Option<&Path>,
+    gc_interval_secs: u64,
+    idle_sleep_secs: u64,
+    database_url: Option<&str>,
+) -> Result<i32, SandboxError> {
     use std::sync::Arc;
+    // Log to stderr, so stdout keeps its key line. RUST_LOG overrides the default.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
     let scheduler = Arc::new(sandbox_scheduler::Scheduler::new());
     let rt = runtime()?;
-    let (app, new_key) = match data_dir {
-        Some(dir) => rt.block_on(sandbox_server::open_durable(scheduler, dir))?,
-        None => {
+    let (app, state, new_key) = match (data_dir, database_url) {
+        (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir)?,
+        (Some(dir), None) => {
+            rt.block_on(sandbox_server::open_durable_with_state(scheduler, dir))?
+        }
+        (None, _) => {
             let auth = Arc::new(sandbox_server::auth::AuthManager::new());
             let key = auth.create_key();
-            (sandbox_server::create_router(scheduler, auth), Some(key))
+            let (app, state) = sandbox_server::create_router_with_state(scheduler, auth);
+            (app, state, Some(key))
         }
     };
     rt.block_on(async {
+        if gc_interval_secs > 0 {
+            sandbox_server::gc::schedule(
+                state.clone(),
+                std::time::Duration::from_secs(gc_interval_secs),
+            );
+        }
+        if idle_sleep_secs > 0 {
+            // Sweep at least once a second and at most every 30 seconds, so a
+            // session sleeps soon after its idle time, not much later.
+            let every = std::time::Duration::from_secs(idle_sleep_secs.clamp(1, 30));
+            sandbox_server::idle::schedule(
+                state,
+                std::time::Duration::from_secs(idle_sleep_secs),
+                every,
+            );
+        }
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| SandboxError::unavailable(format!("binding {addr}: {e}")))?;

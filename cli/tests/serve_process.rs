@@ -58,9 +58,10 @@ fn the_first_run_prints_a_key_and_a_restart_does_not() {
         "{lines:?}"
     );
     drop(first);
+    // The first run saves its key to the state log, and a base file comes later.
     assert!(
-        dir.join("state.json").exists(),
-        "the state file is written at start"
+        dir.join("state.0.log").exists() || dir.join("state.json").exists(),
+        "the state is written at start"
     );
 
     let (second, lines) = start(&dir, "state directory");
