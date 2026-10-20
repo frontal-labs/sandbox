@@ -16,7 +16,7 @@ Traces (ADR 0007) were recorded only by the local CLI. The server ran commands, 
 - A trace holds at most 4096 runs. Later runs are not recorded, and the response carries `X-Trace-Truncated: true`. Exec still succeeds, so a long session never fails because of its trace.
 - A command that sets environment variables is not recorded, because the values are often secrets. The trace is marked incomplete instead, and no value is written.
 - The trace is kept with the session. A sleeping session keeps its trace, and it is persisted with the sleeping session (ADR 0008). A destroyed session's trace is discarded.
-- File writes through the filesystem API are not recorded. A trace is a list of commands, not a file history.
+- File writes through the filesystem API are not recorded. A trace is a list of commands, not a file history. (Amended by ADR 0012, which records filesystem writes and deletes as runs.)
 
 ## Consequences
 ### Positive

@@ -6,7 +6,7 @@ This page lists the resource limits defined in code today, where they live, and 
 
 | Area | Defined in code | Enforced in code |
 |------|-----------------|------------------|
-| Session resource limits (`ResourceLimits`) | Yes | No. The `check_*` helpers in `crates/sandbox-policy/src/limits.rs` have no callers in the repo. |
+| Session resource limits (`ResourceLimits`) | Yes | Partly. `max_file_size`, `max_total_size`, `max_inodes`, and `max_path_depth` are enforced through the VFS, and kept across sleep, wake, restart, and fork (ADR 0014). The others are refused with `501`. The `check_*` helpers in `crates/sandbox-policy/src/limits.rs` have no callers in the repo. |
 | VFS quotas (`Quotas`) | Yes | Yes, on create and write: `total_bytes`, `max_file_size`, `max_path_depth`, and `inode_count`. Checks are not reserved, so concurrent writers can overshoot. |
 | Network policy defaults | Yes | Partly. Policy helpers exist in `crates/sandbox-policy/src/network.rs`; nothing on the exec or fetch path calls them yet. See [SECURITY_MODEL.md](SECURITY_MODEL.md). |
 | API key quotas and tiers | No | No |
@@ -22,7 +22,7 @@ Source: `ResourceLimits::default()` in `crates/sandbox-types/src/policy.rs`. Eve
 |-------|---------|------|-------|
 | `memory_bytes` | 512 MiB (536,870,912) | bytes | Memory cap for a session |
 | `cpu_ms_per_sec` | 1000 | ms | Field name indicates a per-second CPU budget. No enforcement code exists, so the exact semantics are not yet defined. |
-| `wall_timeout_secs` | 300 | s | Wall-clock limit |
+| `wall_timeout_secs` | 300 | s | Wall-clock limit on each command (isolate tier). A command with no shorter `timeout_ms` is stopped at this limit |
 | `max_file_size` | 100 MiB | bytes | Per file |
 | `max_total_size` | 1 GiB | bytes | Total VFS bytes |
 | `max_inodes` | 100,000 | count | Files plus directories |
@@ -30,7 +30,7 @@ Source: `ResourceLimits::default()` in `crates/sandbox-types/src/policy.rs`. Eve
 | `max_processes` | 100 | count | Virtual process count |
 | `max_open_files` | 1024 | count | Open file handles |
 
-Per-exec timeout is separate: `ExecRequest.timeout_ms` in `crates/sandbox-types/src/session.rs` is optional and has no default.
+Per-exec timeout is separate: `ExecRequest.timeout_ms` in `crates/sandbox-types/src/session.rs` is optional and has no default. When set, a command that runs past it is stopped at its next await point and returns `TIMEOUT` (HTTP 504). Its partial writes stay in the filesystem. A command that never reaches an await point cannot be interrupted, so the shell's command budget bounds such work instead. The session's `wall_timeout_secs` caps every command at the same point. It limits each command, not the session's lifetime, and the server does not accept other values yet.
 
 Sessions take their limits from `SessionConfig.limits` (`crates/sandbox-types/src/session.rs`). `SessionConfig::default()` uses `ResourceLimits::default()`.
 

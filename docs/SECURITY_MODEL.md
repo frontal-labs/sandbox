@@ -13,7 +13,7 @@ Do not run untrusted code on this codebase, and do not expose the server to untr
 These assumptions are explicit so they can be checked as the code changes.
 
 1. **Single-tenant development only today.** No tenant isolation is enforced. The `TenantId` field exists in `SessionConfig`, but nothing uses it for isolation.
-2. **Isolates are not a security boundary on their own.** plans/PLAN.md invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, but without seccomp, cgroups, or namespaces. It isolates crashes, not hostile code.
+2. **Isolates are not a security boundary on their own.** PLAN.md invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, and on Linux that process has namespaces, a seccomp denylist, `NO_NEW_PRIVS`, and cgroup v2 limits (ADR 0022). The denylist allows any syscall it does not name. The layers are not tested against a hostile workload, and the Linux-only layers do not exist on macOS.
 3. **Untrusted code is assumed to attempt host access, network exfiltration, resource exhaustion, and sandbox escape.** Each layer below is designed against those attempts.
 4. **The host operating system and Firecracker/KVM are trusted** in the design. Tier 2 would rely on them; Tier 2 is not implemented.
 5. **Dependencies (V8 via `deno_core`, `wasmtime`) are trusted only after review and version pinning.** The workspace pins versions in `Cargo.toml`, but no CVE tracking or automated audit runs in CI.
@@ -25,7 +25,7 @@ Layers, outermost first (plans/PLAN.md section 5):
 | # | Layer | Status | Where |
 |---|-------|--------|-------|
 | 1 | Hardware boundary: Firecracker + jailer | Planned | `crates/sandbox-vmm/src/jailer.rs` returns `unsupported` from `Jailer::setup` |
-| 2 | Per-tenant OS process: seccomp, cgroups, namespaces, `NO_NEW_PRIVS` | Partial | `crates/sandbox-worker/src/worker.rs` runs one child process per session with a JSON protocol and crash isolation. Seccomp, cgroups, namespaces, and `NO_NEW_PRIVS` are not implemented (Linux-only). |
+| 2 | Per-tenant OS process: seccomp, cgroups, namespaces, `NO_NEW_PRIVS` | Partial (Linux) | `crates/sandbox-worker/src/isolation.rs` applies namespaces and a seccomp denylist in the child, and sets cgroup v2 limits from the host. Each layer fails closed. Tests run on Linux (`cli/tests/worker_isolation.rs`). Off Linux, only the unisolated worker starts. |
 | 3 | V8 isolate / wasmtime store: memory and CPU caps | Partial | V8: wall-clock watchdog, heap cap, fresh isolate per run. WASM: fuel and a linear-memory cap per run. |
 | 4 | Capability operations: each host access checks policy | Partial | Policy helpers in `crates/sandbox-policy`; not called from runtime, shell, or server |
 
@@ -37,9 +37,9 @@ Current state: `crates/sandbox-vmm` has driver, jailer, and pool scaffolding. `J
 
 ## Layer 2: Per-tenant process (planned)
 
-Planned: one worker process per tenant, with `prctl(PR_SET_NO_NEW_PRIVS)`, a seccomp-bpf allowlist (`seccompiler`), cgroup v2 limits, optional namespaces (`rustix`/`nix`), and no host mounts.
+Built on Linux: one worker process per session, with `NO_NEW_PRIVS` and a seccomp-bpf denylist (`seccompiler`), namespaces (network, IPC, UTS, and a private mount tree), and cgroup v2 limits set from the host. The host needs a delegated cgroup in `SANDBOX_CGROUP_ROOT` (ADR 0022). An allowlist is planned next.
 
-Current state: `crates/sandbox-worker/src/worker.rs` spawns the `sandbox worker --socket` subcommand as a child process and serves gRPC over a Unix socket in a directory the host creates with mode `0700`. Guest output is data in the reply, not a shared stream. A crashed child returns `Unavailable` to the host. No seccomp, cgroup, or namespace code exists in the repository. A grep for `seccomp`, `cgroup`, and `prctl` in `crates/` finds no implementation.
+Current state: `crates/sandbox-worker/src/worker.rs` spawns the `sandbox worker --socket` subcommand as a child process with the isolation flags, and serves gRPC over a Unix socket in a directory the host creates with mode `0700`. Guest output is data in the reply, not a shared stream. A crashed child returns `Unavailable` to the host. `crates/sandbox-worker/src/isolation.rs` holds the namespace, seccomp, and cgroup code.
 
 ## Layer 3: Language runtimes (planned)
 
@@ -113,21 +113,23 @@ Planned (plans/PLAN.md section 4.7): an in-process HTTP client that is the only 
 
 ## Dependency and supply-chain controls
 
-- Planned: `cargo-deny` (licenses and advisories) and `cargo-audit` in CI. Neither runs in `.github/workflows/ci.yml` or `pr-checks.yml`, and there is no `deny.toml` in the repository.
-- `unsafe` policy: allowed only in named modules with a `// SAFETY:` comment and a test (plans/PLAN.md section 5). Not enforced by a lint in the repository.
-- `unwrap()`: plans/PLAN.md section 11 forbids it outside tests and `main`. Not enforced by a lint in the repository.
+- `cargo deny check` (licenses, advisories, bans, sources) is configured by `deny.toml`. Permissive licenses are allowed, and GPL and AGPL are refused. An advisory is ignored only when `deny.toml` gives a reason.
+- `cargo audit` reads `.cargo/audit.toml`, which carries the same advisory decisions.
+- Both run in the `supply-chain` job of `.github/workflows/ci.yml`, with pinned tool versions. They were run locally on 2026-10-19 and pass. The GitHub job has not been observed.
+- `unsafe` policy: allowed only in named modules with a `// SAFETY:` comment and a test (PLAN.md section 5). Not enforced by a lint in the repository.
+- `unwrap()`: PLAN.md section 11 forbids it outside tests and `main`. Not enforced by a lint in the repository.
 
 ## Required before any public launch
 
-plans/PLAN.md section 5 lists these. None are done.
+PLAN.md section 5 lists these. Some are done, and the rest are open.
 
-- [ ] Threat model document (this page is not one)
+- [x] Threat model document: `docs/THREAT_MODEL.md`
 - [ ] External security review of the worker and VMM
-- [ ] Fuzz targets: shell parser, VFS path handling, WASI fs shim, guest protocol decoder (`cargo-fuzz`)
+- [x] Fuzz targets: shell parser, VFS path handling, WASI fs shim, guest protocol decoder (`cargo-fuzz`). All four are in `fuzz/` (see DEVELOPMENT.md). The guest protocol target covers the wire frames and the generated messages; the guest agent itself does not exist yet, and the 24 h run that PLAN §9 M4 asks for has not been done
 - [ ] Escape tests: host file reads, metadata IP reachability, memory/CPU/inode/PID exhaustion, fork-bomb equivalents, symlink races, zip bombs
 - [ ] Never share a V8 heap or wasmtime store across tenants
 - [ ] Pin and track V8, wasmtime, and Firecracker CVEs; automate dependency updates
-- [ ] `cargo-deny` and `cargo-audit` in CI
+- [x] `cargo-deny` and `cargo-audit` in CI (the `supply-chain` job; see above)
 
 ## Reporting
 

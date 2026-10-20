@@ -109,8 +109,11 @@ sandbox/
   `-D warnings`.
 - **Shared dependencies** use `workspace = true` (see `[workspace.dependencies]`
   in the root `Cargo.toml`).
-- **Dependency policy**: `deny.toml` is not present, so `cargo deny` is not
-  configured in this repo yet.
+- **Dependency policy**: `deny.toml` configures `cargo deny`, and
+  `.cargo/audit.toml` configures `cargo audit`. CI runs both in the
+  `supply-chain` job. Run `cargo deny check` and `cargo audit` before adding a
+  dependency. An advisory may be ignored only with a reason recorded in both
+  files.
 
 ## Adding a New Crate
 
@@ -161,6 +164,24 @@ cd sdks/python && pytest
 These commands have not been run as part of this documentation update, so
 their results are not recorded here.
 
+Conformance: `crates/sandbox-shell/conformance/cases.py` holds the scripts.
+`python3 record.py` runs each one under the local GNU bash and rewrites
+`cases.json`, which records the bash version. `cargo test -p sandbox-shell
+--test conformance` replays the file. Re-record only when the corpus changes,
+and review the diff, since the expected output comes from bash.
+
+Linux tests: worker isolation needs Linux, cgroup v2, and namespaces. `docker/run-linux.sh <command>` runs a command in a privileged Linux container with a delegated cgroup (`SANDBOX_CGROUP_ROOT`). Example: `docker/run-linux.sh cargo test -p cli --test worker_isolation`. It also runs the seccomp and runtime tests. Clustered state needs a Postgres database used only for tests: `SANDBOX_TEST_DATABASE_URL=postgres://… cargo test -p sandbox-server --features clustered --test clustered`.
+
+Fuzzing: the targets in `fuzz/`
+nightly and `cargo-fuzz`. `cargo fuzz` runs the `cargo` found on `PATH`, and
+the Homebrew `cargo` on some machines ignores rustup. Put the nightly `bin`
+directory first on `PATH`:
+
+```bash
+NB=$(dirname "$(rustup which --toolchain nightly cargo)")
+cd fuzz && PATH="$NB:$PATH" cargo fuzz run vfs_paths -- -max_total_time=90 -timeout=10
+```
+
 Benchmarks: `cargo bench --workspace --no-run` is what CI runs as a compile
 check. `benchmarks/` is not a workspace member, so it is not included in that
 command.
@@ -186,10 +207,13 @@ See [docs/adr/README.md](adr/README.md) for the template and process.
 3. `cargo test --workspace`
 4. `cargo bench --workspace --no-run`
 
+A `supply-chain` job runs `cargo deny check` and `cargo audit --deny warnings`,
+with the tool versions pinned in the workflow.
+
 Two more jobs run the SDK suites: `sdk-typescript` (build, test, and an
 `npm pack --dry-run`) and `sdk-python` (editable install, `ruff check`, and
-`pytest`). CI does not yet run `cargo deny` or `cargo audit`. The new SDK jobs
-have not run on GitHub yet, so a passing run is not confirmed.
+`pytest`). The new jobs have not run on GitHub yet, so a passing run is not
+confirmed.
 
 `pr-checks.yml` requires a changeset (`.changeset/*.md`) on any PR that changes
 files under `sdks/`. The older semver-label check is still there.

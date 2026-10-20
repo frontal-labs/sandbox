@@ -6,7 +6,7 @@ but not working, or implemented without tests, stay unticked and are marked
 **Partial**. Acceptance criteria are not ticked unless they were demonstrated,
 and none has been demonstrated yet.
 
-Last reviewed against the source tree on 2026-10-13.
+Last reviewed against the source tree on 2026-10-19.
 
 ## M0: Foundations (Week 1)
 
@@ -14,19 +14,24 @@ Last reviewed against the source tree on 2026-10-13.
 
 ### Deliverables
 - [x] Cargo workspace with all 18 crate members present (`Cargo.toml`)
-- [ ] **Partial.** CI pipeline: fmt, clippy `-D warnings`, test present in
-      `ci.yml` and run without Nix, but `deny` and `audit` are absent and the
-      pipeline has not been verified to pass
-- [ ] **Partial.** `sandbox-types`: IDs, errors, events, config, and `serde`
-      are present. `schemars` is a dependency, but no type derives `JsonSchema`
+- [ ] **Partial.** CI pipeline: fmt, clippy `-D warnings`, test, and a
+      `supply-chain` job (cargo-deny, cargo-audit) are in `ci.yml`. Every
+      command passes locally on 2026-10-19. The GitHub run has not been seen
+      yet.
+- [x] `sandbox-types`: IDs, errors, events, config, and `serde` are present.
+      The OpenAPI spec comes from `utoipa` behind the `openapi` feature (ADR 0001).
+      `schemars` was removed as unused (PLAN §4.1)
 - [x] `sandbox-cas`: `BlobStore` trait, `MemStore`, `DiskStore`, `TieredStore`
-- [ ] CAS property tests (proptest). Not present; the CAS tests are unit tests
+- [x] CAS property tests (proptest) in `crates/sandbox-cas/src/disk_store.rs`:
+      every blob round-trips, an insertion stores only the chunks around it, and
+      a sweep keeps what live blobs name
 
 ### Acceptance Criteria
-- [ ] CI green on all platforms. Not verified; CI depends on the removed flake
-- [ ] CAS property tests pass. No property tests exist
-- [ ] `cargo deny check` passes. `deny.toml` does not exist
-- [ ] `cargo audit` clean. Not configured in CI
+- [ ] CI green on all platforms. The same commands pass locally on macOS
+      (2026-10-19). The Linux and GitHub run is not observed
+- [x] CAS property tests pass (`cargo test -p sandbox-cas`, 2026-10-19)
+- [x] `cargo deny check` passes (`deny.toml`, 2026-10-19)
+- [x] `cargo audit --deny warnings` passes (`.cargo/audit.toml`, 2026-10-19)
 
 ### Status: **In progress**
 
@@ -44,7 +49,10 @@ Last reviewed against the source tree on 2026-10-13.
       Module loading is not implemented.
 - [x] `sandbox-shell`: parser (quotes, `|`, `&&`, `||`, `;`, `<`, `>`, `>>`),
       interpreter, VFS-backed builtins, variables, globs, and `/bin` WASI tools.
-      `case`, arithmetic, and host binaries are not implemented.
+      `case`, `$((...))`, parameter operators, and fd redirection are implemented.
+      Host binaries are not. Recursion is bounded at 32 levels, and a limit aborts
+      the run (ADR 0018). Fuzz targets exist for the parser, the interpreter, VFS
+      paths, and the WASI fs shim (`fuzz/`).
 - [x] `sandbox-session`: `IsolateBackend` owns a VFS and runs commands through
       the shell. Snapshot and sleep are not implemented.
 - [ ] **Partial.** `sandbox-sdk` (Rust): embedded `exec` and `create_session`
@@ -53,9 +61,9 @@ Last reviewed against the source tree on 2026-10-13.
 
 ### Acceptance Criteria
 - [x] `sandbox run "echo hi | cat > /a && cat /a"` works
-- [ ] `node -e` and `.ts` script run against VFS
-- [ ] Cold start < 5 ms from warm pool in `bench/`
-- [ ] 200+ shell conformance cases pass
+- [x] `node -e`, `node FILE.js`, and `node FILE.ts` run against VFS (ADR 0024: TypeScript by type stripping; types are not checked)
+- [x] Cold start < 5 ms from warm pool in `bench/`: a new Tier 1 session takes a p50 of 833 ns, and a `node` run takes a p50 of 0.41 ms from a warm isolate (5.10 ms cold). The back-to-back tail is the cold cost (ADR 0025)
+- [x] 200+ shell conformance cases pass (219 of 219 against GNU bash 5.3.8, ADR 0019)
 
 ### Status: **Partial (scaffolding only)**
 
@@ -76,7 +84,7 @@ Last reviewed against the source tree on 2026-10-13.
 ### Acceptance Criteria
 - [ ] `git clone` (via allowed host), commit, diff works
 - [ ] `python -c` and `pip`-free stdlib scripts run
-- [ ] Trace shows every file change
+- [x] Trace shows every file change: commands record their file changes (ADR 0011), and writes and deletes through the filesystem API are runs of their own (ADR 0012). Renames and chmod are not separate operations, so a rename shows as a delete and a create
 - [ ] 70% pass rate on first agent-transcript corpus
 
 ### Status: **Not started**
@@ -136,7 +144,7 @@ Last reviewed against the source tree on 2026-10-13.
 **Goal**: Clustered deployment, security review, operations
 
 ### Deliverables
-- [ ] Clustered scheduler with Postgres
+- [ ] Clustered state with Postgres: the metadata store is built and tested against Postgres 18 (ADR 0023). The clustered scheduler is not built, and blobs still need a shared directory
 - [ ] Object-store CAS (S3-compatible)
 - [ ] CAS GC from live roots
 - [ ] Multi-tenant quotas, billing export
@@ -184,12 +192,12 @@ Last reviewed against the source tree on 2026-10-13.
 
 | Milestone | Target Week | Status | Blockers |
 |-----------|-------------|--------|----------|
-| M0 | 1 | In progress | CI depends on removed Nix flake; no `deny.toml`; no proptest suite |
-| M1 | 2-5 | Partial | Shell subset and isolate `exec` work over the VFS; runtime (V8) script execution is a TODO |
+| M0 | 1 | In progress | GitHub CI run not yet observed; `supply-chain` job added 2026-10-19 |
+| M1 | 2-5 | Partial | Shell and isolate `exec` work over the VFS; 219 conformance cases pass against GNU bash (acceptance: 200+ cases). `node -e`, `.ts` against VFS, and the cold-start benchmark are still open |
 | M2 | 6-9 | Partial | WASI command modules run over a VFS preopen, with a tool registry; no persistent AOT cache, no preview2 |
 | M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory; API-key auth exists; worker runs one child process per session |
 | M4 | 14-19 | Not started | Promotion stub; VMM and guest scaffolding only |
-| M5 | 20-24 | Not started | - |
+| M5 | 20-24 | Partial | Postgres state store (one node at a time, conditional writes, tested on Postgres 18). Clustered scheduler, placement, and object-store blobs are not built |
 | M6 | Ongoing | Not started | - |
 
 ---
