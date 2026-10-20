@@ -21,7 +21,6 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
@@ -29,3 +28,6 @@ futures = { workspace = true }
 
 [features]
 default = []
+
+[dev-dependencies]
+proptest = { workspace = true }

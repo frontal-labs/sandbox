@@ -14,11 +14,9 @@ tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
-webpki = { workspace = true }
 ipnet = { workspace = true }
 
 [features]
