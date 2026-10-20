@@ -14,7 +14,6 @@ rust_library(
         "@crates//:bytes",
         "@crates//:tracing",
         "@crates//:thiserror",
-        "@crates//:schemars",
         "@crates//:serde",
     ],
     proc_macro_deps = [

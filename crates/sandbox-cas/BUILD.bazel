@@ -14,12 +14,13 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:serde_json",
         "@crates//:tempfile",
         "@crates//:futures",
-    ],
+
+        "@crates//:fastcdc",
+],
     proc_macro_deps = [
         "@crates//:async-trait",
     ],

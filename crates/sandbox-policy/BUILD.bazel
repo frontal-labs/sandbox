@@ -10,15 +10,12 @@ rust_library(
         "@crates//:bytes",
         "@crates//:tracing",
         "@crates//:thiserror",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:reqwest",
         "@crates//:rustls",
-        "@crates//:webpki",
         "@crates//:ipnet",
     ],
     proc_macro_deps = [
-        "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )

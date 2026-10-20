@@ -12,6 +12,38 @@ bazel_dep(name = "rules_nodejs", version = "6.7.6")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "protobuf", version = "33.4")
+bazel_dep(name = "aspect_rules_js", version = "2.9.3")
+
+# Python: a registered interpreter, and pip packages from a locked requirements file.
+# sdks/python/requirements_lock.txt is generated from pyproject.toml with
+# `uv pip compile --extra dev --generate-hashes`.
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(python_version = "3.12")
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pypi",
+    python_version = "3.12",
+    requirements_lock = "//sdks/python:requirements_lock.txt",
+)
+use_repo(pip, "pypi")
+
+# TypeScript SDK: the npm packages it imports and tests with, from sdks/typescript's lock.
+# The packages are fetched into an external repo. Nothing installs node_modules in the
+# source tree, so the source-tree check (verify_node_modules_ignored) is not needed.
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm_sdk",
+    pnpm_lock = "//sdks/typescript:pnpm-lock.yaml",
+    npmrc = "//:.npmrc",
+)
+use_repo(npm, "npm_sdk")
+
+# The TypeScript compiler (`@npm_typescript`). Pinned to the version the SDK's lock
+# resolves (typescript@5.9.3). rules_ts builds ts_project rules against it.
+typescript = use_extension("@aspect_rules_ts//ts:extensions.bzl", "typescript")
+typescript.deps(version = "5.9.3")
+use_repo(typescript, "npm_typescript")
 
 # Rust toolchain
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
@@ -27,37 +59,100 @@ crate.from_cargo(
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
     ],
 )
 
-# v8 finds its generated bindings through CARGO_MANIFEST_DIR, which is a Bazel
-# runfiles copy that does not carry gen/*.rs. Point it at the file in the crate
-# source instead. The path is relative to src/, where binding.rs calls include!.
-# The name matches the x86_64 target in .bazelrc.
-#
-# The prebuilt static V8 library comes from the same release as the crate
-# (v150.4.0, simdutf, release, x86_64-apple-darwin). See
-# third_party/rusty_v8/rusty_v8.bzl for why the build script's own download is
-# not enough under Bazel.
+# Optional features are left out of the universe unless a spec asks for them. These
+# two back the `clustered` feature of sandbox-scheduler and the `vsock` feature of
+# sandbox-guest. Their Bazel targets depend on them.
+crate.spec(
+    package = "sqlx",
+    version = "0.8.6",
+    default_features = False,
+    features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"],
+)
+
+crate.spec(
+    package = "vsock",
+    version = "0.4.0",
+)
+
+# The prebuilt static V8 library is the release asset that matches the `v8` crate
+# (v150.4.0, simdutf, release). The v8 build script would download it on its own,
+# but under Bazel it writes the file outside the declared outputs, so the link
+# step cannot see it. See third_party/rusty_v8/rusty_v8.bzl. There is one archive
+# per target triple, each pinned by SHA-256 in the repo rule below.
 rusty_v8_archive = use_repo_rule("//third_party/rusty_v8:rusty_v8.bzl", "rusty_v8_archive")
 
 rusty_v8_archive(
-    name = "rusty_v8_archive",
+    name = "rusty_v8_archive_x86_64_apple_darwin",
     sha256 = "a750271fec6b211457ed0a5cf7d2eab1924b265621a82da86ab959d6ff0823e4",
     url = "https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_simdutf_release_x86_64-apple-darwin.a.gz",
 )
 
-crate.annotation(
+rusty_v8_archive(
+    name = "rusty_v8_archive_x86_64_unknown_linux_gnu",
+    # Downloaded from the release and hashed here. Upstream publishes no checksum file
+    # for these assets, so re-check the hash against a second download before a bump.
+    sha256 = "f48762ca10d1f1fc605a441c5ae430ec8ce1e9e80f14d78fbc42cb878c30b476",
+    url = "https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_simdutf_release_x86_64-unknown-linux-gnu.a.gz",
+)
+
+rusty_v8_archive(
+    name = "rusty_v8_archive_aarch64_unknown_linux_gnu",
+    sha256 = "539e283815a396a5796f32858b42e517b858ebaaeaaad05d03290ee8c864a527",
+    url = "https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_simdutf_release_aarch64-unknown-linux-gnu.a.gz",
+)
+
+# The v8 crate reads its generated bindings through CARGO_MANIFEST_DIR. Under Bazel
+# that points at a runfiles copy without gen/*.rs, so each triple points the build
+# script at its binding file in the crate source instead. The path is relative to
+# src/, where binding.rs calls include!.
+crate.annotation_select(
     crate = "v8",
+    version = "150.4.0",
+    triples = ["x86_64-apple-darwin"],
     build_script_env = {
         "RUSTY_V8_SRC_BINDING_PATH": "../gen/src_binding_simdutf_release_x86_64-apple-darwin.rs",
     },
-    compile_data = ["@@//third_party/rusty_v8:librusty_v8"],
-    rustc_flags = ["-Lnative=external/+rusty_v8_archive+rusty_v8_archive"],
+    compile_data = ["@@//third_party/rusty_v8:librusty_v8_x86_64_apple_darwin"],
+    rustc_flags = ["-Lnative=external/+rusty_v8_archive+rusty_v8_archive_x86_64_apple_darwin"],
+)
+
+crate.annotation_select(
+    crate = "v8",
+    version = "150.4.0",
+    triples = ["x86_64-unknown-linux-gnu"],
+    build_script_env = {
+        "RUSTY_V8_SRC_BINDING_PATH": "../gen/src_binding_simdutf_release_x86_64-unknown-linux-gnu.rs",
+    },
+    compile_data = ["@@//third_party/rusty_v8:librusty_v8_x86_64_unknown_linux_gnu"],
+    rustc_flags = ["-Lnative=external/+rusty_v8_archive+rusty_v8_archive_x86_64_unknown_linux_gnu"],
+)
+
+crate.annotation_select(
+    crate = "v8",
+    version = "150.4.0",
+    triples = ["aarch64-unknown-linux-gnu"],
+    build_script_env = {
+        "RUSTY_V8_SRC_BINDING_PATH": "../gen/src_binding_simdutf_release_aarch64-unknown-linux-gnu.rs",
+    },
+    compile_data = ["@@//third_party/rusty_v8:librusty_v8_aarch64_unknown_linux_gnu"],
+    rustc_flags = ["-Lnative=external/+rusty_v8_archive+rusty_v8_archive_aarch64_unknown_linux_gnu"],
 )
 
 use_repo(rust, "rust_toolchains")
-use_repo(crate, "crates")
-# The repo builds for the x86_64 Mac platform in .bazelrc. Registering it as an
-# execution platform lets rules_rust tests resolve their test toolchain on it.
-register_execution_platforms("//bazel/platforms:x86_64_apple_darwin")
+use_repo(
+    crate,
+    "crates",
+)
+
+# Every platform the workspace builds for is an execution platform too, so a
+# build on a Linux host (for example the dev container) and on a Mac both resolve.
+register_execution_platforms(
+    "//bazel/platforms:x86_64_apple_darwin",
+    "//bazel/platforms:aarch64_unknown_linux_gnu",
+    "//bazel/platforms:x86_64_unknown_linux_gnu",
+)

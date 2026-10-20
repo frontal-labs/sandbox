@@ -17,6 +17,11 @@ test --keep_going
 # Platform configuration - use x86_64 for Intel Mac
 build --platforms=//bazel/platforms:x86_64_apple_darwin
 
+# Linux builds select their platform explicitly. The dev container is aarch64, and
+# Buildkite Linux agents are x86_64.
+build:linux_aarch64 --platforms=//bazel/platforms:aarch64_unknown_linux_gnu
+build:linux_x86_64 --platforms=//bazel/platforms:x86_64_unknown_linux_gnu
+
 # Release configuration
 build:release --compilation_mode=opt
 build:release --strip=always
