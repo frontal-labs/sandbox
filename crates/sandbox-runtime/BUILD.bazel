@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_runtime",
@@ -27,13 +27,13 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_runtime_test",
+rust_test(
+    name = "sandbox_runtime_warm_isolates_test",
+    srcs = ["tests/warm_isolates.rs"],
+    crate_root = "tests/warm_isolates.rs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
         ":sandbox_runtime",
         "@crates//:tokio",
     ],
-    testonly = True,
 )

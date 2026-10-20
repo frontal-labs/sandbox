@@ -32,15 +32,5 @@ rust_library(
         "@crates//:seccompiler",
     ],
     visibility = ["//visibility:public"],
-)
-
-rust_library(
-    name = "sandbox_vmm_test",
-    edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_vmm",
-        "@crates//:tokio",
-    ],
-    testonly = True,
+    target_compatible_with = ["@platforms//os:linux"],
 )

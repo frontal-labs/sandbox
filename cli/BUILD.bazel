@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 rust_library(
     name = "cli_lib",
@@ -39,13 +39,77 @@ rust_binary(
     visibility = ["//visibility:public"],
 )
 
-rust_binary(
-    name = "sandbox_test",
+rust_test(
+    name = "cli_bench_process_test",
+    srcs = ["tests/bench_process.rs"],
+    crate_root = "tests/bench_process.rs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":sandbox"],
     deps = [
-        ":frontal-sandbox",
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
-    testonly = True,
+)
+
+rust_test(
+    name = "cli_serve_process_test",
+    srcs = ["tests/serve_process.rs"],
+    crate_root = "tests/serve_process.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":sandbox"],
+    deps = [
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "cli_trace_process_test",
+    srcs = ["tests/trace_process.rs"],
+    crate_root = "tests/trace_process.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":sandbox"],
+    deps = [
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "cli_worker_isolation_test",
+    srcs = ["tests/worker_isolation.rs"],
+    crate_root = "tests/worker_isolation.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":sandbox"],
+    deps = [
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "cli_worker_process_test",
+    srcs = ["tests/worker_process.rs"],
+    crate_root = "tests/worker_process.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":sandbox"],
+    deps = [
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
 )

@@ -19,14 +19,3 @@ rust_library(
     ],
     visibility = ["//visibility:public"],
 )
-
-rust_library(
-    name = "sandbox_policy_test",
-    edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_policy",
-        "@crates//:tokio",
-    ],
-    testonly = True,
-)

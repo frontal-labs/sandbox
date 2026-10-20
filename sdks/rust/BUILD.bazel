@@ -31,6 +31,7 @@ rust_test(
     edition = "2021",
     srcs = glob(["tests/**/*.rs"]),
     deps = [
+        "@crates//:futures",
         ":sandbox_sdk",
         "//crates/sandbox-server:sandbox_server",
         "//crates/sandbox-scheduler:sandbox_scheduler",

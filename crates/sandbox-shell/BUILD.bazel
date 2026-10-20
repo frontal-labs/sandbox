@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_shell",
@@ -24,13 +24,93 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_shell_test",
+rust_test(
+    name = "sandbox_shell_conformance_test",
+    srcs = ["tests/conformance.rs"],
+    crate_root = "tests/conformance.rs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
-    testonly = True,
+)
+
+rust_test(
+    name = "sandbox_shell_features_test",
+    srcs = ["tests/features.rs"],
+    crate_root = "tests/features.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "sandbox_shell_globbing_test",
+    srcs = ["tests/globbing.rs"],
+    crate_root = "tests/globbing.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "sandbox_shell_nesting_limit_test",
+    srcs = ["tests/nesting_limit.rs"],
+    crate_root = "tests/nesting_limit.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "sandbox_shell_recursion_test",
+    srcs = ["tests/recursion.rs"],
+    crate_root = "tests/recursion.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "sandbox_shell_streaming_test",
+    srcs = ["tests/streaming.rs"],
+    crate_root = "tests/streaming.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+)
+
+rust_test(
+    name = "sandbox_shell_typescript_test",
+    srcs = ["tests/typescript.rs"],
+    crate_root = "tests/typescript.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
 )

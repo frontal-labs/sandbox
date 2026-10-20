@@ -29,15 +29,5 @@ rust_library(
         "@crates//:vsock",
     ],
     visibility = ["//visibility:public"],
-)
-
-rust_library(
-    name = "sandbox_guest_test",
-    edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_guest",
-        "@crates//:tokio",
-    ],
-    testonly = True,
+    target_compatible_with = ["@platforms//os:linux"],
 )

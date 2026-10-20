@@ -3,6 +3,7 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
 rust_library(
     name = "bench_common",
     edition = "2021",
+    crate_root = "common/mod.rs",
     srcs = glob(["common/**/*.rs"]),
     deps = [
         "//crates/sandbox-types:sandbox_types",
@@ -114,13 +115,3 @@ alias(
 )
 
 # Test target for bench crate itself
-rust_library(
-    name = "bench_test",
-    edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":bench_common",
-        "@crates//:tokio",
-    ],
-    testonly = True,
-)

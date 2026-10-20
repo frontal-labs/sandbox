@@ -33,7 +33,7 @@ filegroup(
 # Test targets for the whole workspace
 alias(
     name = "test_all",
-    actual = "//crates/sandbox-types:sandbox_types_test",
+    actual = ":test_rust",
     visibility = ["//visibility:public"],
 )
 
@@ -58,9 +58,29 @@ alias(
 )
 
 # Test all Rust crates
-alias(
+test_suite(
     name = "test_rust",
-    actual = "//crates/sandbox-types:sandbox_types_test",
+    tests = [
+        "//cli:cli_bench_process_test",
+        "//cli:cli_serve_process_test",
+        "//cli:cli_trace_process_test",
+        "//cli:cli_worker_isolation_test",
+        "//cli:cli_worker_process_test",
+        "//crates/sandbox-proto:sandbox_proto_compat_test",
+        "//crates/sandbox-proto:sandbox_proto_roundtrip_test",
+        "//crates/sandbox-runtime:sandbox_runtime_warm_isolates_test",
+        "//crates/sandbox-shell:sandbox_shell_conformance_test",
+        "//crates/sandbox-shell:sandbox_shell_features_test",
+        "//crates/sandbox-shell:sandbox_shell_globbing_test",
+        "//crates/sandbox-shell:sandbox_shell_nesting_limit_test",
+        "//crates/sandbox-shell:sandbox_shell_recursion_test",
+        "//crates/sandbox-shell:sandbox_shell_streaming_test",
+        "//crates/sandbox-shell:sandbox_shell_typescript_test",
+        "//crates/sandbox-wasm:sandbox_wasm_wasi_fs_test",
+        "//crates/sandbox-worker:sandbox_worker_unit_test",
+        "//sdks/rust:sandbox_sdk_test",
+        "//sdks/rust:sandbox_sdk_unit_test",
+    ],
     visibility = ["//visibility:public"],
 )
 

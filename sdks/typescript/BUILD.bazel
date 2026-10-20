@@ -1,4 +1,9 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project", "ts_config")
+load("@npm_sdk//:defs.bzl", "npm_link_all_packages")
+
+# Links the SDK's npm packages (from pnpm-lock.yaml) into this package.
+npm_link_all_packages(name = "node_modules")
+
 
 # TypeScript configuration
 ts_config(
@@ -11,7 +16,11 @@ ts_project(
     name = "sandbox_sdk",
     srcs = glob(["src/**/*.ts"]),
     tsconfig = ":tsconfig",
-    deps = [],
+    transpiler = "tsc",
+    deps = [
+        ":node_modules/@ulid/ulid",
+        ":node_modules/zod",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -20,6 +29,7 @@ ts_project(
     name = "sandbox_sdk_test",
     srcs = glob(["tests/**/*.test.ts"]),
     tsconfig = ":tsconfig",
+    transpiler = "tsc",
     deps = [
         ":sandbox_sdk",
     ],
