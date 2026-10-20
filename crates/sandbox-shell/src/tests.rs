@@ -46,7 +46,7 @@ fn rejects_malformed_scripts() {
         "echo x |",
         "cat >",
         "echo x &",
-        "echo x 2> f",
+        "echo x 3> f",
     ] {
         let err = parse(bad).expect_err(bad);
         assert_eq!(err.code, ErrorCode::ShellError, "{bad}");

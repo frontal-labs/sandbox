@@ -1,9 +1,22 @@
 //! Builtin commands, implemented against the VFS.
 
-use crate::interpreter::{describe, failure, ExecutionResult, Flow, Shell};
+use crate::interpreter::{describe, failure, ExecutionResult, Flow, Input, Shell};
+use crate::{expand, printf};
 use sandbox_vfs::{SessionFs, VfsError};
 use std::collections::BTreeSet;
 use std::path::Path;
+
+/// Every builtin name. `type` reports these, so keep it in step with `builtin`.
+const BUILTINS: &[&str] = &[
+    "true", "false", "echo", "printf", "read", "pwd", "cd", "cat", "ls", "mkdir", "rm", "mv", "cp",
+    "touch", "head", "tail", "wc", "grep", "node", "wasm", "tools", ":", "test", "[", "break",
+    "continue", "return", "exit", "export", "unset", "type",
+];
+
+/// Whether `name` is a builtin.
+pub(crate) fn is_builtin(name: &str) -> bool {
+    BUILTINS.contains(&name)
+}
 
 fn ok(stdout: Vec<u8>) -> ExecutionResult {
     ExecutionResult {
@@ -36,6 +49,55 @@ fn parse_flags<'a>(
     Ok((flags, operands))
 }
 
+/// Like `failure`, with an exit status of the caller's choosing.
+fn failure_status(message: String, exit_code: i32) -> ExecutionResult {
+    ExecutionResult {
+        exit_code,
+        stdout: Vec::new(),
+        stderr: format!("{message}\n").into_bytes(),
+    }
+}
+
+/// `read` without `-r`: a backslash makes the next character literal.
+fn unescape_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Splits a line for `read NAME...`. Each name but the last takes one word, and
+/// the last takes the rest of the line, with leading and trailing blanks removed.
+fn split_for_names(names: &[&str], line: &str) -> Vec<(String, String)> {
+    let blanks = |c: char| expand::IFS.contains(&c);
+    let mut rest = line.trim_matches(blanks);
+    let mut values = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        if i + 1 == names.len() {
+            values.push((
+                (*name).to_string(),
+                rest.trim_end_matches(blanks).to_string(),
+            ));
+        } else {
+            let (word, after) = match rest.find(blanks) {
+                Some(end) => (&rest[..end], rest[end..].trim_start_matches(blanks)),
+                None => (rest, ""),
+            };
+            values.push(((*name).to_string(), word.to_string()));
+            rest = after;
+        }
+    }
+    values
+}
+
 fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
@@ -56,6 +118,11 @@ impl Shell {
                 ..ExecutionResult::default()
             },
             "echo" => self.echo(args),
+            "printf" => self.printf(args),
+            "read" => self.read(args, stdin),
+            "grep" => self.grep(args, stdin).await,
+            "exit" => self.exit_(args),
+            "type" => self.type_(args),
             "pwd" => ok(format!("{}\n", self.cwd()).into_bytes()),
             "cd" => self.cd(args).await,
             "cat" => self.cat(args, stdin).await,
@@ -66,6 +133,7 @@ impl Shell {
             "cp" => self.cp(args).await,
             "touch" => self.touch(args).await,
             "head" => self.head(args, stdin).await,
+            "tail" => self.tail(args, stdin).await,
             "wc" => self.wc(args, stdin).await,
             "node" => self.node(args, stdin).await,
             "wasm" => self.wasm(args, stdin).await,
@@ -86,16 +154,235 @@ impl Shell {
         Some(out)
     }
 
+    /// `echo [-neE] [WORD]...`. `-n` drops the newline, `-e` expands escapes,
+    /// and `-E` turns that back off. Other arguments are printed as they are.
     fn echo(&self, args: &[String]) -> ExecutionResult {
-        let (newline, words) = match args.first().map(String::as_str) {
-            Some("-n") => (false, &args[1..]),
-            _ => (true, args),
-        };
-        let mut text = words.join(" ");
+        let mut newline = true;
+        let mut escapes = false;
+        let mut index = 0;
+        while let Some(flags) = args.get(index).and_then(|arg| arg.strip_prefix('-')) {
+            if flags.is_empty() || !flags.chars().all(|c| matches!(c, 'n' | 'e' | 'E')) {
+                break;
+            }
+            for flag in flags.chars() {
+                match flag {
+                    'n' => newline = false,
+                    'e' => escapes = true,
+                    _ => escapes = false,
+                }
+            }
+            index += 1;
+        }
+        let mut text = args[index..].join(" ");
+        if escapes {
+            let (expanded, stop) = printf::echo_escapes(&text);
+            text = expanded;
+            if stop {
+                newline = false;
+            }
+        }
         if newline {
             text.push('\n');
         }
         ok(text.into_bytes())
+    }
+
+    /// `printf FORMAT [ARGUMENT]...`
+    fn printf(&self, args: &[String]) -> ExecutionResult {
+        let Some((format_text, rest)) = args.split_first() else {
+            return failure("printf: usage: printf FORMAT [ARGUMENT]...".to_string());
+        };
+        match printf::format(format_text, rest) {
+            Ok(printf::Formatted {
+                output,
+                error: None,
+            }) => ok(output),
+            Ok(printf::Formatted {
+                output,
+                error: Some(message),
+            }) => ExecutionResult {
+                exit_code: 1,
+                stdout: output,
+                stderr: format!("{message}\n").into_bytes(),
+            },
+            Err(message) => failure(message),
+        }
+    }
+
+    /// `read [-r] NAME...`: reads one line from the input the shell is reading,
+    /// or from this command's stdin. Status 1 at the end of the input. The last
+    /// name gets the rest of the line.
+    fn read(&mut self, args: &[String], stdin: Vec<u8>) -> ExecutionResult {
+        let (flags, names) = match parse_flags("read", args, "r") {
+            Ok(parsed) => parsed,
+            Err(message) => return failure(message),
+        };
+        if let Some(bad) = names.iter().find(|name| !expand::is_name(name)) {
+            return failure(format!("read: `{bad}': not a valid identifier"));
+        }
+        let (line, complete) = match self.input.as_mut() {
+            Some(input) => input.next_line(),
+            None => Input::new(stdin).next_line(),
+        }
+        .unwrap_or_default();
+        let mut line = String::from_utf8_lossy(&line).into_owned();
+        if !flags.contains(&'r') {
+            line = unescape_line(&line);
+        }
+        if names.is_empty() {
+            self.set_env("REPLY".to_string(), line);
+        } else {
+            for (name, value) in split_for_names(&names, &line) {
+                self.set_env(name, value);
+            }
+        }
+        ExecutionResult {
+            exit_code: i32::from(!complete),
+            ..ExecutionResult::default()
+        }
+    }
+
+    /// `exit [N]`. Ends the shell, or the subshell it runs in.
+    fn exit_(&mut self, args: &[String]) -> ExecutionResult {
+        let code = match args.first() {
+            None => self.status(),
+            Some(arg) => match arg.trim().parse::<i32>() {
+                Ok(code) => code & 0xff,
+                Err(_) => {
+                    self.flow = Some(Flow::Exit(2));
+                    return ExecutionResult {
+                        exit_code: 2,
+                        stdout: Vec::new(),
+                        stderr: format!("exit: {arg}: numeric argument required\n").into_bytes(),
+                    };
+                }
+            },
+        };
+        self.flow = Some(Flow::Exit(code));
+        ExecutionResult {
+            exit_code: code,
+            ..ExecutionResult::default()
+        }
+    }
+
+    /// `type NAME...`: says what each name is. Status 1 if one is not found.
+    fn type_(&self, args: &[String]) -> ExecutionResult {
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        let mut status = 0;
+        for name in args {
+            if self.has_function(name) {
+                stdout.push_str(&format!("{name} is a function\n"));
+            } else if BUILTINS.contains(&name.as_str()) {
+                stdout.push_str(&format!("{name} is a shell builtin\n"));
+            } else {
+                stderr.push_str(&format!("type: {name}: not found\n"));
+                status = 1;
+            }
+        }
+        ExecutionResult {
+            exit_code: status,
+            stdout: stdout.into_bytes(),
+            stderr: stderr.into_bytes(),
+        }
+    }
+
+    /// `grep [-FiqvnlcE] PATTERN [FILE]...`. PATTERN is a regular expression
+    /// (the syntax of the `regex` crate, which is close to POSIX extended). `-F`
+    /// matches it as text. Status 0 if a line is selected, 1 if none is, and 2
+    /// on error, which takes precedence unless `-q` found a match.
+    async fn grep(&self, args: &[String], stdin: Vec<u8>) -> ExecutionResult {
+        let (flags, operands) = match parse_flags("grep", args, "FiqvnlcE") {
+            Ok(parsed) => parsed,
+            Err(message) => return failure_status(message, 2),
+        };
+        let Some((pattern, files)) = operands.split_first() else {
+            return failure_status(
+                "grep: usage: grep [-FiqvnlcE] PATTERN [FILE]...".to_string(),
+                2,
+            );
+        };
+        let source = if flags.contains(&'F') {
+            regex::escape(pattern)
+        } else {
+            pattern.to_string()
+        };
+        let regex = match regex::RegexBuilder::new(&source)
+            .case_insensitive(flags.contains(&'i'))
+            .build()
+        {
+            Ok(regex) => regex,
+            Err(e) => return failure_status(format!("grep: {pattern}: {e}"), 2),
+        };
+
+        let mut inputs: Vec<(Option<String>, Vec<u8>)> = Vec::new();
+        let mut stderr = String::new();
+        let mut error = false;
+        if files.is_empty() {
+            inputs.push((None, stdin));
+        }
+        for file in files {
+            match self.read_file(file).await {
+                Ok(data) => inputs.push((Some((*file).to_string()), data)),
+                Err(e) => {
+                    error = true;
+                    stderr.push_str(&format!("grep: {file}: {}\n", describe(&e)));
+                }
+            }
+        }
+
+        let label = inputs.len() > 1;
+        let mut stdout = String::new();
+        let mut any = false;
+        for (name, data) in &inputs {
+            let text = String::from_utf8_lossy(data);
+            let mut count = 0usize;
+            for (number, line) in text.lines().enumerate() {
+                if regex.is_match(line) == flags.contains(&'v') {
+                    continue;
+                }
+                count += 1;
+                if flags.contains(&'q') || flags.contains(&'l') || flags.contains(&'c') {
+                    continue;
+                }
+                if label {
+                    stdout.push_str(name.as_deref().unwrap_or("(standard input)"));
+                    stdout.push(':');
+                }
+                if flags.contains(&'n') {
+                    stdout.push_str(&format!("{}:", number + 1));
+                }
+                stdout.push_str(line);
+                stdout.push('\n');
+            }
+            any |= count > 0;
+            if flags.contains(&'c') {
+                if label {
+                    stdout.push_str(name.as_deref().unwrap_or("(standard input)"));
+                    stdout.push(':');
+                }
+                stdout.push_str(&format!("{count}\n"));
+            }
+            if flags.contains(&'l') && count > 0 {
+                stdout.push_str(name.as_deref().unwrap_or("(standard input)"));
+                stdout.push('\n');
+            }
+        }
+
+        let status = if error && !(flags.contains(&'q') && any) {
+            2
+        } else {
+            i32::from(!any)
+        };
+        ExecutionResult {
+            exit_code: status,
+            stdout: if flags.contains(&'q') {
+                Vec::new()
+            } else {
+                stdout.into_bytes()
+            },
+            stderr: stderr.into_bytes(),
+        }
     }
 
     async fn cd(&mut self, args: &[String]) -> ExecutionResult {
@@ -275,6 +562,14 @@ impl Shell {
         };
         let from = self.resolve(src);
         let to = self.destination(src, dst).await;
+        // Like mv, replace a file that is already at the destination.
+        if let Ok(stat) = self.fs().stat(Path::new(&to)).await {
+            if !stat.is_dir {
+                if let Err(e) = self.fs().rm(Path::new(&to), false).await {
+                    return failure(format!("mv: {dst}: {}", describe(&e)));
+                }
+            }
+        }
         match self.fs().rename(Path::new(&from), Path::new(&to)).await {
             Ok(()) => ok(Vec::new()),
             Err(e) => failure(format!("mv: {src}: {}", describe(&e))),
@@ -332,6 +627,35 @@ impl Shell {
             }
         }
         ok(Vec::new())
+    }
+
+    /// `tail [-n N] [FILE]...`: the last N lines (default 10).
+    async fn tail(&self, args: &[String], stdin: Vec<u8>) -> ExecutionResult {
+        let mut count = 10usize;
+        let mut rest = Vec::new();
+        let mut iter = args.iter();
+        while let Some(arg) = iter.next() {
+            if arg == "-n" {
+                match iter.next().and_then(|v| v.parse().ok()) {
+                    Some(n) => count = n,
+                    None => return failure("tail: option -n needs a number".to_string()),
+                }
+            } else {
+                rest.push(arg.clone());
+            }
+        }
+        let inputs = self.read_inputs("tail", &rest, stdin).await;
+        let mut out = Vec::new();
+        for data in inputs.data {
+            let lines: Vec<&[u8]> = data.split_inclusive(|&b| b == b'\n').collect();
+            let first = lines.len().saturating_sub(count);
+            out.extend(lines[first..].iter().flat_map(|line| line.iter().copied()));
+        }
+        ExecutionResult {
+            exit_code: i32::from(!inputs.errors.is_empty()),
+            stdout: out,
+            stderr: inputs.errors.join("\n").into_bytes(),
+        }
     }
 
     async fn head(&self, args: &[String], stdin: Vec<u8>) -> ExecutionResult {
@@ -582,13 +906,29 @@ impl Shell {
         let code = match args {
             [] => String::from_utf8_lossy(&stdin).into_owned(),
             [flag, code] if flag == "-e" => code.clone(),
-            [file] if !file.starts_with('-') => match self.read_file(file).await {
-                Ok(data) => String::from_utf8_lossy(&data).into_owned(),
-                Err(e) => return failure(format!("node: {file}: {}", describe(&e))),
-            },
+            [file] if !file.starts_with('-') => {
+                let source = match self.read_file(file).await {
+                    Ok(data) => String::from_utf8_lossy(&data).into_owned(),
+                    Err(e) => return failure(format!("node: {file}: {}", describe(&e))),
+                };
+                // A `.ts` file runs as the JavaScript its types erase to.
+                if file.ends_with(".ts") {
+                    match sandbox_runtime::strip_types(&source, file) {
+                        Ok(js) => js,
+                        Err(e) => return failure(format!("node: {}", e.message)),
+                    }
+                } else {
+                    source
+                }
+            }
             _ => return failure("node: usage: node [-e CODE | FILE]".to_string()),
         };
-        match sandbox_runtime::execute_script(&code, sandbox_runtime::ScriptLimits::default()).await
+        match sandbox_runtime::execute_script_streamed(
+            &code,
+            sandbox_runtime::ScriptLimits::default(),
+            self.tool_stdout(),
+        )
+        .await
         {
             Ok(out) => ExecutionResult {
                 exit_code: out.exit_code,
@@ -611,12 +951,13 @@ impl Shell {
             Ok(bytes) => bytes,
             Err(e) => return failure(format!("wasm: {file}: {}", describe(&e))),
         };
-        match sandbox_wasm::run_module_with_mount(
+        match sandbox_wasm::run_module_with_mount_streamed(
             module,
             args.to_vec(),
             stdin,
             sandbox_wasm::WasiLimits::default(),
             Some(self.mount()),
+            self.tool_stdout(),
         )
         .await
         {

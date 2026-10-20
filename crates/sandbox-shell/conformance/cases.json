@@ -1,0 +1,1319 @@
+{
+ "recorded_with": "GNU bash, version 5.3.8(1)-release (aarch64-apple-darwin24.6.0)",
+ "cases": [
+  {
+   "name": "echo_plain_0",
+   "script": "echo 'hi'",
+   "stdout": "hi\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_1",
+   "script": "echo 'hello world'",
+   "stdout": "hello world\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_2",
+   "script": "echo 'a  b   c'",
+   "stdout": "a  b   c\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_3",
+   "script": "echo 'tab\there'",
+   "stdout": "tab\there\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_4",
+   "script": "echo ''",
+   "stdout": "\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_5",
+   "script": "echo 'x=1'",
+   "stdout": "x=1\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_6",
+   "script": "echo '-n'",
+   "stdout": "",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_7",
+   "script": "echo '100%'",
+   "stdout": "100%\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_8",
+   "script": "echo 'back\\slash'",
+   "stdout": "back\\slash\n",
+   "status": 0
+  },
+  {
+   "name": "echo_plain_9",
+   "script": "echo \"quote'd\"",
+   "stdout": "quote'd\n",
+   "status": 0
+  },
+  {
+   "name": "echo_no_newline",
+   "script": "echo -n abc; echo def",
+   "stdout": "abcdef\n",
+   "status": 0
+  },
+  {
+   "name": "echo_multiple_args",
+   "script": "echo a b c d",
+   "stdout": "a b c d\n",
+   "status": 0
+  },
+  {
+   "name": "echo_empty",
+   "script": "echo",
+   "stdout": "\n",
+   "status": 0
+  },
+  {
+   "name": "echo_dash_e_escapes",
+   "script": "echo -e 'a\\tb\\nc'",
+   "stdout": "a\tb\nc\n",
+   "status": 0
+  },
+  {
+   "name": "echo_literal_backslash_n",
+   "script": "echo 'a\\nb'",
+   "stdout": "a\\nb\n",
+   "status": 0
+  },
+  {
+   "name": "echo_double_quoted_var",
+   "script": "x=foo; echo \"$x bar\"",
+   "stdout": "foo bar\n",
+   "status": 0
+  },
+  {
+   "name": "echo_single_quoted_var",
+   "script": "x=foo; echo '$x'",
+   "stdout": "$x\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_0",
+   "script": "printf '%s\\n' word",
+   "stdout": "word\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_1",
+   "script": "printf '%d\\n' 42",
+   "stdout": "42\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_2",
+   "script": "printf '%5s|\\n' ab",
+   "stdout": "   ab|\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_3",
+   "script": "printf '%-5s|\\n' ab",
+   "stdout": "ab   |\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_4",
+   "script": "printf '%x\\n' 255",
+   "stdout": "ff\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_5",
+   "script": "printf '%o\\n' 8",
+   "stdout": "10\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_6",
+   "script": "printf '%c\\n' Z",
+   "stdout": "Z\n",
+   "status": 0
+  },
+  {
+   "name": "printf_fmt_7",
+   "script": "printf '%%\\n'",
+   "stdout": "%\n",
+   "status": 0
+  },
+  {
+   "name": "printf_multiple_args",
+   "script": "printf '%s-%s\\n' a b c d",
+   "stdout": "a-b\nc-d\n",
+   "status": 0
+  },
+  {
+   "name": "printf_no_newline",
+   "script": "printf 'x'; printf 'y\\n'",
+   "stdout": "xy\n",
+   "status": 0
+  },
+  {
+   "name": "var_assign_echo",
+   "script": "x=5; echo $x",
+   "stdout": "5\n",
+   "status": 0
+  },
+  {
+   "name": "var_braced",
+   "script": "x=abc; echo ${x}def",
+   "stdout": "abcdef\n",
+   "status": 0
+  },
+  {
+   "name": "var_unset_default",
+   "script": "unset y; echo ${y:-fallback}",
+   "stdout": "fallback\n",
+   "status": 0
+  },
+  {
+   "name": "var_set_default",
+   "script": "y=set; echo ${y:-fallback}",
+   "stdout": "set\n",
+   "status": 0
+  },
+  {
+   "name": "var_empty_default",
+   "script": "y=; echo ${y:-fallback}",
+   "stdout": "fallback\n",
+   "status": 0
+  },
+  {
+   "name": "var_length",
+   "script": "x=hello; echo ${#x}",
+   "stdout": "5\n",
+   "status": 0
+  },
+  {
+   "name": "var_length_empty",
+   "script": "x=; echo ${#x}",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "var_suffix_strip",
+   "script": "f=archive.tar.gz; echo ${f%.gz}",
+   "stdout": "archive.tar\n",
+   "status": 0
+  },
+  {
+   "name": "var_suffix_strip_long",
+   "script": "f=archive.tar.gz; echo ${f%%.*}",
+   "stdout": "archive\n",
+   "status": 0
+  },
+  {
+   "name": "var_prefix_strip",
+   "script": "p=/usr/local/bin; echo ${p#/usr/}",
+   "stdout": "local/bin\n",
+   "status": 0
+  },
+  {
+   "name": "var_prefix_strip_long",
+   "script": "p=/usr/local/bin; echo ${p##*/}",
+   "stdout": "bin\n",
+   "status": 0
+  },
+  {
+   "name": "var_special_status",
+   "script": "true; echo $?; false; echo $?",
+   "stdout": "0\n1\n",
+   "status": 0
+  },
+  {
+   "name": "var_status_after_failure",
+   "script": "ls /nonexistent_dir_xyz >/dev/null 2>&1; echo $?",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "var_export_visible_in_child",
+   "script": "export GREET=hi; sh_like=$GREET; echo $sh_like",
+   "stdout": "hi\n",
+   "status": 0
+  },
+  {
+   "name": "var_reassign",
+   "script": "x=1; x=2; echo $x",
+   "stdout": "2\n",
+   "status": 0
+  },
+  {
+   "name": "var_prefix_assignment_command",
+   "script": "X=temp sh_var_test=1; echo ${sh_var_test}",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "var_multiple_in_word",
+   "script": "a=1; b=2; echo $a$b${a}x",
+   "stdout": "121x\n",
+   "status": 0
+  },
+  {
+   "name": "var_positional_none",
+   "script": "set -- ; echo \"[$#]\"",
+   "stdout": "[0]\n",
+   "status": 0
+  },
+  {
+   "name": "var_positional_args",
+   "script": "f() { echo $1 $2 $#; }; f one two three",
+   "stdout": "one two 3\n",
+   "status": 0
+  },
+  {
+   "name": "var_at_expansion",
+   "script": "f() { for a in \"$@\"; do echo \"<$a>\"; done; }; f 'a b' c",
+   "stdout": "<a b>\n<c>\n",
+   "status": 0
+  },
+  {
+   "name": "var_star_expansion",
+   "script": "f() { echo \"$*\"; }; f a b c",
+   "stdout": "a b c\n",
+   "status": 0
+  },
+  {
+   "name": "var_dollar_question_nested",
+   "script": "f() { return 7; }; f; echo $?",
+   "stdout": "7\n",
+   "status": 0
+  },
+  {
+   "name": "var_unquoted_split",
+   "script": "x='a b  c'; for w in $x; do echo \"[$w]\"; done",
+   "stdout": "[a]\n[b]\n[c]\n",
+   "status": 0
+  },
+  {
+   "name": "var_quoted_no_split",
+   "script": "x='a b  c'; for w in \"$x\"; do echo \"[$w]\"; done",
+   "stdout": "[a b  c]\n",
+   "status": 0
+  },
+  {
+   "name": "quote_double_escape",
+   "script": "echo \"a\\\"b\"",
+   "stdout": "a\"b\n",
+   "status": 0
+  },
+  {
+   "name": "quote_mixed",
+   "script": "echo 'single'\"double\"bare",
+   "stdout": "singledoublebare\n",
+   "status": 0
+  },
+  {
+   "name": "quote_empty_arg",
+   "script": "echo '' x",
+   "stdout": " x\n",
+   "status": 0
+  },
+  {
+   "name": "quote_glob_literal",
+   "script": "echo '*'",
+   "stdout": "*\n",
+   "status": 0
+  },
+  {
+   "name": "quote_space_in_arg",
+   "script": "mkdir -p q; echo hi > 'q/a b.txt'; cat 'q/a b.txt'",
+   "stdout": "hi\n",
+   "status": 0
+  },
+  {
+   "name": "mkdir_and_ls",
+   "script": "mkdir -p d1/d2; ls d1",
+   "stdout": "d2\n",
+   "status": 0
+  },
+  {
+   "name": "mkdir_p_nested",
+   "script": "mkdir -p a/b/c && ls a/b",
+   "stdout": "c\n",
+   "status": 0
+  },
+  {
+   "name": "touch_creates_empty",
+   "script": "touch empty.txt; cat empty.txt; echo done",
+   "stdout": "done\n",
+   "status": 0
+  },
+  {
+   "name": "write_and_read",
+   "script": "echo content > f.txt; cat f.txt",
+   "stdout": "content\n",
+   "status": 0
+  },
+  {
+   "name": "append_redirect",
+   "script": "echo one > f.txt; echo two >> f.txt; cat f.txt",
+   "stdout": "one\ntwo\n",
+   "status": 0
+  },
+  {
+   "name": "overwrite_redirect",
+   "script": "echo one > f.txt; echo two > f.txt; cat f.txt",
+   "stdout": "two\n",
+   "status": 0
+  },
+  {
+   "name": "cp_file",
+   "script": "echo data > src.txt; cp src.txt dst.txt; cat dst.txt",
+   "stdout": "data\n",
+   "status": 0
+  },
+  {
+   "name": "mv_file",
+   "script": "echo data > a.txt; mv a.txt b.txt; cat b.txt; ls",
+   "stdout": "data\nb.txt\n",
+   "status": 0
+  },
+  {
+   "name": "rm_file",
+   "script": "echo x > gone.txt; rm gone.txt; ls",
+   "stdout": "",
+   "status": 0
+  },
+  {
+   "name": "rm_dir_empty_fails_gracefully",
+   "script": "mkdir -p dd; rm dd; echo $?",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "cat_multiple",
+   "script": "echo one > a.txt; echo two > b.txt; cat a.txt b.txt",
+   "stdout": "one\ntwo\n",
+   "status": 0
+  },
+  {
+   "name": "cat_stdin",
+   "script": "echo piped | cat",
+   "stdout": "piped\n",
+   "status": 0
+  },
+  {
+   "name": "cat_missing_status",
+   "script": "cat no_such_file_here 2>/dev/null; echo $?",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "head_default",
+   "script": "seq_out=''; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo line$i; done > n.txt; head n.txt",
+   "stdout": "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n",
+   "status": 0
+  },
+  {
+   "name": "head_n",
+   "script": "for i in 1 2 3 4 5; do echo l$i; done > n.txt; head -n 2 n.txt",
+   "stdout": "l1\nl2\n",
+   "status": 0
+  },
+  {
+   "name": "tail_default",
+   "script": "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo line$i; done > n.txt; tail n.txt",
+   "stdout": "line3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\n",
+   "status": 0
+  },
+  {
+   "name": "tail_n",
+   "script": "for i in 1 2 3 4 5; do echo l$i; done > n.txt; tail -n 2 n.txt",
+   "stdout": "l4\nl5\n",
+   "status": 0
+  },
+  {
+   "name": "wc_lines",
+   "script": "printf 'a\\nb\\nc\\n' > w.txt; wc -l w.txt",
+   "stdout": "       3 w.txt\n",
+   "status": 0
+  },
+  {
+   "name": "wc_words",
+   "script": "echo one two three > w.txt; wc -w w.txt",
+   "stdout": "       3 w.txt\n",
+   "status": 0
+  },
+  {
+   "name": "wc_chars",
+   "script": "printf 'abc' > w.txt; wc -c w.txt",
+   "stdout": "       3 w.txt\n",
+   "status": 0
+  },
+  {
+   "name": "ls_sorted",
+   "script": "touch b.txt a.txt c.txt; ls",
+   "stdout": "a.txt\nb.txt\nc.txt\n",
+   "status": 0
+  },
+  {
+   "name": "ls_empty_dir",
+   "script": "mkdir -p e; ls e; echo $?",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "test_file_exists",
+   "script": "touch f; if test -f f; then echo yes; fi",
+   "stdout": "yes\n",
+   "status": 0
+  },
+  {
+   "name": "test_dir_exists",
+   "script": "mkdir -p dir; if test -d dir; then echo yes; fi",
+   "stdout": "yes\n",
+   "status": 0
+  },
+  {
+   "name": "test_missing",
+   "script": "if test -e nothere; then echo yes; else echo no; fi",
+   "stdout": "no\n",
+   "status": 0
+  },
+  {
+   "name": "bracket_string_eq",
+   "script": "x=abc; if [ \"$x\" = abc ]; then echo same; fi",
+   "stdout": "same\n",
+   "status": 0
+  },
+  {
+   "name": "bracket_string_ne",
+   "script": "x=abc; if [ \"$x\" != abd ]; then echo diff; fi",
+   "stdout": "diff\n",
+   "status": 0
+  },
+  {
+   "name": "bracket_numeric_eq",
+   "script": "if [ 3 -eq 3 ]; then echo eq; fi",
+   "stdout": "eq\n",
+   "status": 0
+  },
+  {
+   "name": "bracket_numeric_lt",
+   "script": "if [ 2 -lt 3 ]; then echo lt; fi",
+   "stdout": "lt\n",
+   "status": 0
+  },
+  {
+   "name": "bracket_numeric_gt",
+   "script": "if [ 2 -gt 3 ]; then echo gt; else echo not; fi",
+   "stdout": "not\n",
+   "status": 0
+  },
+  {
+   "name": "bracket_empty_string",
+   "script": "if [ -z '' ]; then echo empty; fi",
+   "stdout": "empty\n",
+   "status": 0
+  },
+  {
+   "name": "bracket_nonempty",
+   "script": "if [ -n 'x' ]; then echo nonempty; fi",
+   "stdout": "nonempty\n",
+   "status": 0
+  },
+  {
+   "name": "test_negation",
+   "script": "if ! [ 1 -eq 2 ]; then echo negated; fi",
+   "stdout": "negated\n",
+   "status": 0
+  },
+  {
+   "name": "test_file_size",
+   "script": "echo hi > s.txt; if [ -s s.txt ]; then echo nonempty; fi",
+   "stdout": "nonempty\n",
+   "status": 0
+  },
+  {
+   "name": "test_empty_file",
+   "script": "touch z; if [ -s z ]; then echo big; else echo small; fi",
+   "stdout": "small\n",
+   "status": 0
+  },
+  {
+   "name": "cd_and_relative",
+   "script": "mkdir -p sub; echo deep > sub/f.txt; cd sub; cat f.txt",
+   "stdout": "deep\n",
+   "status": 0
+  },
+  {
+   "name": "cd_back",
+   "script": "mkdir -p x; cd x; cd ..; echo ok > top.txt; cat top.txt",
+   "stdout": "ok\n",
+   "status": 0
+  },
+  {
+   "name": "cd_nested_relative",
+   "script": "mkdir -p p/q; cd p; cd q; echo here > h.txt; cd ../..; cat p/q/h.txt",
+   "stdout": "here\n",
+   "status": 0
+  },
+  {
+   "name": "glob_star",
+   "script": "touch a.log b.log c.txt; echo *.log",
+   "stdout": "a.log b.log\n",
+   "status": 0
+  },
+  {
+   "name": "glob_question",
+   "script": "touch ab abc ac; echo a?",
+   "stdout": "ab ac\n",
+   "status": 0
+  },
+  {
+   "name": "glob_no_match_literal",
+   "script": "echo nomatch*.xyz",
+   "stdout": "nomatch*.xyz\n",
+   "status": 0
+  },
+  {
+   "name": "glob_in_dir",
+   "script": "mkdir -p g; touch g/1.md g/2.md g/3.txt; echo g/*.md",
+   "stdout": "g/1.md g/2.md\n",
+   "status": 0
+  },
+  {
+   "name": "glob_class",
+   "script": "touch x1 x2 xa; echo x[12]",
+   "stdout": "x1 x2\n",
+   "status": 0
+  },
+  {
+   "name": "glob_negated_class",
+   "script": "touch y1 y2 ya; echo y[!1]",
+   "stdout": "y2 ya\n",
+   "status": 0
+  },
+  {
+   "name": "rm_glob",
+   "script": "touch r1.tmp r2.tmp keep.txt; rm r*.tmp; ls",
+   "stdout": "keep.txt\n",
+   "status": 0
+  },
+  {
+   "name": "cp_into_dir",
+   "script": "mkdir -p dest; echo v > s.txt; cp s.txt dest/; cat dest/s.txt",
+   "stdout": "v\n",
+   "status": 0
+  },
+  {
+   "name": "mv_into_dir",
+   "script": "mkdir -p dest; echo v > s.txt; mv s.txt dest/; cat dest/s.txt; ls",
+   "stdout": "v\ndest\n",
+   "status": 0
+  },
+  {
+   "name": "pipe_two",
+   "script": "echo abc | cat",
+   "stdout": "abc\n",
+   "status": 0
+  },
+  {
+   "name": "pipe_three",
+   "script": "echo hello | cat | cat",
+   "stdout": "hello\n",
+   "status": 0
+  },
+  {
+   "name": "pipe_wc",
+   "script": "printf 'a\\nb\\n' | wc -l",
+   "stdout": "       2\n",
+   "status": 0
+  },
+  {
+   "name": "pipe_status_last",
+   "script": "false | true; echo $?",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "pipe_head",
+   "script": "for i in 1 2 3 4 5; do echo $i; done | head -n 2",
+   "stdout": "1\n2\n",
+   "status": 0
+  },
+  {
+   "name": "redirect_stdin",
+   "script": "echo from-file > in.txt; cat < in.txt",
+   "stdout": "from-file\n",
+   "status": 0
+  },
+  {
+   "name": "redirect_both_to_file",
+   "script": "ls no_such_zz > out.txt 2>&1; cat out.txt | wc -l",
+   "stdout": "       1\n",
+   "status": 0
+  },
+  {
+   "name": "redirect_stderr_to_null",
+   "script": "ls no_such_zz 2>/dev/null; echo $?",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "redirect_stdout_then_stderr",
+   "script": "echo ok > o.txt; cat o.txt",
+   "stdout": "ok\n",
+   "status": 0
+  },
+  {
+   "name": "and_success",
+   "script": "true && echo yes",
+   "stdout": "yes\n",
+   "status": 0
+  },
+  {
+   "name": "and_failure",
+   "script": "false && echo yes; echo after",
+   "stdout": "after\n",
+   "status": 0
+  },
+  {
+   "name": "or_success",
+   "script": "true || echo no",
+   "stdout": "",
+   "status": 0
+  },
+  {
+   "name": "or_failure",
+   "script": "false || echo fallback",
+   "stdout": "fallback\n",
+   "status": 0
+  },
+  {
+   "name": "semicolon_sequence",
+   "script": "echo a; echo b; echo c",
+   "stdout": "a\nb\nc\n",
+   "status": 0
+  },
+  {
+   "name": "and_or_chain",
+   "script": "false || true && echo chained",
+   "stdout": "chained\n",
+   "status": 0
+  },
+  {
+   "name": "pipe_with_and",
+   "script": "echo x | cat && echo done",
+   "stdout": "x\ndone\n",
+   "status": 0
+  },
+  {
+   "name": "empty_command_sequence",
+   "script": "; echo still",
+   "stdout": "",
+   "status": 2
+  },
+  {
+   "name": "append_creates",
+   "script": "echo first >> new.txt; cat new.txt",
+   "stdout": "first\n",
+   "status": 0
+  },
+  {
+   "name": "if_true",
+   "script": "if true; then echo t; else echo f; fi",
+   "stdout": "t\n",
+   "status": 0
+  },
+  {
+   "name": "if_false",
+   "script": "if false; then echo t; else echo f; fi",
+   "stdout": "f\n",
+   "status": 0
+  },
+  {
+   "name": "if_elif",
+   "script": "x=2; if [ $x -eq 1 ]; then echo one; elif [ $x -eq 2 ]; then echo two; else echo other; fi",
+   "stdout": "two\n",
+   "status": 0
+  },
+  {
+   "name": "if_no_else",
+   "script": "if false; then echo nope; fi; echo after",
+   "stdout": "after\n",
+   "status": 0
+  },
+  {
+   "name": "if_nested",
+   "script": "if true; then if false; then echo a; else echo b; fi; fi",
+   "stdout": "b\n",
+   "status": 0
+  },
+  {
+   "name": "if_status_from_command",
+   "script": "if grep -q zzz /dev/null; then echo found; else echo missing; fi",
+   "stdout": "missing\n",
+   "status": 0
+  },
+  {
+   "name": "for_list",
+   "script": "for w in a b c; do echo $w; done",
+   "stdout": "a\nb\nc\n",
+   "status": 0
+  },
+  {
+   "name": "for_empty_list",
+   "script": "for w in; do echo $w; done; echo end",
+   "stdout": "end\n",
+   "status": 0
+  },
+  {
+   "name": "for_glob",
+   "script": "touch g1.c g2.c; for f in g*.c; do echo $f; done",
+   "stdout": "g1.c\ng2.c\n",
+   "status": 0
+  },
+  {
+   "name": "for_seq_words",
+   "script": "for i in 1 2 3; do echo n$i; done",
+   "stdout": "n1\nn2\nn3\n",
+   "status": 0
+  },
+  {
+   "name": "for_nested",
+   "script": "for i in 1 2; do for j in a b; do echo $i$j; done; done",
+   "stdout": "1a\n1b\n2a\n2b\n",
+   "status": 0
+  },
+  {
+   "name": "for_break",
+   "script": "for i in 1 2 3 4; do if [ $i -eq 3 ]; then break; fi; echo $i; done",
+   "stdout": "1\n2\n",
+   "status": 0
+  },
+  {
+   "name": "for_continue",
+   "script": "for i in 1 2 3; do if [ $i -eq 2 ]; then continue; fi; echo $i; done",
+   "stdout": "1\n3\n",
+   "status": 0
+  },
+  {
+   "name": "while_counter",
+   "script": "i=0; while [ $i -lt 3 ]; do echo $i; i=$((i+1)); done",
+   "stdout": "0\n1\n2\n",
+   "status": 0
+  },
+  {
+   "name": "while_false",
+   "script": "while false; do echo never; done; echo end",
+   "stdout": "end\n",
+   "status": 0
+  },
+  {
+   "name": "until_loop",
+   "script": "i=0; until [ $i -ge 2 ]; do echo u$i; i=$((i+1)); done",
+   "stdout": "u0\nu1\n",
+   "status": 0
+  },
+  {
+   "name": "while_break",
+   "script": "while true; do echo once; break; done",
+   "stdout": "once\n",
+   "status": 0
+  },
+  {
+   "name": "loop_with_pipe",
+   "script": "for i in b a c; do echo $i; done | cat",
+   "stdout": "b\na\nc\n",
+   "status": 0
+  },
+  {
+   "name": "case_word",
+   "script": "x=beta; case $x in alpha) echo A;; beta) echo B;; esac",
+   "stdout": "B\n",
+   "status": 0
+  },
+  {
+   "name": "case_default",
+   "script": "x=zzz; case $x in a) echo A;; *) echo other;; esac",
+   "stdout": "other\n",
+   "status": 0
+  },
+  {
+   "name": "case_multiple_patterns",
+   "script": "x=b; case $x in a|b) echo ab;; c) echo c;; esac",
+   "stdout": "ab\n",
+   "status": 0
+  },
+  {
+   "name": "case_no_match",
+   "script": "x=q; case $x in a) echo A;; esac; echo done",
+   "stdout": "done\n",
+   "status": 0
+  },
+  {
+   "name": "case_glob_pattern",
+   "script": "f=file.txt; case $f in *.txt) echo text;; *) echo other;; esac",
+   "stdout": "text\n",
+   "status": 0
+  },
+  {
+   "name": "case_quoted_pattern",
+   "script": "x='*'; case $x in '*') echo star;; esac",
+   "stdout": "star\n",
+   "status": 0
+  },
+  {
+   "name": "function_basic",
+   "script": "hello() { echo hello; }; hello",
+   "stdout": "hello\n",
+   "status": 0
+  },
+  {
+   "name": "function_args",
+   "script": "greet() { echo hi $1; }; greet bob",
+   "stdout": "hi bob\n",
+   "status": 0
+  },
+  {
+   "name": "function_return_status",
+   "script": "f() { return 3; }; f; echo $?",
+   "stdout": "3\n",
+   "status": 0
+  },
+  {
+   "name": "function_return_zero",
+   "script": "f() { true; }; f; echo $?",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "function_redefine",
+   "script": "f() { echo one; }; f; f() { echo two; }; f",
+   "stdout": "one\ntwo\n",
+   "status": 0
+  },
+  {
+   "name": "function_calls_function",
+   "script": "a() { echo A; }; b() { a; echo B; }; b",
+   "stdout": "A\nB\n",
+   "status": 0
+  },
+  {
+   "name": "function_local_global_var",
+   "script": "v=1; f() { v=2; }; f; echo $v",
+   "stdout": "2\n",
+   "status": 0
+  },
+  {
+   "name": "function_in_pipe",
+   "script": "up() { cat; }; echo text | up",
+   "stdout": "text\n",
+   "status": 0
+  },
+  {
+   "name": "function_recursive",
+   "script": "down() { if [ $1 -gt 0 ]; then echo $1; down $(($1-1)); fi; }; down 3",
+   "stdout": "3\n2\n1\n",
+   "status": 0
+  },
+  {
+   "name": "subshell_isolation",
+   "script": "x=1; (x=2; echo $x); echo $x",
+   "stdout": "2\n1\n",
+   "status": 0
+  },
+  {
+   "name": "subshell_status",
+   "script": "(exit 0); echo $?",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "subshell_in_list",
+   "script": "(echo a; echo b); echo c",
+   "stdout": "a\nb\nc\n",
+   "status": 0
+  },
+  {
+   "name": "group_no_isolation",
+   "script": "x=1; { x=2; }; echo $x",
+   "stdout": "2\n",
+   "status": 0
+  },
+  {
+   "name": "subshell_cd",
+   "script": "mkdir -p sc; (cd sc; touch inside.txt); ls sc",
+   "stdout": "inside.txt\n",
+   "status": 0
+  },
+  {
+   "name": "exit_status_group",
+   "script": "{ false; }; echo $?",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_echo",
+   "script": "x=$(echo inner); echo $x",
+   "stdout": "inner\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_trailing_newlines",
+   "script": "x=$(printf 'a\\n\\n'); echo \"[$x]\"",
+   "stdout": "[a]\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_nested",
+   "script": "echo $(echo $(echo deep))",
+   "stdout": "deep\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_in_args",
+   "script": "echo pre-$(echo mid)-post",
+   "stdout": "pre-mid-post\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_status",
+   "script": "x=$(false); echo $?",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_quoted",
+   "script": "echo \"$(echo a b)\"",
+   "stdout": "a b\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_unquoted_split",
+   "script": "for w in $(echo a b c); do echo [$w]; done",
+   "stdout": "[a]\n[b]\n[c]\n",
+   "status": 0
+  },
+  {
+   "name": "cmdsub_in_redirect_target",
+   "script": "echo data > $(echo target.txt); cat target.txt",
+   "stdout": "data\n",
+   "status": 0
+  },
+  {
+   "name": "true_false_status",
+   "script": "true; echo $?; false; echo $?",
+   "stdout": "0\n1\n",
+   "status": 0
+  },
+  {
+   "name": "colon_noop",
+   "script": ": ; echo $?",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "which_builtin",
+   "script": "type echo >/dev/null; echo $?",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "read_from_stdin",
+   "script": "echo hello | { read x; echo got $x; }",
+   "stdout": "got hello\n",
+   "status": 0
+  },
+  {
+   "name": "read_multiple_words",
+   "script": "echo one two three | { read a b; echo $a-$b; }",
+   "stdout": "one-two three\n",
+   "status": 0
+  },
+  {
+   "name": "read_eof_status",
+   "script": "printf '' | { read x; echo $?; }",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "export_then_child",
+   "script": "export EXPORTED=val; echo $EXPORTED",
+   "stdout": "val\n",
+   "status": 0
+  },
+  {
+   "name": "unset_removes",
+   "script": "x=1; unset x; echo [$x]",
+   "stdout": "[]\n",
+   "status": 0
+  },
+  {
+   "name": "sleep_zero",
+   "script": "sleep 0; echo slept",
+   "stdout": "slept\n",
+   "status": 0
+  },
+  {
+   "name": "env_prefix_scope",
+   "script": "FOO=bar; echo $FOO",
+   "stdout": "bar\n",
+   "status": 0
+  },
+  {
+   "name": "script_sum_loop",
+   "script": "t=0; for n in 1 2 3 4 5; do t=$((t+n)); done; echo $t",
+   "stdout": "15\n",
+   "status": 0
+  },
+  {
+   "name": "script_file_roundtrip",
+   "script": "mkdir -p proj/src; echo 'int x;' > proj/src/a.c; echo 'int y;' > proj/src/b.c; cat proj/src/*.c | wc -l",
+   "stdout": "       2\n",
+   "status": 0
+  },
+  {
+   "name": "script_grep_like",
+   "script": "printf 'alpha\\nbeta\\ngamma\\n' > words.txt; cat words.txt | head -n 2 | tail -n 1",
+   "stdout": "beta\n",
+   "status": 0
+  },
+  {
+   "name": "script_build_listing",
+   "script": "mkdir -p out; for f in one two three; do echo $f > out/$f.txt; done; ls out",
+   "stdout": "one.txt\nthree.txt\ntwo.txt\n",
+   "status": 0
+  },
+  {
+   "name": "script_counter_file",
+   "script": "echo 0 > c.txt; n=$(cat c.txt); n=$((n+1)); echo $n > c.txt; cat c.txt",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "script_nested_functions_files",
+   "script": "mk() { mkdir -p $1; echo $2 > $1/f; }; mk alpha one; mk beta two; cat alpha/f beta/f",
+   "stdout": "one\ntwo\n",
+   "status": 0
+  },
+  {
+   "name": "script_error_recovery",
+   "script": "cat missing_zz 2>/dev/null || echo recovered",
+   "stdout": "recovered\n",
+   "status": 0
+  },
+  {
+   "name": "script_pipeline_filter",
+   "script": "for i in 1 2 3 4 5 6; do echo n$i; done | head -n 4 | tail -n 2",
+   "stdout": "n3\nn4\n",
+   "status": 0
+  },
+  {
+   "name": "script_word_count_loop",
+   "script": "total=0; for f in a b c; do echo x y > $f.txt; total=$((total+$(wc -w < $f.txt))); done; echo $total",
+   "stdout": "6\n",
+   "status": 0
+  },
+  {
+   "name": "script_append_then_read",
+   "script": "for i in 1 2 3; do echo row$i >> log.txt; done; wc -l log.txt; tail -n 1 log.txt",
+   "stdout": "       3 log.txt\nrow3\n",
+   "status": 0
+  },
+  {
+   "name": "script_rename_chain",
+   "script": "echo v > a; mv a b; mv b c; cat c; ls",
+   "stdout": "v\nc\n",
+   "status": 0
+  },
+  {
+   "name": "echo_option_like_word",
+   "script": "echo -x literal",
+   "stdout": "-x literal\n",
+   "status": 0
+  },
+  {
+   "name": "printf_string_width_multi",
+   "script": "printf '%s|%s|\\n' ab cd",
+   "stdout": "ab|cd|\n",
+   "status": 0
+  },
+  {
+   "name": "printf_repeat_format",
+   "script": "printf '%s\\n' one two",
+   "stdout": "one\ntwo\n",
+   "status": 0
+  },
+  {
+   "name": "var_default_assign_unset_none",
+   "script": "echo ${undefined_v:-}done",
+   "stdout": "done\n",
+   "status": 0
+  },
+  {
+   "name": "var_replace_default_word_split",
+   "script": "x=; echo ${x:-a b}",
+   "stdout": "a b\n",
+   "status": 0
+  },
+  {
+   "name": "var_nested_expansion",
+   "script": "a=b; c=a; echo ${!c:-x}",
+   "stdout": "b\n",
+   "status": 0
+  },
+  {
+   "name": "test_string_empty_arg",
+   "script": "if [ -z \"\" ]; then echo empty; fi",
+   "stdout": "empty\n",
+   "status": 0
+  },
+  {
+   "name": "test_two_files_exist",
+   "script": "touch p q; if [ -e p ] && [ -e q ]; then echo both; fi",
+   "stdout": "both\n",
+   "status": 0
+  },
+  {
+   "name": "test_file_not_dir",
+   "script": "touch notdir; if [ -d notdir ]; then echo dir; else echo file; fi",
+   "stdout": "file\n",
+   "status": 0
+  },
+  {
+   "name": "ls_after_mkdir_chain",
+   "script": "mkdir -p top/mid/low; ls top; ls top/mid",
+   "stdout": "mid\nlow\n",
+   "status": 0
+  },
+  {
+   "name": "cat_order_of_args",
+   "script": "echo A > a; echo B > b; cat b a",
+   "stdout": "B\nA\n",
+   "status": 0
+  },
+  {
+   "name": "rm_then_ls_empty",
+   "script": "touch one two; rm one two; ls; echo end",
+   "stdout": "end\n",
+   "status": 0
+  },
+  {
+   "name": "cp_overwrites",
+   "script": "echo old > t; echo new > s; cp s t; cat t",
+   "stdout": "new\n",
+   "status": 0
+  },
+  {
+   "name": "mv_overwrites",
+   "script": "echo old > t; echo new > s; mv s t; cat t; ls",
+   "stdout": "new\nt\n",
+   "status": 0
+  },
+  {
+   "name": "head_more_than_lines",
+   "script": "printf 'x\\ny\\n' > s.txt; head -n 10 s.txt",
+   "stdout": "x\ny\n",
+   "status": 0
+  },
+  {
+   "name": "tail_more_than_lines",
+   "script": "printf 'x\\ny\\n' > s.txt; tail -n 10 s.txt",
+   "stdout": "x\ny\n",
+   "status": 0
+  },
+  {
+   "name": "wc_empty_file",
+   "script": "touch e; wc -l e",
+   "stdout": "       0 e\n",
+   "status": 0
+  },
+  {
+   "name": "grep_absent_status",
+   "script": "echo hay > h.txt; grep -q needle h.txt; echo $?",
+   "stdout": "1\n",
+   "status": 0
+  },
+  {
+   "name": "subshell_pipeline_status",
+   "script": "(exit 3) | cat; echo $?",
+   "stdout": "0\n",
+   "status": 0
+  },
+  {
+   "name": "while_read_loop",
+   "script": "printf 'a\\nb\\n' | while read line; do echo got $line; done",
+   "stdout": "got a\ngot b\n",
+   "status": 0
+  },
+  {
+   "name": "for_over_files",
+   "script": "touch f1 f2; for f in f1 f2; do echo [$f]; done",
+   "stdout": "[f1]\n[f2]\n",
+   "status": 0
+  },
+  {
+   "name": "if_test_combined",
+   "script": "x=3; if [ $x -gt 1 ] && [ $x -lt 5 ]; then echo mid; fi",
+   "stdout": "mid\n",
+   "status": 0
+  },
+  {
+   "name": "case_numeric_word",
+   "script": "n=7; case $n in 7) echo seven;; esac",
+   "stdout": "seven\n",
+   "status": 0
+  },
+  {
+   "name": "function_no_args_count",
+   "script": "f() { echo $#; }; f; f a",
+   "stdout": "0\n1\n",
+   "status": 0
+  },
+  {
+   "name": "function_status_propagation",
+   "script": "f() { false; }; f || echo failed",
+   "stdout": "failed\n",
+   "status": 0
+  },
+  {
+   "name": "var_in_glob_name",
+   "script": "p=zz; touch ${p}1 ${p}2; echo ${p}*",
+   "stdout": "zz1 zz2\n",
+   "status": 0
+  },
+  {
+   "name": "empty_for_body_skipped",
+   "script": "for i in 1 2; do :; done; echo fin",
+   "stdout": "fin\n",
+   "status": 0
+  },
+  {
+   "name": "nested_subst_quotes",
+   "script": "echo \"x$(echo \"y\")z\"",
+   "stdout": "xyz\n",
+   "status": 0
+  },
+  {
+   "name": "pipe_into_subshell",
+   "script": "echo abc | (cat; echo end)",
+   "stdout": "abc\nend\n",
+   "status": 0
+  },
+  {
+   "name": "backslash_newline_join",
+   "script": "echo one\\\ntwo",
+   "stdout": "onetwo\n",
+   "status": 0
+  }
+ ]
+}

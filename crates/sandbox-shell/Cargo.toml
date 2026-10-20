@@ -14,16 +14,17 @@ sandbox-vfs = { path = "../sandbox-vfs" }
 sandbox-runtime = { path = "../sandbox-runtime" }
 sandbox-wasm = { path = "../sandbox-wasm" }
 tokio = { workspace = true }
+regex = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
 sandbox-cas = { path = "../sandbox-cas" }
+serde_json = { workspace = true }
 
 [features]
 default = []

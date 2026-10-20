@@ -1,0 +1,6 @@
+# cargo-fuzz output. Crashes found by the fuzzer are regression tests in
+# crates/sandbox-shell/tests, not files kept here.
+target/
+corpus/
+artifacts/
+coverage/

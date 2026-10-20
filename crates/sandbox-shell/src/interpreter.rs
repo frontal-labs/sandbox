@@ -5,11 +5,14 @@
 //! never runs host binaries. Every command counts against a step budget, so
 //! a loop cannot hang the host.
 
+use crate::arith;
 use crate::ast::{
-    Ch, Command, Connector, ForClause, IfClause, Piece, Pipeline, RedirectKind, Script,
-    SimpleCommand, WhileClause, Word,
+    CaseClause, Ch, Command, Connector, ForClause, IfClause, Mode, Param, ParamOp, Piece, Pipeline,
+    Redirect, RedirectKind, Script, SimpleCommand, WhileClause, Word,
 };
-use crate::expand::{expand_vars, glob_match, has_glob, split_assignment, text, Scope};
+use crate::expand::{
+    glob_match, has_glob, push_text, push_values, split_assignment, split_fields, text, trim,
+};
 use crate::parser;
 use sandbox_types::SandboxError;
 use sandbox_vfs::{OpenFlags, SessionFs, Vfs};
@@ -61,8 +64,96 @@ pub(crate) enum Flow {
     Break(u32),
     Continue(u32),
     Return(i32),
+    /// `exit N`: ends the current shell, or the subshell it runs in.
+    Exit(i32),
     Abort,
 }
+
+/// Input that a compound command reads from, one line at a time. `read` takes
+/// lines from it, so `printf 'a\nb\n' | while read x; do ...; done` sees both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Input {
+    pub(crate) data: Vec<u8>,
+    pub(crate) pos: usize,
+}
+
+impl Input {
+    pub(crate) fn new(data: Vec<u8>) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    /// Takes everything not yet read.
+    pub(crate) fn take_rest(&mut self) -> Vec<u8> {
+        let rest = self.data[self.pos..].to_vec();
+        self.pos = self.data.len();
+        rest
+    }
+
+    /// The next line without its newline, or `None` at the end.
+    pub(crate) fn next_line(&mut self) -> Option<(Vec<u8>, bool)> {
+        if self.pos >= self.data.len() {
+            return None;
+        }
+        let rest = &self.data[self.pos..];
+        let (line, complete) = match rest.iter().position(|&b| b == b'\n') {
+            Some(end) => {
+                self.pos += end + 1;
+                (rest[..end].to_vec(), true)
+            }
+            None => {
+                self.pos = self.data.len();
+                (rest.to_vec(), false)
+            }
+        };
+        Some((line, complete))
+    }
+}
+
+/// Whether a word is quoted at all. A quoted word that expands to nothing is
+/// still one empty field. `"$@"` is not counted, because with no parameters it
+/// is no field.
+fn word_quoted(word: &Word) -> bool {
+    // `"$@"` with no parameters is no field, so the quotes around it do not count.
+    let has_at = word
+        .0
+        .iter()
+        .any(|piece| matches!(piece, Piece::Param(param) if param.name == "@"));
+    word.0.iter().any(|piece| match piece {
+        Piece::Ch(ch) => ch.mode != Mode::Bare,
+        Piece::Subst { quoted, .. } => *quoted,
+        Piece::Param(param) => param.quoted && param.name != "@",
+        Piece::Empty => !has_at,
+        Piece::Arith(_) => false,
+    })
+}
+
+/// Where an output descriptor goes once the redirections are applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Sink {
+    Stdout,
+    Stderr,
+    /// `/dev/null`: output is discarded.
+    Null,
+    /// A file. It was created or truncated when the redirection was applied.
+    File(String),
+}
+
+/// Output that reached the top level of a run, as it becomes available. See
+/// [`Shell::run_streamed`] for when a chunk is sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputChunk {
+    /// 1 for stdout, 2 for stderr.
+    pub fd: u8,
+    pub data: Vec<u8>,
+}
+
+/// Receives output chunks as a run produces them. It is called on the run's task,
+/// so it must not block.
+pub type OutputObserver = Arc<dyn Fn(OutputChunk) + Send + Sync>;
+
+/// Receives a tool's stdout as the tool writes it. The same shape as the runtime's
+/// and the WASI host's observers, so one value serves each.
+pub(crate) type ToolStdout = Arc<dyn Fn(&[u8]) + Send + Sync>;
 
 /// Shell state that persists across calls: working directory, variables,
 /// functions, and the last exit status (`$?`).
@@ -78,8 +169,25 @@ pub struct Shell {
     pub(crate) pending_stdin: Option<Vec<u8>>,
     steps: u64,
     max_steps: u64,
+    /// Compound commands open around the command being run. See `run_command`.
+    depth: usize,
     output_used: usize,
     max_output_bytes: usize,
+    /// Input a compound command is reading. See `Input`.
+    pub(crate) input: Option<Input>,
+    /// Bytes of stdout a tool streamed while the simple command being run was
+    /// running. `None` when that command's output is not streamed. See `tool_stdout`.
+    stream_count: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    /// The status of the last command substitution, for an assignment that
+    /// has no command, such as `x=$(false)`.
+    subst_status: Option<i32>,
+    /// An expansion error, such as a division by zero. It stops the command.
+    expansion_error: Option<String>,
+    /// Receives top-level output as it is produced. `None` buffers it in the result only.
+    observer: Option<OutputObserver>,
+    /// Set while the output of the command being run is consumed by something
+    /// else: a pipe, a redirection, or a substitution. Such output is not streamed.
+    capturing: bool,
 }
 
 fn literal_word(s: &str) -> Word {
@@ -111,7 +219,14 @@ impl Shell {
             positional: Vec::new(),
             flow: None,
             pending_stdin: None,
+            input: None,
+            subst_status: None,
+            expansion_error: None,
+            observer: None,
+            capturing: false,
+            stream_count: None,
             steps: 0,
+            depth: 0,
             max_steps: config.max_steps,
             output_used: 0,
             max_output_bytes: config.max_output_bytes,
@@ -140,6 +255,24 @@ impl Shell {
     }
 
     /// Exit status of the last command. This is `$?`.
+    pub(crate) fn has_function(&self, name: &str) -> bool {
+        self.functions.contains_key(name)
+    }
+
+    /// Whether a command reads its stdin. Builtins such as `echo` do not, so they
+    /// leave the input of an enclosing `while read` loop alone. Functions do not
+    /// read it unless their body does. External tools always may.
+    fn reads_input(&self, name: &str) -> bool {
+        if self.has_function(name) {
+            return false;
+        }
+        !crate::builtins::is_builtin(name)
+            || matches!(
+                name,
+                "cat" | "head" | "tail" | "wc" | "grep" | "node" | "wasm"
+            )
+    }
+
     pub fn status(&self) -> i32 {
         self.status
     }
@@ -162,12 +295,36 @@ impl Shell {
     /// Parses and runs a script. Syntax errors are returned as `Err`; command
     /// failures are reported through the exit code and stderr.
     pub async fn run(&mut self, script: &str) -> Result<ExecutionResult, SandboxError> {
+        self.run_streamed(script, None).await
+    }
+
+    /// Like [`Shell::run`], and also reports output to `observer` as it is
+    /// produced. A command's output is reported when the command finishes, so a
+    /// command that writes a lot and then stops does not stream part of it early.
+    /// Output inside a pipe, a redirection, or a substitution is not reported,
+    /// because the shell consumes it. It is still in the result. The chunks
+    /// concatenate to the result's output, except for output that the shell
+    /// itself reports only in the result (see `run_case`).
+    pub async fn run_streamed(
+        &mut self,
+        script: &str,
+        observer: Option<OutputObserver>,
+    ) -> Result<ExecutionResult, SandboxError> {
         let script: Script = parser::parse(script)?;
         self.steps = 0;
         self.output_used = 0;
+        self.observer = observer;
+        // A run cancelled inside a pipe or a substitution may have left this set.
+        self.capturing = false;
         let result = self.run_script(&script).await;
-        self.flow = None;
-        Ok(result)
+        self.observer = None;
+        Ok(self.finish(result))
+    }
+
+    /// Drops the observer. A run that the caller cancelled never reaches the end
+    /// of its own, so its caller clears the observer through this.
+    pub fn detach_observer(&mut self) {
+        self.observer = None;
     }
 
     /// Runs `argv` as one command, with `stdin` as its input. Arguments are
@@ -176,6 +333,17 @@ impl Shell {
         &mut self,
         argv: &[String],
         stdin: &[u8],
+    ) -> Result<ExecutionResult, SandboxError> {
+        self.run_argv_streamed(argv, stdin, None).await
+    }
+
+    /// Like [`Shell::run_argv`], and reports the command's output to `observer`
+    /// when the command finishes. One command has one chunk per stream.
+    pub async fn run_argv_streamed(
+        &mut self,
+        argv: &[String],
+        stdin: &[u8],
+        observer: Option<OutputObserver>,
     ) -> Result<ExecutionResult, SandboxError> {
         if argv.is_empty() {
             return Err(SandboxError::invalid_argument("argv is empty"));
@@ -187,15 +355,45 @@ impl Shell {
         self.steps = 0;
         self.output_used = 0;
         self.pending_stdin = Some(stdin.to_vec());
+        self.observer = observer;
+        self.capturing = false;
         let out = self.run_simple(&command).await;
+        self.observer = None;
         self.pending_stdin = None;
-        self.flow = None;
+        let out = self.finish(out);
         self.status = out.exit_code;
         Ok(out)
     }
 
+    /// Ends a run. A run that hit a limit fails, even when the command that was
+    /// running last succeeded, as a substitution that was cut short does.
+    fn finish(&mut self, mut result: ExecutionResult) -> ExecutionResult {
+        match self.flow.take() {
+            Some(Flow::Exit(code)) => result.exit_code = code,
+            // A run that hit a limit fails, even when the command running then succeeded.
+            Some(Flow::Abort) if result.exit_code == 0 => result.exit_code = 1,
+            _ => {}
+        }
+        result
+    }
+
     /// A copy of the shell state, for subshells and command substitutions.
     /// Changes made to the copy do not reach this shell.
+    /// Takes back what a forked child used. A limit the child hit aborts this run
+    /// too, at the point it was hit, instead of waiting for this run's next command.
+    fn absorb(&mut self, child: &Shell) {
+        self.steps = child.steps;
+        self.output_used = child.output_used;
+        // A subshell that reads the input consumes it for the parent too.
+        if let (Some(mine), Some(theirs)) = (self.input.as_mut(), child.input.as_ref()) {
+            mine.pos = theirs.pos;
+        }
+        // A limit the child hit aborts this run. `exit` ends only the child.
+        if child.flow == Some(Flow::Abort) {
+            self.flow = Some(Flow::Abort);
+        }
+    }
+
     fn fork(&self) -> Shell {
         Shell {
             fs: self.fs.clone(),
@@ -206,7 +404,14 @@ impl Shell {
             positional: self.positional.clone(),
             flow: None,
             pending_stdin: None,
+            input: self.input.clone(),
+            subst_status: None,
+            expansion_error: None,
+            observer: self.observer.clone(),
+            capturing: self.capturing,
+            stream_count: None,
             steps: self.steps,
+            depth: self.depth,
             max_steps: self.max_steps,
             output_used: self.output_used,
             max_output_bytes: self.max_output_bytes,
@@ -241,17 +446,30 @@ impl Shell {
 
     fn run_pipeline<'a>(&'a mut self, pipeline: &'a Pipeline) -> BoxFuture<'a, ExecutionResult> {
         Box::pin(async move {
-            // A compound command as a stage passes its input to its first command.
-            let mut input = self.pending_stdin.take().unwrap_or_default();
+            // The first stage gets the stdin the pipeline was given, if any. Later
+            // stages get the output of the stage before. `None` means a stage has
+            // no stdin of its own, so it reads the input of an enclosing compound.
+            let mut input: Option<Vec<u8>> = self.pending_stdin.take();
             let mut stderr = Vec::new();
             let mut exit_code = 0;
-            for stage in &pipeline.stages {
-                self.pending_stdin = Some(std::mem::take(&mut input));
+            let last = pipeline.stages.len().saturating_sub(1);
+            for (index, stage) in pipeline.stages.iter().enumerate() {
+                self.pending_stdin = input.take();
+                // Only the last stage's output reaches the top level. The others feed the next stage.
+                let outer = self.capturing;
+                self.capturing = outer || index < last;
                 let out = self.run_command(stage).await;
+                self.capturing = outer;
                 self.pending_stdin = None;
                 stderr.extend(out.stderr);
                 exit_code = out.exit_code;
-                input = out.stdout;
+                input = Some(out.stdout);
+                self.status = exit_code;
+            }
+            let input = input.unwrap_or_default();
+            // `!` inverts the status of the pipeline. It does not change its output.
+            if pipeline.negated {
+                exit_code = i32::from(exit_code == 0);
                 self.status = exit_code;
             }
             ExecutionResult {
@@ -269,25 +487,67 @@ impl Shell {
                 self.flow = Some(Flow::Abort);
                 return failure_with("sandbox: step limit exceeded".to_string(), 1);
             }
-            match command {
+            // Every recursive path runs through here: function calls, subshells,
+            // substitutions, and loop bodies. The step budget alone is too late, because
+            // a recursive call overflows the stack before it runs out (ADR 0018).
+            if self.depth >= parser::MAX_COMMAND_DEPTH {
+                self.flow = Some(Flow::Abort);
+                return failure_with(
+                    format!(
+                        "sandbox: commands nested deeper than {} levels",
+                        parser::MAX_COMMAND_DEPTH
+                    ),
+                    1,
+                );
+            }
+            self.depth += 1;
+            let out = match command {
                 Command::Simple(simple) => self.run_simple(simple).await,
-                Command::If(clause) => self.run_if(clause).await,
-                Command::While(clause) => self.run_while(clause).await,
-                Command::For(clause) => self.run_for(clause).await,
-                Command::Group(body) => self.run_script(body).await,
-                Command::Subshell(body) => {
-                    let mut child = self.fork();
-                    let out = child.run_script(body).await;
-                    self.steps = child.steps;
-                    self.output_used = child.output_used;
-                    out
-                }
                 Command::Function(def) => {
                     self.functions.insert(def.name.clone(), (*def.body).clone());
                     ExecutionResult::default()
                 }
-            }
+                Command::Redirected { command, redirects } => {
+                    let stdin = self.pending_stdin.take();
+                    self.run_redirected(command, redirects, stdin).await
+                }
+                compound => {
+                    let stdin = self.pending_stdin.take();
+                    self.run_compound(compound, stdin).await
+                }
+            };
+            self.depth -= 1;
+            out
         })
+    }
+
+    /// Runs a compound command. Its stdin, if it was given one, becomes the
+    /// input its commands read, and is restored afterwards.
+    async fn run_compound(&mut self, command: &Command, stdin: Option<Vec<u8>>) -> ExecutionResult {
+        let subshell_stdin = stdin.clone();
+        let saved = stdin.map(|data| self.input.replace(Input::new(data)));
+        let out = match command {
+            Command::If(clause) => self.run_if(clause).await,
+            Command::While(clause) => self.run_while(clause).await,
+            Command::For(clause) => self.run_for(clause).await,
+            Command::Case(clause) => self.run_case(clause).await,
+            Command::Group(body) => self.run_script(body).await,
+            Command::Subshell(body) => {
+                let mut child = self.fork();
+                // The subshell's first command reads the stdin it was given.
+                child.pending_stdin = subshell_stdin;
+                let out = child.run_script(body).await;
+                self.absorb(&child);
+                out
+            }
+            Command::Simple(_) | Command::Function(_) | Command::Redirected { .. } => {
+                unreachable!("run_command dispatches these before run_compound")
+            }
+        };
+        if let Some(previous) = saved {
+            self.input = previous;
+        }
+        out
     }
 
     async fn run_if(&mut self, clause: &IfClause) -> ExecutionResult {
@@ -314,6 +574,7 @@ impl Shell {
 
     async fn run_while(&mut self, clause: &WhileClause) -> ExecutionResult {
         let mut out = ExecutionResult::default();
+        let mut status = 0;
         loop {
             merge(&mut out, self.run_script(&clause.condition).await);
             if self.flow.is_some() {
@@ -323,12 +584,14 @@ impl Shell {
             if succeeded == clause.until {
                 break;
             }
-            merge(&mut out, self.run_script(&clause.body).await);
+            let body = self.run_script(&clause.body).await;
+            status = body.exit_code;
+            merge(&mut out, body);
             if self.loop_should_stop() {
                 break;
             }
         }
-        out.exit_code = self.status;
+        out.exit_code = status;
         out
     }
 
@@ -340,14 +603,19 @@ impl Shell {
             out.stderr.extend(expansion_stderr);
             values.extend(fields);
         }
+        // A loop with no iterations has status 0. Otherwise the status is that of
+        // its last body command.
+        let mut status = 0;
         for value in values {
             self.env.insert(clause.variable.clone(), value);
-            merge(&mut out, self.run_script(&clause.body).await);
+            let body = self.run_script(&clause.body).await;
+            status = body.exit_code;
+            merge(&mut out, body);
             if self.loop_should_stop() {
                 break;
             }
         }
-        out.exit_code = self.status;
+        out.exit_code = status;
         out
     }
 
@@ -372,15 +640,78 @@ impl Shell {
                 self.flow = Some(Flow::Break(n - 1));
                 true
             }
-            Some(Flow::Return(_) | Flow::Abort) => true,
+            Some(Flow::Return(_) | Flow::Exit(_) | Flow::Abort) => true,
         }
     }
 
     async fn run_simple(&mut self, command: &SimpleCommand) -> ExecutionResult {
+        let out = self.run_simple_inner(command).await;
+        // Stdout a tool streamed while it ran is the start of this command's stdout.
+        // Only the rest is left to report.
+        let streamed = self
+            .stream_count
+            .take()
+            .map_or(0, |count| count.load(std::sync::atomic::Ordering::SeqCst));
+        self.emit_after(&out, streamed);
+        out
+    }
+
+    /// Reports a finished command's output to the observer, unless the output is
+    /// being captured by a pipe, a redirection, or a substitution.
+    fn emit(&self, out: &ExecutionResult) {
+        self.emit_after(out, 0);
+    }
+
+    /// Reports `out`, except its first `streamed` bytes of stdout, which the observer
+    /// already has.
+    fn emit_after(&self, out: &ExecutionResult, streamed: usize) {
+        if self.capturing {
+            return;
+        }
+        let Some(observer) = &self.observer else {
+            return;
+        };
+        let stdout = &out.stdout[streamed.min(out.stdout.len())..];
+        if !stdout.is_empty() {
+            observer(OutputChunk {
+                fd: 1,
+                data: stdout.to_vec(),
+            });
+        }
+        if !out.stderr.is_empty() {
+            observer(OutputChunk {
+                fd: 2,
+                data: out.stderr.clone(),
+            });
+        }
+    }
+
+    /// Where a tool's stdout goes as the tool writes it, or `None` when the output
+    /// of the command being run is not streamed (see `stream_count`).
+    pub(crate) fn tool_stdout(&self) -> Option<ToolStdout> {
+        let count = self.stream_count.clone()?;
+        // A weak reference: a tool can outlive the command that started it, because
+        // a runtime keeps running after its caller gave up. The observer must not be
+        // kept alive by that, or the stream of a timed-out command would never end.
+        let observer = Arc::downgrade(self.observer.as_ref()?);
+        Some(Arc::new(move |bytes: &[u8]| {
+            let Some(observer) = observer.upgrade() else {
+                return;
+            };
+            count.fetch_add(bytes.len(), std::sync::atomic::Ordering::SeqCst);
+            observer(OutputChunk {
+                fd: 1,
+                data: bytes.to_vec(),
+            });
+        }))
+    }
+
+    async fn run_simple_inner(&mut self, command: &SimpleCommand) -> ExecutionResult {
         let mut stderr = Vec::new();
-        let mut stdin = self.pending_stdin.take().unwrap_or_default();
+        let pending_stdin = self.pending_stdin.take();
 
         // Leading `NAME=value` words are assignments. The rest is the command.
+        self.subst_status = None;
         let mut assignments = Vec::new();
         let mut index = 0;
         while let Some(word) = command.words.get(index) {
@@ -394,19 +725,32 @@ impl Shell {
                 None => break,
             }
         }
+        // An assignment that runs a substitution has the substitution's status.
+        let assignment_status = self.subst_status.take();
 
+        self.expansion_error = None;
         let mut argv = Vec::new();
         for word in &command.words[index..] {
             let (fields, subst_err) = self.expand_word(word).await;
             stderr.extend(subst_err);
             argv.extend(fields);
         }
+        if let Some(message) = self.expansion_error.take() {
+            // As in bash, a failed expansion ends the run, not just this command.
+            self.flow = Some(Flow::Abort);
+            stderr.extend(format!("sandbox: {message}\n").into_bytes());
+            return ExecutionResult {
+                exit_code: 1,
+                stdout: Vec::new(),
+                stderr,
+            };
+        }
 
-        let mut targets: Vec<(RedirectKind, String)> = Vec::new();
+        let mut redirects = Vec::new();
         for redirect in &command.redirects {
             let (chars, subst_err) = self.expand_chars(&redirect.target).await;
             stderr.extend(subst_err);
-            targets.push((redirect.kind, text(&chars)));
+            redirects.push((redirect.fd, redirect.kind, text(&chars)));
         }
 
         if argv.is_empty() {
@@ -415,29 +759,49 @@ impl Shell {
             for (name, value) in assignments {
                 self.env.insert(name, value);
             }
-            for (kind, target) in &targets {
-                if *kind == RedirectKind::Output {
-                    if let Err(e) = self.write_file(target, &[], false).await {
-                        stderr.extend(format!("{target}: {}\n", describe(&e)).into_bytes());
-                    }
-                }
+            if let Err(message) = self.open_sinks(&redirects).await {
+                stderr.extend(message.into_bytes());
             }
+            let exit_code = if stderr.is_empty() {
+                assignment_status.unwrap_or(0)
+            } else {
+                1
+            };
             return ExecutionResult {
-                exit_code: i32::from(!stderr.is_empty()),
+                exit_code,
                 stdout: Vec::new(),
                 stderr,
             };
         }
 
         // Input redirections load stdin before the command runs. The last one wins.
-        for (kind, target) in &targets {
+        let mut stdin_override = None;
+        for (_, kind, target) in &redirects {
             if *kind == RedirectKind::Input {
                 match self.read_file(target).await {
-                    Ok(data) => stdin = data,
-                    Err(e) => return failure(format!("{target}: {}", describe(&e))),
+                    Ok(data) => stdin_override = Some(data),
+                    Err(e) => {
+                        stderr.extend(format!("{target}: {}\n", describe(&e)).into_bytes());
+                        return ExecutionResult {
+                            exit_code: 1,
+                            stdout: Vec::new(),
+                            stderr,
+                        };
+                    }
                 }
             }
         }
+        let sinks = match self.open_sinks(&redirects).await {
+            Ok(sinks) => sinks,
+            Err(message) => {
+                stderr.extend(message.into_bytes());
+                return ExecutionResult {
+                    exit_code: 1,
+                    stdout: Vec::new(),
+                    stderr,
+                };
+            }
+        };
 
         // Prefix assignments apply to this command only.
         let saved: Vec<(String, Option<String>)> = assignments
@@ -448,7 +812,27 @@ impl Shell {
             self.env.insert(name, value);
         }
 
-        let mut out = self.run_argv_inner(&argv, stdin).await;
+        // Without stdin of its own, a command reads what is left of the input the
+        // enclosing compound command is reading, as `cat` does in `{ cat; }`. `read`
+        // takes one line of it instead, so it is left alone here.
+        // An input redirection replaces both, and it leaves the input unread.
+        let stdin = match (stdin_override, pending_stdin) {
+            (Some(data), _) => data,
+            (None, Some(data)) => data,
+            (None, None) if argv[0] == "read" => Vec::new(),
+            (None, None) if self.reads_input(&argv[0]) => self
+                .input
+                .as_mut()
+                .map(Input::take_rest)
+                .unwrap_or_default(),
+            (None, None) => Vec::new(),
+        };
+        // A tool streams its stdout only for a command whose output is plain: no
+        // redirection, and not captured by a pipe or a substitution.
+        let streams = redirects.is_empty() && !self.capturing && matches!(sinks.0, Sink::Stdout);
+        self.stream_count =
+            streams.then(|| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+        let out = self.run_argv_inner(&argv, stdin).await;
 
         for (name, previous) in saved.into_iter().rev() {
             match previous {
@@ -457,35 +841,176 @@ impl Shell {
             };
         }
 
-        let outputs: Vec<&(RedirectKind, String)> = targets
-            .iter()
-            .filter(|(kind, _)| *kind != RedirectKind::Input)
-            .collect();
-        let mut exit_code = out.exit_code;
-        if !outputs.is_empty() {
-            let last = outputs.len() - 1;
-            for (i, (kind, target)) in outputs.iter().enumerate() {
-                let data = if i == last {
-                    std::mem::take(&mut out.stdout)
-                } else {
-                    Vec::new()
-                };
-                let append = *kind == RedirectKind::Append;
-                if let Err(e) = self.write_file(target, &data, append).await {
-                    out.stderr
-                        .extend(format!("{target}: {}\n", describe(&e)).into_bytes());
-                    exit_code = 1;
-                }
-            }
-        }
-        stderr.extend(out.stderr);
+        let routed = self.route(out, &sinks).await;
+        stderr.extend(routed.stderr);
         let mut result = ExecutionResult {
-            exit_code,
-            stdout: out.stdout,
+            exit_code: routed.exit_code,
+            stdout: routed.stdout,
             stderr,
         };
         self.charge_output(&mut result);
         result
+    }
+
+    /// Applies the redirections of one command, in order, to its two output
+    /// descriptors. Output files are created or truncated now. Returns where
+    /// descriptors 1 and 2 go, or the error that stops the command.
+    async fn open_sinks(
+        &self,
+        redirects: &[(u8, RedirectKind, String)],
+    ) -> Result<(Sink, Sink), String> {
+        let mut sinks = [Sink::Null, Sink::Stdout, Sink::Stderr];
+        for (fd, kind, target) in redirects {
+            let fd = usize::from(*fd);
+            if fd == 0 {
+                continue;
+            }
+            match kind {
+                RedirectKind::Input => {}
+                RedirectKind::Output | RedirectKind::Append => {
+                    sinks[fd] = if target == "/dev/null" {
+                        Sink::Null
+                    } else {
+                        let append = *kind == RedirectKind::Append;
+                        self.write_file(target, &[], append)
+                            .await
+                            .map_err(|e| format!("{target}: {}\n", describe(&e)))?;
+                        Sink::File(target.clone())
+                    };
+                }
+                RedirectKind::Dup => {
+                    let source = match target.as_str() {
+                        "1" => sinks[1].clone(),
+                        "2" => sinks[2].clone(),
+                        _ => return Err(format!("sandbox: {target}: ambiguous redirect\n")),
+                    };
+                    sinks[fd] = source;
+                }
+            }
+        }
+        Ok((sinks[1].clone(), sinks[2].clone()))
+    }
+
+    /// Sends a command's output to where its descriptors point. Output to a file
+    /// is appended, because the file was created when the redirection was applied.
+    async fn route(&mut self, out: ExecutionResult, sinks: &(Sink, Sink)) -> ExecutionResult {
+        let mut result = ExecutionResult {
+            exit_code: out.exit_code,
+            ..ExecutionResult::default()
+        };
+        for (data, sink) in [(out.stdout, &sinks.0), (out.stderr, &sinks.1)] {
+            if data.is_empty() {
+                continue;
+            }
+            match sink {
+                Sink::Stdout => result.stdout.extend(data),
+                Sink::Stderr => result.stderr.extend(data),
+                Sink::Null => {}
+                Sink::File(path) => {
+                    if let Err(e) = self.write_file(path, &data, true).await {
+                        result
+                            .stderr
+                            .extend(format!("{path}: {}\n", describe(&e)).into_bytes());
+                        result.exit_code = 1;
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// A compound command with redirections after it. Its input redirection
+    /// sets the input it reads, and its output goes where the redirections say.
+    async fn run_redirected(
+        &mut self,
+        command: &Command,
+        redirects: &[Redirect],
+        stdin: Option<Vec<u8>>,
+    ) -> ExecutionResult {
+        let out = self.run_redirected_inner(command, redirects, stdin).await;
+        self.emit(&out);
+        out
+    }
+
+    async fn run_redirected_inner(
+        &mut self,
+        command: &Command,
+        redirects: &[Redirect],
+        stdin: Option<Vec<u8>>,
+    ) -> ExecutionResult {
+        let mut stderr = Vec::new();
+        let mut targets = Vec::new();
+        for redirect in redirects {
+            let (chars, subst_err) = self.expand_chars(&redirect.target).await;
+            stderr.extend(subst_err);
+            targets.push((redirect.fd, redirect.kind, text(&chars)));
+        }
+        let mut input = stdin;
+        for (_, kind, target) in &targets {
+            if *kind == RedirectKind::Input {
+                match self.read_file(target).await {
+                    Ok(data) => input = Some(data),
+                    Err(e) => {
+                        stderr.extend(format!("{target}: {}\n", describe(&e)).into_bytes());
+                        return ExecutionResult {
+                            exit_code: 1,
+                            stdout: Vec::new(),
+                            stderr,
+                        };
+                    }
+                }
+            }
+        }
+        let sinks = match self.open_sinks(&targets).await {
+            Ok(sinks) => sinks,
+            Err(message) => {
+                stderr.extend(message.into_bytes());
+                return ExecutionResult {
+                    exit_code: 1,
+                    stdout: Vec::new(),
+                    stderr,
+                };
+            }
+        };
+        // The compound's commands write to the redirected descriptors, so their
+        // output is not streamed on its own. The routed result is emitted once.
+        let outer = std::mem::replace(&mut self.capturing, true);
+        let out = self.run_compound(command, input).await;
+        self.capturing = outer;
+        let routed = self.route(out, &sinks).await;
+        stderr.extend(routed.stderr);
+        ExecutionResult {
+            exit_code: routed.exit_code,
+            stdout: routed.stdout,
+            stderr,
+        }
+    }
+
+    /// Runs the first arm whose pattern matches the subject. Patterns are
+    /// globs, and quoted characters in them match literally. With no match the
+    /// status is 0, as in POSIX sh.
+    async fn run_case(&mut self, clause: &CaseClause) -> ExecutionResult {
+        let (subject_chars, mut stderr) = self.expand_chars(&clause.subject).await;
+        let subject: Vec<char> = text(&subject_chars).chars().collect();
+        for arm in &clause.arms {
+            for pattern in &arm.patterns {
+                let (pattern_chars, subst_err) = self.expand_chars(pattern).await;
+                stderr.extend(subst_err);
+                if glob_match(&pattern_chars, &subject) {
+                    let body = self.run_script(&arm.body).await;
+                    return ExecutionResult {
+                        exit_code: body.exit_code,
+                        stdout: body.stdout,
+                        stderr: [stderr, body.stderr].concat(),
+                    };
+                }
+            }
+        }
+        ExecutionResult {
+            exit_code: 0,
+            stdout: Vec::new(),
+            stderr,
+        }
     }
 
     /// Counts a command's output against the run's budget. Going over stops
@@ -510,7 +1035,12 @@ impl Shell {
     /// Runs an expanded command: function, builtin, tool, then 127.
     async fn run_argv_inner(&mut self, argv: &[String], stdin: Vec<u8>) -> ExecutionResult {
         if let Some(body) = self.functions.get(&argv[0]).cloned() {
-            return self.call_function(body, &argv[1..], stdin).await;
+            // The call is one command, so its body's output is reported once, when the
+            // call finishes, and not again through the body's own commands.
+            let outer = std::mem::replace(&mut self.capturing, true);
+            let out = self.call_function(body, &argv[1..], stdin).await;
+            self.capturing = outer;
+            return out;
         }
         if let Some(out) = self.builtin(argv, stdin.clone()).await {
             return out;
@@ -623,77 +1153,192 @@ impl Shell {
 
     /// Expands one word into the fields it produces: variables, substitutions,
     /// and globs. Unquoted words that expand to nothing produce no field.
+    /// Expands a word into fields: splits unquoted expansions on `IFS`, then
+    /// globs each field that has unquoted glob characters.
     async fn expand_word(&mut self, word: &Word) -> (Vec<String>, Vec<u8>) {
         let (chars, stderr) = self.expand_chars(word).await;
-        let quoted = word.0.iter().any(|piece| match piece {
-            Piece::Ch(ch) => ch.mode != crate::ast::Mode::Bare,
-            Piece::Subst(_) => false,
-        });
-        if has_glob(&chars) {
-            let matches = self.glob(&chars).await;
-            if !matches.is_empty() {
-                return (matches, stderr);
+        let mut words = Vec::new();
+        for field in split_fields(&chars, word_quoted(word)) {
+            if has_glob(&field) {
+                let matches = self.glob(&field).await;
+                if !matches.is_empty() {
+                    words.extend(matches);
+                    continue;
+                }
             }
+            words.push(text(&field));
         }
-        if chars.is_empty() && !quoted {
-            return (Vec::new(), stderr);
-        }
-        (vec![text(&chars)], stderr)
+        (words, stderr)
     }
 
-    /// Expands a word's variables and substitutions into characters. No globbing.
+    /// Expands the pieces of a word to characters, keeping each one's quoting.
     async fn expand_chars(&mut self, word: &Word) -> (Vec<Ch>, Vec<u8>) {
         let mut stderr = Vec::new();
         let mut out: Vec<Ch> = Vec::new();
-        let mut run: Vec<Ch> = Vec::new();
         for piece in &word.0 {
             match piece {
-                Piece::Ch(ch) => run.push(*ch),
-                Piece::Subst(script) => {
-                    out.extend(self.expand_run(&run));
-                    run.clear();
-                    let (output, sub_stderr) = self.substitute(script).await;
+                Piece::Ch(ch) => out.push(*ch),
+                Piece::Subst { script, quoted } => {
+                    let (output, sub_stderr) = self.substitute(script, *quoted).await;
                     stderr.extend(sub_stderr);
                     out.extend(output);
                 }
+                Piece::Param(param) => {
+                    let (chars, param_stderr) = self.expand_param(param).await;
+                    stderr.extend(param_stderr);
+                    out.extend(chars);
+                }
+                Piece::Arith(expr) => {
+                    let (chars, expr_stderr) = self.expand_arith_word(expr).await;
+                    stderr.extend(expr_stderr);
+                    match self.arithmetic(&text(&chars)) {
+                        Ok(value) => push_text(&mut out, &value.to_string(), Mode::Expanded),
+                        Err(message) => self.expansion_error = Some(message),
+                    }
+                }
+                Piece::Empty => {}
             }
         }
-        out.extend(self.expand_run(&run));
         (out, stderr)
-    }
-
-    fn expand_run(&self, run: &[Ch]) -> Vec<Ch> {
-        let scope = Scope {
-            env: &self.env,
-            positional: &self.positional,
-            status: self.status,
-        };
-        expand_vars(run, &scope)
     }
 
     /// Runs a command substitution in a copy of the shell and returns its
     /// output as literal characters, minus trailing newlines.
-    async fn substitute(&mut self, script: &Script) -> (Vec<Ch>, Vec<u8>) {
+    /// Runs a command substitution in a copy of the shell and returns its output
+    /// with trailing newlines removed. Its status is kept for `x=$(cmd)`.
+    async fn substitute(&mut self, script: &Script, quoted: bool) -> (Vec<Ch>, Vec<u8>) {
         let mut child = self.fork();
+        // A substitution's output becomes text in a word, so it is never streamed.
+        child.observer = None;
         let out = child.run_script(script).await;
-        self.steps = child.steps;
-        self.output_used = child.output_used;
+        self.absorb(&child);
+        self.subst_status = Some(out.exit_code);
         let mut output = String::from_utf8_lossy(&out.stdout).into_owned();
         while output.ends_with('\n') {
             output.pop();
         }
-        let chars = output
-            .chars()
-            .map(|c| Ch {
-                c,
-                mode: crate::ast::Mode::Literal,
-            })
-            .collect();
+        let mode = if quoted { Mode::Double } else { Mode::Expanded };
+        let mut chars = Vec::new();
+        push_text(&mut chars, &output, mode);
         (chars, out.stderr)
     }
 
-    /// Expands a pattern against the VFS. Returns sorted matches, or an
-    /// empty list if nothing matches (the caller then keeps the literal word).
+    /// Expands `${...}`: a value, its length, a default, or a trimmed value.
+    // The expression of `$((...))` is expanded before it is evaluated. Boxed,
+    // because the expansion calls back into this module.
+    fn expand_arith_word<'a>(&'a mut self, word: &'a Word) -> BoxFuture<'a, (Vec<Ch>, Vec<u8>)> {
+        Box::pin(async move { self.expand_chars(word).await })
+    }
+
+    // Boxed, because a default word or pattern expands with `expand_chars`, which
+    // calls this function again.
+    fn expand_param<'a>(&'a mut self, param: &'a Param) -> BoxFuture<'a, (Vec<Ch>, Vec<u8>)> {
+        Box::pin(async move { self.expand_param_inner(param).await })
+    }
+
+    async fn expand_param_inner(&mut self, param: &Param) -> (Vec<Ch>, Vec<u8>) {
+        let mode = if param.quoted {
+            Mode::Double
+        } else {
+            Mode::Expanded
+        };
+        let mut out = Vec::new();
+        let mut stderr = Vec::new();
+        let value = self.param_scalar(&param.name);
+        match &param.op {
+            ParamOp::Value if param.name == "@" => push_values(&mut out, &self.positional, mode),
+            ParamOp::Value => push_text(&mut out, value.as_deref().unwrap_or(""), mode),
+            ParamOp::Length => {
+                let length = value.as_deref().unwrap_or("").chars().count();
+                push_text(&mut out, &length.to_string(), mode);
+            }
+            ParamOp::Default { colon, word } => {
+                let missing = match &value {
+                    None => true,
+                    Some(text) => *colon && text.is_empty(),
+                };
+                if missing {
+                    // The default word is expanded with the quoting of the parameter.
+                    let (chars, word_stderr) = self.expand_chars(word).await;
+                    stderr.extend(word_stderr);
+                    out.extend(chars.into_iter().map(|ch| match ch.mode {
+                        Mode::Bare => Ch { mode, ..ch },
+                        _ => ch,
+                    }));
+                } else {
+                    push_text(&mut out, value.as_deref().unwrap_or(""), mode);
+                }
+            }
+            ParamOp::Indirect { default } => {
+                // The value of the variable named by `value`.
+                let target = value.as_deref().and_then(|name| self.param_scalar(name));
+                let missing = match (&target, default) {
+                    (None, _) => true,
+                    (Some(text), Some((colon, _))) => *colon && text.is_empty(),
+                    (Some(_), None) => false,
+                };
+                match (missing, default) {
+                    (true, Some((_, word))) => {
+                        let (chars, word_stderr) = self.expand_chars(word).await;
+                        stderr.extend(word_stderr);
+                        out.extend(chars.into_iter().map(|ch| match ch.mode {
+                            Mode::Bare => Ch { mode, ..ch },
+                            _ => ch,
+                        }));
+                    }
+                    (true, None) => {}
+                    (false, _) => push_text(&mut out, target.as_deref().unwrap_or(""), mode),
+                }
+            }
+            ParamOp::Suffix { longest, pattern } | ParamOp::Prefix { longest, pattern } => {
+                let prefix = matches!(param.op, ParamOp::Prefix { .. });
+                let (pattern_chars, pattern_stderr) = self.expand_chars(pattern).await;
+                stderr.extend(pattern_stderr);
+                let chars: Vec<char> = value.as_deref().unwrap_or("").chars().collect();
+                let trimmed = trim(&chars, &pattern_chars, prefix, *longest);
+                push_text(&mut out, &trimmed, mode);
+            }
+        }
+        (out, stderr)
+    }
+
+    /// The value of a parameter, or `None` if it is unset. `$@` and `$*` join
+    /// the positional parameters with spaces here. `$@` keeps them apart in
+    /// `expand_param`.
+    fn param_scalar(&self, name: &str) -> Option<String> {
+        match name {
+            "?" => Some(self.status.to_string()),
+            "#" => Some(self.positional.len().to_string()),
+            "@" | "*" => Some(self.positional.join(" ")),
+            _ if !name.is_empty() && name.chars().all(|c| c.is_ascii_digit()) => {
+                let index: usize = name.parse().unwrap_or(usize::MAX);
+                if index == 0 {
+                    Some("sandbox".to_string())
+                } else {
+                    self.positional.get(index - 1).cloned()
+                }
+            }
+            _ => self.env.get(name).cloned(),
+        }
+    }
+
+    /// Evaluates the text of `$((...))`.
+    fn arithmetic(&self, expr: &str) -> Result<i64, String> {
+        let env = &self.env;
+        let positional = &self.positional;
+        arith::evaluate(expr, &|name: &str| {
+            if !name.is_empty() && name.chars().all(|c| c.is_ascii_digit()) {
+                let index: usize = name.parse().unwrap_or(usize::MAX);
+                match index {
+                    0 => "sandbox".to_string(),
+                    n => positional.get(n - 1).cloned().unwrap_or_default(),
+                }
+            } else {
+                env.get(name).cloned().unwrap_or_default()
+            }
+        })
+    }
+
     async fn glob(&self, pattern: &[Ch]) -> Vec<String> {
         let absolute = pattern.first().is_some_and(|c| c.c == '/');
         let segments: Vec<&[Ch]> = pattern
