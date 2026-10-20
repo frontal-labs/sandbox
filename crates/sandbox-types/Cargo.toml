@@ -13,7 +13,6 @@ description = "Shared types for the sandbox system"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 ulid = { workspace = true }
 blake3 = { workspace = true }
 bytes = { workspace = true }

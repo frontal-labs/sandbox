@@ -10,7 +10,6 @@ rust_library(
         "@crates//:serde",
         "@crates//:serde_json",
         "@crates//:thiserror",
-        "@crates//:schemars",
         "@crates//:ulid",
         "@crates//:blake3",
         "@crates//:bytes",

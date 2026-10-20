@@ -1,3 +1,4 @@
+use crate::error::ErrorCode;
 use crate::hash::ContentHash;
 use crate::ids::{SnapshotId, TenantId};
 use crate::policy::{NetworkPolicy, ResourceLimits, SecretsConfig};
@@ -157,7 +158,40 @@ pub struct ExecRequest {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<Vec<u32>>))]
     pub stdin: Option<Vec<u8>>,
     pub timeout_ms: Option<u64>,
+    /// Stream the output while the command runs, as NDJSON. Set by the server
+    /// from `?stream=true` or from this field. Buffered callers leave it `false`.
     pub stream: bool,
+}
+
+/// Which output stream a streamed chunk came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum OutputStream {
+    Stdout,
+    Stderr,
+}
+
+/// One line of a streamed exec response (NDJSON, PLAN §4.15). Output lines arrive
+/// while the command runs. Exactly one `Exit` or `Error` line ends the response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum ExecEvent {
+    /// Output of the command, in order. Bytes are integer arrays, as in `ExecResult`.
+    Output {
+        stream: OutputStream,
+        #[cfg_attr(feature = "openapi", schema(value_type = Vec<u32>))]
+        data: Vec<u8>,
+    },
+    /// The command finished. Its output was sent in `Output` lines before this.
+    Exit {
+        exit_code: i32,
+        cpu_ms: u64,
+        wall_ms: u64,
+    },
+    /// The command failed or was cut short, such as by its timeout.
+    Error { code: ErrorCode, message: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

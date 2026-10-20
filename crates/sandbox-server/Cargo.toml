@@ -16,10 +16,11 @@ sandbox-vfs = { path = "../sandbox-vfs" }
 sandbox-cas = { path = "../sandbox-cas" }
 sandbox-trace = { path = "../sandbox-trace" }
 tokio = { workspace = true }
+sqlx = { workspace = true, optional = true }
+tokio-stream = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 axum = { workspace = true }
@@ -35,3 +36,5 @@ tower = { workspace = true, features = ["util"] }
 
 [features]
 default = []
+# The Postgres state store, for several nodes sharing one database (PLAN §4.8, M5).
+clustered = ["sqlx"]

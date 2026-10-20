@@ -13,6 +13,46 @@
     "version": "v1"
   },
   "paths": {
+    "/v1/gc": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Start a garbage collection of the blob store. It runs in the background, so",
+        "description": "the request does not wait for it (PLAN §4.2). The report is written to the\nlog when it finishes.\n\nAny key may call it. A collection holds every session's gate for a moment,\nso the server allows one per minute, and a call inside that window gets\n`RESOURCE_EXHAUSTED`.",
+        "operationId": "run_gc",
+        "responses": {
+          "202": {
+            "description": "Collection started in the background"
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A collection started less than a minute ago",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions": {
       "post": {
         "tags": [
@@ -201,7 +241,8 @@
         "tags": [
           "exec"
         ],
-        "summary": "Run one command in a session.",
+        "summary": "Run one command in a session. With `stream`, the output comes as NDJSON",
+        "description": "`ExecEvent` lines while the command runs (PLAN §4.15).",
         "operationId": "exec_command",
         "parameters": [
           {
@@ -227,11 +268,21 @@
         },
         "responses": {
           "200": {
-            "description": "Command finished",
+            "description": "Command finished. Buffered, the whole result. Streamed (`?stream=true`), `application/x-ndjson` lines, each an `ExecEvent`",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExecResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, such as an empty argv",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -248,16 +299,6 @@
           },
           "404": {
             "description": "No such session for this key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Streaming exec is not implemented yet",
             "content": {
               "application/json": {
                 "schema": {
@@ -966,10 +1007,92 @@
           }
         ]
       }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "The caller's usage counters since this server started.",
+        "operationId": "get_usage",
+        "responses": {
+          "200": {
+            "description": "The caller's counters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Counters"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "Counters": {
+        "type": "object",
+        "description": "What one key has used. Counts since the server started, and held in memory,\nso a restart resets them. They are not billing records (PLAN §4.14).",
+        "required": [
+          "sessions_created",
+          "sessions_slept",
+          "sessions_woken",
+          "execs",
+          "exec_wall_ms",
+          "bytes_written"
+        ],
+        "properties": {
+          "bytes_written": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes written through the filesystem API.",
+            "minimum": 0
+          },
+          "exec_wall_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall time of the commands the key ran, in milliseconds.",
+            "minimum": 0
+          },
+          "execs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions_created": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions_slept": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions_woken": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "CreateSessionResponse": {
         "type": "object",
         "required": [
@@ -1024,6 +1147,97 @@
           "WASM_ERROR"
         ]
       },
+      "ExecEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Output of the command, in order. Bytes are integer arrays, as in `ExecResult`.",
+            "required": [
+              "stream",
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              },
+              "stream": {
+                "$ref": "#/components/schemas/OutputStream"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "output"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The command finished. Its output was sent in `Output` lines before this.",
+            "required": [
+              "exit_code",
+              "cpu_ms",
+              "wall_ms",
+              "type"
+            ],
+            "properties": {
+              "cpu_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "exit_code": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "exit"
+                ]
+              },
+              "wall_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The command failed or was cut short, such as by its timeout.",
+            "required": [
+              "code",
+              "message",
+              "type"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "One line of a streamed exec response (NDJSON, PLAN §4.15). Output lines arrive\nwhile the command runs. Exactly one `Exit` or `Error` line ends the response.",
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
       "ExecRequest": {
         "type": "object",
         "required": [
@@ -1066,7 +1280,8 @@
             "description": "Bytes as an integer array, 0-255 each (serde default)."
           },
           "stream": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Stream the output while the command runs, as NDJSON. Set by the server\nfrom `?stream=true` or from this field. Buffered callers leave it `false`."
           },
           "timeout_ms": {
             "type": [
@@ -1194,6 +1409,14 @@
             }
           }
         }
+      },
+      "OutputStream": {
+        "type": "string",
+        "description": "Which output stream a streamed chunk came from.",
+        "enum": [
+          "stdout",
+          "stderr"
+        ]
       },
       "PolicyAction": {
         "type": "string",

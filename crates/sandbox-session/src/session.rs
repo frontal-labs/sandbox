@@ -1,6 +1,7 @@
 //! Session trait and types
 
 use async_trait::async_trait;
+use sandbox_shell::OutputObserver;
 use sandbox_types::hash::ContentHash;
 use sandbox_types::{ExecRequest, ExecResult, SandboxError, SessionId, Tier};
 use std::collections::HashMap;
@@ -36,6 +37,14 @@ pub trait Session: Send + Sync {
     /// Runs `req.argv` as one command. Output is buffered and returned with
     /// the exit code.
     async fn exec(&self, req: ExecRequest) -> Result<ExecResult, SandboxError>;
+    /// Like `exec`, and reports the command's output to `observer` as it becomes
+    /// available. The returned result holds the same output. See `OutputObserver`
+    /// for the granularity.
+    async fn exec_streamed(
+        &self,
+        req: ExecRequest,
+        observer: OutputObserver,
+    ) -> Result<ExecResult, SandboxError>;
     /// Parses and runs a shell script. Working directory and environment
     /// persist across calls.
     async fn run_script(&self, script: &str) -> Result<ExecResult, SandboxError>;

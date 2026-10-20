@@ -21,7 +21,7 @@ Every `/v1` route requires `Authorization: Bearer <key>`. `GET /v1/openapi.json`
 | POST | `/v1/sessions` | Creates an isolate-backed session owned by the calling key. Returns `201`. |
 | GET | `/v1/sessions/:id` | Returns the session state. |
 | DELETE | `/v1/sessions/:id` | Destroys the session. Returns `204`. |
-| POST | `/v1/sessions/:id/exec` | Runs one command and returns its buffered output. `stream: true` or `?stream=true` returns `501`, because streaming is not implemented. |
+| POST | `/v1/sessions/:id/exec` | Runs one command and returns its output. `stream: true` or `?stream=true` returns NDJSON `ExecEvent` lines as each command finishes (ADR 0020). |
 | GET | `/v1/sessions/:id/fs/*path` | Reads a file as `application/octet-stream`. |
 | PUT | `/v1/sessions/:id/fs/*path` | Creates or replaces a file. Returns `204`. |
 | DELETE | `/v1/sessions/:id/fs/*path` | Deletes a file or an empty directory. Returns `204`. |

@@ -529,8 +529,16 @@ async fn empty_limits_mean_defaults_and_are_accepted() {
     );
 }
 
+/// Splits an NDJSON body into its parsed lines.
+fn ndjson(body: &[u8]) -> Vec<Value> {
+    String::from_utf8_lossy(body)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each line is JSON"))
+        .collect()
+}
+
 #[tokio::test]
-async fn streaming_exec_is_refused_not_faked() {
+async fn streamed_exec_sends_output_then_one_exit_line() {
     let (app, key, _) = router();
     let id = create(&app, &key).await;
     let request = json!({ "argv": ["echo", "hi"], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": true });
@@ -542,14 +550,83 @@ async fn streaming_exec_is_refused_not_faked() {
         json_body(&request),
     )
     .await;
-    assert_eq!(
-        status,
-        StatusCode::NOT_IMPLEMENTED,
-        "{}",
-        String::from_utf8_lossy(&body)
-    );
-    let (status, _) = call(&app, "POST", &format!("/v1/sessions/{id}/exec?stream=true"), &key, json_body(&json!({ "argv": ["echo", "hi"], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": false }))).await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let lines = ndjson(&body);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[0]["type"], "output");
+    assert_eq!(lines[0]["stream"], "stdout");
+    let text: Vec<u8> = lines[0]["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b.as_u64().unwrap() as u8)
+        .collect();
+    assert_eq!(text, b"hi\n");
+    assert_eq!(lines[1]["type"], "exit");
+    assert_eq!(lines[1]["exit_code"], 0);
+}
+
+#[tokio::test]
+async fn query_flag_streams_the_same_way() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/exec?stream=true"),
+        &key,
+        json_body(&json!({ "argv": ["echo", "hi"], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(ndjson(&body).last().unwrap()["type"], "exit");
+}
+
+#[tokio::test]
+async fn a_streamed_command_cut_short_ends_with_an_error_line() {
+    // The status is already 200 when the timeout fires, so the failure is a line.
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let request = json!({
+        "argv": ["node", "-e", "let i=0; while(i<1000000000){i++}"],
+        "env": {}, "cwd": null, "stdin": null, "timeout_ms": 50, "stream": true
+    });
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/exec"),
+        &key,
+        json_body(&request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let last = ndjson(&body).pop().expect("at least one line");
+    assert_eq!(last["type"], "error");
+    assert_eq!(last["code"], "TIMEOUT");
+}
+
+#[tokio::test]
+async fn streamed_exec_still_refuses_bad_requests_before_streaming() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/exec?stream=true"),
+        &key,
+        json_body(&json!({ "argv": [], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/sessions/01ARZ3NDEKTSV4RRFFQ69G5FAV/exec?stream=true",
+        &key,
+        json_body(&json!({ "argv": ["echo", "hi"], "env": {}, "cwd": null, "stdin": null, "timeout_ms": null, "stream": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -586,14 +663,15 @@ async fn sleep_releases_the_session_and_wake_restores_its_files() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(state["status"], "sleeping");
 
-    // Asleep, the session refuses work with a conflict, not a not-found.
+    // A request to a sleeping session wakes it first (PLAN §4.14). The command
+    // runs on the restored files.
     let (status, body) = call(
         &app,
         "POST",
         &format!("/v1/sessions/{id}/exec"),
         &owner,
         json_body(&json!({
-            "argv": ["true"],
+            "argv": ["cat", "/keep.txt"],
             "env": {},
             "cwd": null,
             "stdin": null,
@@ -602,12 +680,13 @@ async fn sleep_releases_the_session_and_wake_restores_its_files() {
         })),
     )
     .await;
-    assert_eq!(
-        status,
-        StatusCode::CONFLICT,
-        "{}",
-        String::from_utf8_lossy(&body)
-    );
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let (status, state) = get_json(&app, &owner, &format!("/v1/sessions/{id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(state["status"], "running");
+
+    // Sleeping again, a snapshot request wakes it too.
+    assert_eq!(sleep(&app, &owner, &id).await.0, StatusCode::OK);
     let (status, _) = call(
         &app,
         "POST",
@@ -616,12 +695,7 @@ async fn sleep_releases_the_session_and_wake_restores_its_files() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-
-    let (status, state) = wake(&app, &owner, &id).await;
-    assert_eq!(status, StatusCode::OK, "{state}");
-    assert_eq!(state["status"], "running");
-    assert_eq!(state["id"], json!(id));
+    assert_eq!(status, StatusCode::CREATED);
 
     let (status, bytes) = read_file(&app, &owner, &id, "/keep.txt").await;
     assert_eq!(status, StatusCode::OK);
@@ -755,19 +829,196 @@ async fn the_trace_records_commands_and_replays_to_the_same_outputs() {
     let session = IsolateBackend::new(sandbox_types::SessionConfig::default())
         .await
         .unwrap();
-    let report = replay(&trace, |script| {
+    let report = replay(&trace, |run| {
         let session = &session;
-        async move {
-            use sandbox_session::Session;
-            session
-                .run_script(&script)
-                .await
-                .map(|out| (out.exit_code, out.stdout, out.stderr))
-        }
+        let run = run.clone();
+        async move { sandbox_session::replay_run(session, &run).await }
     })
     .await;
     assert!(report.matches(), "{:?}", report.divergences);
     assert_eq!(report.runs, 2);
+}
+
+#[tokio::test]
+async fn the_trace_lists_the_files_each_command_changed() {
+    use sandbox_trace::{FileChange, Trace};
+    use sandbox_types::event::FileOp;
+
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let (status, _) = exec_argv(&app, &key, &id, &["mkdir", "/made"]).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = exec_argv(&app, &key, &id, &["touch", "/made/a.txt"]).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = exec_argv(&app, &key, &id, &["cat", "/made/a.txt"]).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/v1/sessions/{id}/trace"))
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.headers()["x-trace-complete"], "true");
+    let text = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    let trace = Trace::parse(&text).unwrap();
+    assert_eq!(trace.runs.len(), 3);
+    assert_eq!(
+        trace.runs[0].files,
+        vec![FileChange {
+            path: "/made".to_string(),
+            op: FileOp::Mkdir,
+            before: None,
+            after: None,
+        }]
+    );
+    assert_eq!(trace.runs[1].files.len(), 1);
+    assert_eq!(trace.runs[1].files[0].path, "/made/a.txt");
+    assert_eq!(trace.runs[1].files[0].op, FileOp::Create);
+    // A read changes nothing, so the run lists no files.
+    assert!(trace.runs[2].files.is_empty());
+}
+
+#[tokio::test]
+async fn an_exec_past_its_timeout_returns_504_with_the_timeout_code() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/exec"),
+        &key,
+        json_body(&json!({
+            "argv": ["node", "-e", "let i=0; while(i<1000000000){i++}"],
+            "env": {}, "cwd": null, "stdin": null, "timeout_ms": 50, "stream": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["code"], "TIMEOUT");
+}
+
+#[tokio::test]
+async fn filesystem_writes_and_deletes_are_traced_and_replay_to_the_same_state() {
+    use sandbox_session::{replay_run, IsolateBackend, Session};
+    use sandbox_trace::{replay, FsOp, Trace};
+    use sandbox_types::event::FileOp;
+
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    // The write API does not create parent directories, so make one first.
+    let (status, _) = exec_argv(&app, &key, &id, &["mkdir", "/notes"]).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &app,
+        "PUT",
+        &format!("/v1/sessions/{id}/fs/notes/a.txt"),
+        &key,
+        Some(("application/octet-stream", b"hello file".to_vec())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(
+        &app,
+        "PUT",
+        &format!("/v1/sessions/{id}/fs/notes/b.txt"),
+        &key,
+        Some(("application/octet-stream", b"second".to_vec())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        &format!("/v1/sessions/{id}/fs/notes/a.txt"),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = exec_argv(&app, &key, &id, &["cat", "/notes/b.txt"]).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/v1/sessions/{id}/trace"))
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.headers()["x-trace-complete"], "true");
+    let text = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let trace = Trace::parse(&text).unwrap();
+    assert_eq!(trace.runs.len(), 5);
+
+    // Scripts have no filesystem operation, and filesystem runs have no script.
+    assert!(trace.runs[0].fs.is_none());
+    assert!(trace.runs[4].fs.is_none());
+    assert_eq!(
+        trace.runs[1].fs,
+        Some(FsOp::Write {
+            path: "/notes/a.txt".to_string(),
+            data: b"hello file".to_vec(),
+        })
+    );
+    assert_eq!(trace.runs[1].script, "");
+    let created: Vec<(&str, FileOp)> = trace.runs[1]
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.op))
+        .collect();
+    assert_eq!(created, vec![("/notes/a.txt", FileOp::Create)]);
+    assert_eq!(
+        trace.runs[3].fs,
+        Some(FsOp::Delete {
+            path: "/notes/a.txt".to_string(),
+        })
+    );
+    let removed: Vec<(&str, FileOp)> = trace.runs[3]
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.op))
+        .collect();
+    assert_eq!(removed, vec![("/notes/a.txt", FileOp::Delete)]);
+
+    // Replaying in a fresh sandbox makes the same writes, so every outcome matches.
+    let session = IsolateBackend::new(sandbox_types::SessionConfig::default())
+        .await
+        .unwrap();
+    let report = replay(&trace, |run| {
+        let session = &session;
+        let run = run.clone();
+        async move { replay_run(session, &run).await }
+    })
+    .await;
+    assert!(report.matches(), "{:?}", report.divergences);
+    assert_eq!(report.runs, 5);
+    // The replayed session holds b.txt and not a.txt, as the original did.
+    let out = session.run_script("cat /notes/b.txt").await.unwrap();
+    assert_eq!(out.stdout, b"second".to_vec());
+    assert_ne!(
+        session
+            .run_script("cat /notes/a.txt")
+            .await
+            .unwrap()
+            .exit_code,
+        0
+    );
 }
 
 #[tokio::test]

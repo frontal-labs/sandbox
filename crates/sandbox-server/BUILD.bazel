@@ -13,7 +13,6 @@ rust_library(
         "@crates//:bytes",
         "@crates//:tracing",
         "@crates//:thiserror",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:serde_json",
         "@crates//:axum",
@@ -23,9 +22,12 @@ rust_library(
         "@crates//:argon2",
         "@crates//:uuid",
         "@crates//:blake3",
-    ],
+
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-cas:sandbox_cas",
+        "@crates//:tokio-stream",
+],
     proc_macro_deps = [
-        "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )

@@ -1,0 +1,60 @@
+name: Build system
+
+# Checks the two supported ways to build the repository. `nix` runs the Nix flake
+# checks and the Bazel build inside the Nix dev shell. `bazel` runs the same Bazel
+# targets on a plain runner that has no Nix. See docs/build-system.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. A job that writes asks for the scope it needs.
+permissions:
+  contents: read
+
+jobs:
+  nix:
+    name: Nix flake check and Bazel (dev shell)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android && df -h /
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Flake checks
+        run: nix flake check
+      # The dev shell provides `bazel` (bazelisk), which reads .bazelversion.
+      - name: Bazel build
+        run: nix develop --command bazel build //...
+      - name: Bazel test
+        run: nix develop --command bazel test //...
+
+  bazel:
+    name: Bazel without Nix
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android && df -h /
+      # Installs bazelisk, which reads .bazelversion. The Rust, Python, Node and
+      # protoc toolchains come from Bazel's own repository rules, not the runner.
+      - name: Install Bazelisk
+        uses: bazel-contrib/setup-bazel@0.14.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+      - name: Bazel build
+        run: bazel build //...
+      - name: Bazel test
+        run: bazel test //...

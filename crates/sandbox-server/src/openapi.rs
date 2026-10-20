@@ -17,6 +17,8 @@ use utoipa::{Modify, OpenApi};
             Snapshots capture the committed filesystem. Settings the backend does not enforce are refused with 501."
     ),
     paths(
+        crate::gc::run_gc,
+        crate::api::get_usage,
         crate::api::create_session,
         crate::api::get_session,
         crate::api::destroy_session,
@@ -33,6 +35,7 @@ use utoipa::{Modify, OpenApi};
         crate::api::fork_snapshot,
     ),
     components(schemas(
+        crate::api::Counters,
         crate::api::ErrorBody,
         crate::api::CreateSessionResponse,
         crate::api::TakeSnapshotResponse,
@@ -45,6 +48,8 @@ use utoipa::{Modify, OpenApi};
         sandbox_types::TierPreference,
         sandbox_types::ExecRequest,
         sandbox_types::ExecResult,
+        sandbox_types::ExecEvent,
+        sandbox_types::OutputStream,
         sandbox_types::Snapshot,
         sandbox_types::ErrorCode,
         sandbox_types::policy::ResourceLimits,

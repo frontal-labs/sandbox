@@ -3,7 +3,7 @@
 
 use crate::auth::{AuthManager, KeyId};
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Path, Query, Request, State},
     http::{header, StatusCode},
     middleware::{self, Next},
@@ -12,23 +12,65 @@ use axum::{
     Extension, Router,
 };
 use sandbox_scheduler::Scheduler;
-use sandbox_session::session::SessionFs;
-use sandbox_session::{restore_checkpoint, Checkpoint, IsolateBackend, Session};
-use sandbox_trace::{outcome_of, RunRecord, Trace};
+use sandbox_session::{
+    changed_since, committed_root, delete_file as delete_session_file, restore_checkpoint_limited,
+    vfs_error, write_file as write_session_file, Checkpoint, IsolateBackend, OutputChunk,
+    OutputObserver, Session,
+};
+use sandbox_trace::{outcome_of, FileChange, FsOp, RunRecord, Trace};
 use sandbox_types::hash::ContentHash;
 use sandbox_types::policy::{NetworkPolicy, ResourceLimits};
 use sandbox_types::{
-    ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, SessionState,
-    SessionStatus, Snapshot, SnapshotId, TenantId, Tier, TierPreference,
+    ErrorCode, ExecEvent, ExecRequest, ExecResult, OutputStream, SandboxError, SessionConfig,
+    SessionId, SessionState, SessionStatus, Snapshot, SnapshotId, TenantId, Tier, TierPreference,
 };
-use sandbox_vfs::{OpenFlags, VfsError};
+use sandbox_vfs::OpenFlags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::RwLock;
+use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use utoipa::ToSchema;
+
+/// What one key has used. Counts since the server started, and held in memory,
+/// so a restart resets them. They are not billing records (PLAN §4.14).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ToSchema)]
+pub struct Counters {
+    pub sessions_created: u64,
+    pub sessions_slept: u64,
+    pub sessions_woken: u64,
+    pub execs: u64,
+    /// Wall time of the commands the key ran, in milliseconds.
+    pub exec_wall_ms: u64,
+    /// Bytes written through the filesystem API.
+    pub bytes_written: u64,
+}
+
+/// Usage counters for every key, keyed by the key's ID.
+#[derive(Clone, Default)]
+pub(crate) struct UsageTable(Arc<std::sync::Mutex<HashMap<String, Counters>>>);
+
+impl UsageTable {
+    /// Applies `change` to the owner's counters.
+    fn add(&self, owner: &KeyId, change: impl FnOnce(&mut Counters)) {
+        let mut table = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        change(table.entry(owner.as_str().to_string()).or_default());
+    }
+
+    fn get(&self, owner: &KeyId) -> Counters {
+        let table = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        table.get(owner.as_str()).cloned().unwrap_or_default()
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -38,25 +80,31 @@ pub struct AppState {
     pub snapshots: SnapshotTable,
     /// Where keys, snapshots, and sleeping sessions are saved. `None` keeps the
     /// server in memory (ADR 0008).
-    pub store: Option<Arc<crate::persist::Store>>,
+    pub store: Option<Arc<crate::persist::Persistence>>,
+    /// When the last garbage collection started. Limits how often it can run.
+    pub(crate) gc_last_run: Arc<tokio::sync::Mutex<Option<std::time::Instant>>>,
+    /// What each key has used since this server started (PLAN §4.14).
+    pub(crate) usage: UsageTable,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
 /// the root is the filesystem state it restores.
 #[derive(Clone)]
-struct SnapshotRecord {
+pub(crate) struct SnapshotRecord {
     owner: KeyId,
     session: SessionId,
-    root: ContentHash,
+    pub(crate) root: ContentHash,
     created_at: SystemTime,
     labels: HashMap<String, String>,
+    /// The limits of the session it was taken from. A fork gets them (ADR 0014).
+    pub(crate) limits: ResourceLimits,
 }
 
 /// Snapshots held by the server, keyed by ID. The server owns this table, so
 /// the snapshot limits and the owner checks live in one place.
 #[derive(Clone, Default)]
 pub struct SnapshotTable {
-    records: Arc<RwLock<HashMap<SnapshotId, SnapshotRecord>>>,
+    pub(crate) records: Arc<RwLock<HashMap<SnapshotId, SnapshotRecord>>>,
     /// Serializes snapshot admission, so the limits cannot be raced past.
     admit: Arc<tokio::sync::Mutex<()>>,
 }
@@ -101,17 +149,17 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
 
 /// Live sessions, keyed by ID, each with the key that owns it.
 #[derive(Clone, Default)]
-pub struct SessionTable(Arc<RwLock<HashMap<SessionId, Entry>>>);
+pub struct SessionTable(pub(crate) Arc<RwLock<HashMap<SessionId, Entry>>>);
 
-struct Entry {
+pub(crate) struct Entry {
     owner: KeyId,
     state: SessionState,
     /// `None` while the session sleeps. Sleep drops the live session, so a
     /// sleeping session holds no VFS in memory. See ADR 0006.
-    session: Option<Arc<dyn Session>>,
+    pub(crate) session: Option<Arc<dyn Session>>,
     /// The session's last checkpoint: what a restart or a wake brings back. Only
     /// a durable server keeps one (ADR 0010).
-    checkpoint: Option<Checkpoint>,
+    pub(crate) checkpoint: Option<Checkpoint>,
     /// Commands the session ran, in order (ADR 0009).
     trace: Vec<RunRecord>,
     /// Bytes the trace holds in its scripts and outputs.
@@ -121,7 +169,29 @@ struct Entry {
     /// Held for every command, file operation, and snapshot on this session.
     /// A checkpoint must not interleave with a write, or the write can be lost
     /// from the snapshot or from the overlay.
-    gate: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) gate: Arc<tokio::sync::Mutex<()>>,
+    /// The session's limits, set when it was created (ADR 0014). A wake, a
+    /// snapshot, and a restart all keep them.
+    pub(crate) limits: ResourceLimits,
+    /// When a request last touched the session, in milliseconds since the Unix
+    /// epoch. Idle sleep reads it (PLAN §4.14).
+    pub(crate) last_active: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Entry {
+    /// Records that a request touched the session now.
+    fn touch(&self) {
+        self.last_active
+            .store(now_millis(), std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Milliseconds since the Unix epoch.
+pub(crate) fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// Error body for every non-2xx response on `/v1`.
@@ -156,6 +226,7 @@ pub struct ForkResponse {
 }
 
 /// An error that renders as an [`ErrorBody`] with the status its code implies.
+#[derive(Debug)]
 pub struct ApiError(SandboxError);
 
 impl From<SandboxError> for ApiError {
@@ -186,18 +257,6 @@ impl IntoResponse for ApiError {
 }
 
 /// Maps VFS errors to API errors. The orphan rule keeps this out of `From`.
-fn vfs_error(error: VfsError) -> SandboxError {
-    match error {
-        VfsError::NotFound(m) => SandboxError::not_found(m),
-        VfsError::AlreadyExists(m) => SandboxError::already_exists(m),
-        VfsError::InvalidPath(m) => SandboxError::invalid_argument(m),
-        VfsError::PermissionDenied(m) => SandboxError::permission_denied(m),
-        VfsError::QuotaExceeded(m) => SandboxError::resource_exhausted(m),
-        VfsError::Unsupported(m) => SandboxError::unsupported(m),
-        other => SandboxError::new(ErrorCode::VfsError, other.to_string()),
-    }
-}
-
 /// Whether a file of `size` bytes is too large to read in one call.
 fn over_read_limit(size: u64) -> bool {
     size > MAX_READ_BYTES
@@ -212,20 +271,47 @@ fn vfs_path(raw: &str) -> Result<PathBuf, ApiError> {
     Ok(PathBuf::from(format!("/{raw}")))
 }
 
-/// Whether `requested` sets a limit to a value other than the default. A field
-/// left unset means the default, so `{}` requests no custom limits.
-fn requests_custom_limits(requested: &ResourceLimits) -> bool {
+/// The first limit `requested` sets that the server does not enforce, as the
+/// message names it. A limit left unset, or set to its default, asks for nothing
+/// the server lacks. The VFS enforces the file size, total size, inode, and path
+/// depth limits (ADR 0014). The command wall timeout is enforced at its default
+/// only, and the others are not enforced at all.
+fn unenforced_limit(requested: &ResourceLimits) -> Option<&'static str> {
     let d = ResourceLimits::default();
-    (requested.memory_bytes.is_some() && requested.memory_bytes != d.memory_bytes)
-        || (requested.cpu_ms_per_sec.is_some() && requested.cpu_ms_per_sec != d.cpu_ms_per_sec)
-        || (requested.wall_timeout_secs.is_some()
-            && requested.wall_timeout_secs != d.wall_timeout_secs)
-        || (requested.max_file_size.is_some() && requested.max_file_size != d.max_file_size)
-        || (requested.max_total_size.is_some() && requested.max_total_size != d.max_total_size)
-        || (requested.max_inodes.is_some() && requested.max_inodes != d.max_inodes)
-        || (requested.max_path_depth.is_some() && requested.max_path_depth != d.max_path_depth)
-        || (requested.max_processes.is_some() && requested.max_processes != d.max_processes)
-        || (requested.max_open_files.is_some() && requested.max_open_files != d.max_open_files)
+    if requested.memory_bytes.is_some() && requested.memory_bytes != d.memory_bytes {
+        return Some("a memory limit");
+    }
+    if requested.cpu_ms_per_sec.is_some() && requested.cpu_ms_per_sec != d.cpu_ms_per_sec {
+        return Some("a CPU limit");
+    }
+    if requested.wall_timeout_secs.is_some() && requested.wall_timeout_secs != d.wall_timeout_secs {
+        return Some("a session wall timeout other than the default");
+    }
+    if requested.max_processes.is_some() && requested.max_processes != d.max_processes {
+        return Some("a process limit");
+    }
+    if requested.max_open_files.is_some() && requested.max_open_files != d.max_open_files {
+        return Some("an open file limit");
+    }
+    None
+}
+
+/// Rejects a limit that would block every write, such as a zero file size.
+fn invalid_limit(limits: &ResourceLimits) -> Option<&'static str> {
+    let zero = |v: Option<u64>| v == Some(0);
+    if zero(limits.max_file_size) {
+        return Some("max_file_size must be at least 1");
+    }
+    if zero(limits.max_total_size) {
+        return Some("max_total_size must be at least 1");
+    }
+    if zero(limits.max_inodes) {
+        return Some("max_inodes must be at least 1");
+    }
+    if limits.max_path_depth == Some(0) {
+        return Some("max_path_depth must be at least 1");
+    }
+    None
 }
 
 /// Refuses a config that asks for something the backend does not enforce.
@@ -243,8 +329,11 @@ fn refuse_unenforced(config: &SessionConfig) -> Result<(), ApiError> {
     ) {
         return refuse("the vm tier");
     }
-    if requests_custom_limits(&config.limits) {
-        return refuse("per-session resource limits");
+    if let Some(what) = unenforced_limit(&config.limits) {
+        return refuse(what);
+    }
+    if let Some(why) = invalid_limit(&config.limits) {
+        return Err(SandboxError::invalid_argument(why).into());
     }
     if config.network != NetworkPolicy::default() {
         return refuse("a network policy");
@@ -267,6 +356,7 @@ fn entry(
     session: Arc<dyn Session>,
     tenant_id: TenantId,
     labels: HashMap<String, String>,
+    limits: ResourceLimits,
 ) -> Entry {
     let now = SystemTime::now();
     let state = SessionState {
@@ -289,6 +379,8 @@ fn entry(
         trace_bytes: 0,
         trace_complete: true,
         gate: Arc::new(tokio::sync::Mutex::new(())),
+        limits,
+        last_active: Arc::new(std::sync::atomic::AtomicU64::new(now_millis())),
     }
 }
 
@@ -299,6 +391,7 @@ struct Lookup {
     session: Option<Arc<dyn Session>>,
     state: SessionState,
     gate: Arc<tokio::sync::Mutex<()>>,
+    limits: ResourceLimits,
 }
 
 /// A live session the caller owns.
@@ -306,6 +399,7 @@ struct Owned {
     session: Arc<dyn Session>,
     state: SessionState,
     gate: Arc<tokio::sync::Mutex<()>>,
+    limits: ResourceLimits,
 }
 
 /// Finds a session the caller owns, sleeping or not. Other keys get the same
@@ -315,11 +409,15 @@ async fn lookup(state: &AppState, owner: &KeyId, raw: &str) -> Result<Lookup, Ap
     let id: SessionId = raw.parse().map_err(|_| not_found())?;
     let table = state.sessions.0.read().await;
     match table.get(&id) {
-        Some(entry) if entry.owner == *owner => Ok(Lookup {
-            session: entry.session.clone(),
-            state: entry.state.clone(),
-            gate: entry.gate.clone(),
-        }),
+        Some(entry) if entry.owner == *owner => {
+            entry.touch();
+            Ok(Lookup {
+                session: entry.session.clone(),
+                state: entry.state.clone(),
+                gate: entry.gate.clone(),
+                limits: entry.limits.clone(),
+            })
+        }
         _ => Err(not_found().into()),
     }
 }
@@ -327,12 +425,18 @@ async fn lookup(state: &AppState, owner: &KeyId, raw: &str) -> Result<Lookup, Ap
 /// Finds a live session the caller owns. A sleeping session is refused until
 /// it is woken.
 async fn owned(state: &AppState, owner: &KeyId, raw: &str) -> Result<Owned, ApiError> {
-    let found = lookup(state, owner, raw).await?;
+    let mut found = lookup(state, owner, raw).await?;
+    // A request to a sleeping session wakes it first (PLAN §4.14).
+    if found.session.is_none() {
+        wake_entry(state, found.state.id, None).await?;
+        found = lookup(state, owner, raw).await?;
+    }
     match found.session {
         Some(session) => Ok(Owned {
             session,
             state: found.state,
             gate: found.gate,
+            limits: found.limits,
         }),
         None => Err(asleep().into()),
     }
@@ -375,13 +479,25 @@ async fn require_api_key(
 /// Builds the API router. Every `/v1` route requires a valid bearer API key,
 /// except `GET /v1/openapi.json`, which holds only the public contract.
 pub fn create_router(scheduler: Arc<Scheduler>, auth: Arc<AuthManager>) -> Router {
-    build_router(AppState {
+    create_router_with_state(scheduler, auth).0
+}
+
+/// Like [`create_router`], and also returns the server state, so a caller can
+/// schedule garbage collection with [`crate::gc::schedule`].
+pub fn create_router_with_state(
+    scheduler: Arc<Scheduler>,
+    auth: Arc<AuthManager>,
+) -> (Router, AppState) {
+    let state = AppState {
         scheduler,
         auth,
         sessions: SessionTable::default(),
         snapshots: SnapshotTable::default(),
+        gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
+        usage: UsageTable::default(),
         store: None,
-    })
+    };
+    (build_router(state.clone()), state)
 }
 
 /// Opens a durable server whose state lives in `dir` (ADR 0008). Keys, snapshots,
@@ -391,7 +507,46 @@ pub async fn open_durable(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
 ) -> Result<(Router, Option<String>), SandboxError> {
+    let (app, _, new_key) = open_durable_with_state(scheduler, dir).await?;
+    Ok((app, new_key))
+}
+
+/// Like [`open_durable`], and also returns the server state (see
+/// [`create_router_with_state`]).
+pub async fn open_durable_with_state(
+    scheduler: Arc<Scheduler>,
+    dir: &std::path::Path,
+) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let (store, saved) = crate::persist::Store::open(dir)?;
+    attach_store(scheduler, crate::persist::Persistence::Files(store), saved).await
+}
+
+/// Like [`open_durable_with_state`], with the metadata in the Postgres database at
+/// `database_url`, so several nodes can serve the same state. The blobs stay in
+/// `dir`, which every node must be able to reach.
+#[cfg(feature = "clustered")]
+pub async fn open_clustered_with_state(
+    scheduler: Arc<Scheduler>,
+    database_url: &str,
+    dir: &std::path::Path,
+) -> Result<(Router, AppState, Option<String>), SandboxError> {
+    crate::persist::prepare_blobs(dir)?;
+    let (store, saved) = crate::pg_store::PgStore::connect(database_url).await?;
+    attach_store(
+        scheduler,
+        crate::persist::Persistence::Clustered(store),
+        saved,
+    )
+    .await
+}
+
+/// Builds the server around a durable store and its saved state: restores the
+/// keys, snapshots, and sessions, then saves the restored state.
+async fn attach_store(
+    scheduler: Arc<Scheduler>,
+    store: crate::persist::Persistence,
+    saved: crate::persist::Saved,
+) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
         Some(auth.create_key())
@@ -409,11 +564,13 @@ pub async fn open_durable(
         auth,
         sessions: SessionTable::default(),
         snapshots: SnapshotTable::default(),
+        gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
+        usage: UsageTable::default(),
         store: Some(Arc::new(store)),
     };
     restore(&state, saved).await?;
     persist(&state).await.map_err(|e| e.0)?;
-    Ok((build_router(state), new_key))
+    Ok((build_router(state.clone()), state, new_key))
 }
 
 /// Loads snapshot records and sleeping sessions into an empty server.
@@ -429,6 +586,7 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
                     root: s.root,
                     created_at: s.created_at,
                     labels: s.labels,
+                    limits: s.limits,
                 },
             );
         }
@@ -444,6 +602,7 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
             cwd: "/".to_string(),
             env: HashMap::new(),
             sleeping: true,
+            limits: ResourceLimits::default(),
             trace: s.trace,
             trace_complete: s.trace_complete,
         });
@@ -462,7 +621,11 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
         let session: Option<Arc<dyn Session>> = if saved_session.sleeping {
             None
         } else {
-            Some(restore_checkpoint(checkpoint.clone()).await?.into())
+            Some(
+                restore_checkpoint_limited(checkpoint.clone(), &saved_session.limits)
+                    .await?
+                    .into(),
+            )
         };
         let id = saved_session.state.id;
         table.insert(
@@ -476,6 +639,8 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
                 trace: trace.runs,
                 trace_complete: saved_session.trace_complete,
                 gate: Arc::new(tokio::sync::Mutex::new(())),
+                limits: saved_session.limits,
+                last_active: Arc::new(std::sync::atomic::AtomicU64::new(now_millis())),
             },
         );
     }
@@ -502,6 +667,7 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
                 root: r.root,
                 created_at: r.created_at,
                 labels: r.labels.clone(),
+                limits: r.limits.clone(),
             })
             .collect()
     };
@@ -521,6 +687,7 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
                     // to disk. A restored session starts with an empty environment (ADR 0010).
                     env: HashMap::new(),
                     sleeping: e.session.is_none(),
+                    limits: e.limits.clone(),
                     trace: Trace {
                         runs: e.trace.clone(),
                     }
@@ -536,6 +703,8 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
         snapshots,
         sleeping: Vec::new(),
         sessions,
+        // The store sets the epoch when it writes the base file.
+        log_epoch: 0,
     }
 }
 
@@ -581,6 +750,24 @@ async fn persist(state: &AppState) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// The caller's usage counters since this server started.
+#[utoipa::path(
+    get,
+    path = "/v1/usage",
+    tag = "usage",
+    responses(
+        (status = 200, description = "The caller's counters", body = Counters),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn get_usage(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+) -> Json<Counters> {
+    Json(state.usage.get(&owner))
+}
+
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/sessions", post(create_session))
@@ -597,6 +784,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id/snapshots", get(list_snapshots))
         .route("/v1/sessions/:id/snapshots/:snapshot_id", get(get_snapshot))
         .route("/v1/snapshots/:id/fork", post(fork_snapshot))
+        .route("/v1/gc", post(crate::gc::run_gc))
+        .route("/v1/usage", get(get_usage))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_api_key,
@@ -633,17 +822,23 @@ pub async fn create_session(
     refuse_unenforced(&config)?;
     let tenant_id = config.tenant_id;
     let labels = config.labels.clone();
+    let limits = config.limits.clone();
     let session: Arc<dyn Session> = match config.initial_snapshot {
         Some(snapshot_id) => {
             let record = snapshot_for(&state, &owner, snapshot_id).await?;
-            sandbox_session::restore(record.root).await?.into()
+            sandbox_session::restore_limited(record.root, &limits)
+                .await?
+                .into()
         }
         None => Arc::new(IsolateBackend::new(config).await?),
     };
     let id = session.id();
-    let mut entry = entry(owner.clone(), session.clone(), tenant_id, labels);
+    let mut entry = entry(owner.clone(), session.clone(), tenant_id, labels, limits);
     stamp(&state, &mut entry, &session).await?;
     admit_session(&state, &owner, entry).await?;
+    state.usage.add(&owner, |c| c.sessions_created += 1);
+    // A new session is saved now, so a restart before its first change keeps it (ADR 0010).
+    persist(&state).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateSessionResponse { session_id: id }),
@@ -700,7 +895,8 @@ pub async fn destroy_session(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Run one command in a session.
+/// Run one command in a session. With `stream`, the output comes as NDJSON
+/// `ExecEvent` lines while the command runs (PLAN §4.15).
 #[utoipa::path(
     post,
     path = "/v1/sessions/{id}/exec",
@@ -708,10 +904,10 @@ pub async fn destroy_session(
     params(("id" = String, Path, description = "Session ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$")),
     request_body = ExecRequest,
     responses(
-        (status = 200, description = "Command finished", body = ExecResult),
+        (status = 200, description = "Command finished. Buffered, the whole result. Streamed (`?stream=true`), `application/x-ndjson` lines, each an `ExecEvent`", body = ExecResult),
+        (status = 400, description = "Invalid request, such as an empty argv", body = ErrorBody),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 404, description = "No such session for this key", body = ErrorBody),
-        (status = 501, description = "Streaming exec is not implemented yet", body = ErrorBody),
     ),
     security(("bearer" = []))
 )]
@@ -721,19 +917,103 @@ pub async fn exec_command(
     Path(id): Path<String>,
     Query(query): Query<ExecQuery>,
     Json(request): Json<ExecRequest>,
-) -> Result<Json<ExecResult>, ApiError> {
-    // Output is buffered. Streaming would need the backend to emit chunks while
-    // the command runs, which it cannot do yet, so refuse rather than fake it.
+) -> Result<Response, ApiError> {
     if query.stream.unwrap_or(false) || request.stream {
-        return Err(SandboxError::unsupported("streaming exec is not implemented yet").into());
+        return exec_streaming(state, owner, id, request).await;
     }
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
-    let session = own.session;
-    let result = session.exec(request.clone()).await;
-    record_exec(&state, own.state.id, &request, &result).await;
-    save_session(&state, own.state.id, &session).await?;
-    Ok(Json(result?))
+    let result = run_exec(&state, &owner, &own, request, None).await?;
+    Ok(Json(result).into_response())
+}
+
+/// The NDJSON line for one chunk of a command's output.
+fn output_event(chunk: OutputChunk) -> ExecEvent {
+    let stream = if chunk.fd == 2 {
+        OutputStream::Stderr
+    } else {
+        OutputStream::Stdout
+    };
+    ExecEvent::Output {
+        stream,
+        data: chunk.data,
+    }
+}
+
+/// Runs a command for a request, and does what every command does afterwards: it
+/// is metered, recorded in the trace, and the session is saved. The caller holds
+/// the session's gate.
+async fn run_exec(
+    state: &AppState,
+    owner: &KeyId,
+    own: &Owned,
+    request: ExecRequest,
+    observer: Option<OutputObserver>,
+) -> Result<ExecResult, ApiError> {
+    let session = own.session.clone();
+    let before = committed_root(session.as_ref()).await;
+    let result = match observer {
+        Some(observer) => session.exec_streamed(request.clone(), observer).await,
+        None => session.exec(request.clone()).await,
+    };
+    state.usage.add(owner, |c| {
+        c.execs += 1;
+        if let Ok(out) = &result {
+            c.exec_wall_ms += out.wall_ms;
+        }
+    });
+    let files = files_since(session.as_ref(), before).await;
+    record_exec(state, own.state.id, &request, &result, files).await;
+    save_session(state, own.state.id, &session).await?;
+    Ok(result?)
+}
+
+/// Runs a command and streams its output as NDJSON. The response starts before
+/// the command finishes, so a failure after that point is an `error` line, not an
+/// HTTP status. A failure before it, such as an unknown session, is an HTTP error.
+/// The command keeps running if the client disconnects, so the session still ends
+/// in a consistent state, and its trace still records the run.
+async fn exec_streaming(
+    state: AppState,
+    owner: KeyId,
+    id: String,
+    request: ExecRequest,
+) -> Result<Response, ApiError> {
+    if request.argv.is_empty() {
+        return Err(SandboxError::invalid_argument("argv is empty").into());
+    }
+    let own = owned(&state, &owner, &id).await?;
+    let gate = own.gate.clone().lock_owned().await;
+    let (events, lines) = tokio::sync::mpsc::unbounded_channel::<ExecEvent>();
+    let output = events.clone();
+    let observer: OutputObserver = Arc::new(move |chunk: OutputChunk| {
+        // A send fails only after the client has gone away. The command still runs.
+        let _ = output.send(output_event(chunk));
+    });
+    tokio::spawn(async move {
+        let _gate = gate;
+        let last = match run_exec(&state, &owner, &own, request, Some(observer)).await {
+            Ok(result) => ExecEvent::Exit {
+                exit_code: result.exit_code,
+                cpu_ms: result.cpu_ms,
+                wall_ms: result.wall_ms,
+            },
+            Err(ApiError(error)) => ExecEvent::Error {
+                code: error.code,
+                message: error.message,
+            },
+        };
+        let _ = events.send(last);
+    });
+    let body = UnboundedReceiverStream::new(lines).map(|event| {
+        let mut line = serde_json::to_vec(&event).expect("an exec event serializes");
+        line.push(b'\n');
+        Ok::<_, Infallible>(Bytes::from(line))
+    });
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, "application/x-ndjson")
+        .body(Body::from_stream(body))
+        .expect("the content type is a valid header"))
 }
 
 /// Most runs one session's trace holds. Runs past this are not recorded, and the
@@ -744,57 +1024,58 @@ pub const MAX_TRACE_RUNS: usize = 4096;
 /// state, so the budget bounds both.
 pub const MAX_TRACE_BYTES: usize = 8 * 1024 * 1024;
 
-/// Bytes a run takes in a trace: its script and its output.
+/// Bytes a run takes in a trace: its script, its output, and the paths it changed.
 fn run_size(run: &RunRecord) -> usize {
     let outcome = match &run.outcome {
         sandbox_trace::Outcome::Completed { stdout, stderr, .. } => stdout.len() + stderr.len(),
         sandbox_trace::Outcome::Failed { message, .. } => message.len(),
     };
-    run.script.len() + outcome
+    let files: usize = run.files.iter().map(|f| f.path.len() + 64).sum();
+    run.script.len() + outcome + files
 }
 
 fn trace_size(runs: &[RunRecord]) -> usize {
     runs.iter().map(run_size).sum()
 }
 
-/// Appends one command to the session's trace (ADR 0009).
-async fn record_exec(
-    state: &AppState,
-    id: SessionId,
-    request: &ExecRequest,
-    result: &Result<ExecResult, SandboxError>,
-) {
-    if request.argv.is_empty() {
-        return;
-    }
+/// One run as the trace records it, before it is appended.
+struct Ran {
+    /// The script, or `None` when the run cannot be replayed faithfully. The
+    /// trace is then marked incomplete. A filesystem run has an empty script.
+    script: Option<String>,
+    /// The filesystem write or delete, when the run is one.
+    fs: Option<FsOp>,
+    result: Result<(i32, Vec<u8>, Vec<u8>), SandboxError>,
+    /// The files the run changed, or the error that stopped them being read.
+    files: Result<Vec<FileChange>, SandboxError>,
+}
+
+/// Appends one run to the session's trace (ADR 0009, ADR 0012).
+async fn append_run(state: &AppState, id: SessionId, ran: Ran) {
     let mut table = state.sessions.0.write().await;
     let Some(entry) = table.get_mut(&id) else {
         return;
     };
-    // Standard input cannot be written into a script, so the trace is marked
-    // incomplete rather than recording a command that replays differently.
-    let script = match script_for(request) {
-        Some(script) if request.stdin.as_ref().is_none_or(|s| s.is_empty()) => script,
-        _ => {
-            entry.trace_complete = false;
-            return;
-        }
+    let Some(script) = ran.script else {
+        entry.trace_complete = false;
+        return;
     };
     if entry.trace.len() >= MAX_TRACE_RUNS {
         entry.trace_complete = false;
         return;
     }
-    let outcome = outcome_of(
-        result
-            .as_ref()
-            .map(|out| (out.exit_code, out.stdout.clone(), out.stderr.clone()))
-            .map_err(|e| SandboxError::new(e.code, e.message.clone())),
-    );
+    let outcome = outcome_of(ran.result);
+    let files = ran.files.unwrap_or_else(|_| {
+        entry.trace_complete = false;
+        Vec::new()
+    });
     let seq = entry.trace.len() as u64 + 1;
     let run = RunRecord {
         seq,
         script,
+        fs: ran.fs,
         outcome,
+        files,
     };
     let size = run_size(&run);
     if entry.trace_bytes + size > MAX_TRACE_BYTES {
@@ -803,6 +1084,76 @@ async fn record_exec(
     }
     entry.trace_bytes += size;
     entry.trace.push(run);
+}
+
+/// Appends one command to the session's trace (ADR 0009).
+async fn record_exec(
+    state: &AppState,
+    id: SessionId,
+    request: &ExecRequest,
+    result: &Result<ExecResult, SandboxError>,
+    files: Result<Vec<FileChange>, SandboxError>,
+) {
+    if request.argv.is_empty() {
+        return;
+    }
+    // Standard input cannot be written into a script, so the trace is marked
+    // incomplete rather than recording a command that replays differently.
+    let script = match script_for(request) {
+        Some(script) if request.stdin.as_ref().is_none_or(|s| s.is_empty()) => Some(script),
+        _ => None,
+    };
+    let result = result
+        .as_ref()
+        .map(|out| (out.exit_code, out.stdout.clone(), out.stderr.clone()))
+        .map_err(|e| SandboxError::new(e.code, e.message.clone()));
+    append_run(
+        state,
+        id,
+        Ran {
+            script,
+            fs: None,
+            result,
+            files,
+        },
+    )
+    .await;
+}
+
+/// Appends one filesystem write or delete to the session's trace (ADR 0012).
+/// `op` is `None` when the operation is too large to record, and the trace is
+/// then marked incomplete.
+async fn record_fs(
+    state: &AppState,
+    id: SessionId,
+    op: Option<FsOp>,
+    result: &Result<(), SandboxError>,
+    files: Result<Vec<FileChange>, SandboxError>,
+) {
+    let result = result
+        .as_ref()
+        .map(|()| (0, Vec::new(), Vec::new()))
+        .map_err(|e| SandboxError::new(e.code, e.message.clone()));
+    append_run(
+        state,
+        id,
+        Ran {
+            script: op.as_ref().map(|_| String::new()),
+            fs: op,
+            result,
+            files,
+        },
+    )
+    .await;
+}
+
+/// The files changed since `before`, a committed root read before the operation.
+async fn files_since(
+    session: &dyn Session,
+    before: Result<ContentHash, SandboxError>,
+) -> Result<Vec<FileChange>, SandboxError> {
+    let changes = changed_since(session, before?).await?;
+    Ok(changes.into_iter().map(FileChange::from).collect())
 }
 
 /// The script that runs `request` in a shell: its directory, then its argv, with
@@ -876,7 +1227,7 @@ pub async fn get_trace(
 /// Query options for exec.
 #[derive(Debug, Deserialize)]
 pub struct ExecQuery {
-    /// Streaming output. Not implemented, so `true` is refused with 501.
+    /// Stream the output as NDJSON `ExecEvent` lines while the command runs.
     pub stream: Option<bool>,
 }
 
@@ -960,31 +1311,25 @@ pub async fn write_file(
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
     let session = own.session;
-    let target = vfs_path(&path)?;
-    let fs = session.fs();
-    let handle = fs.open(&target, write_flags()).await.map_err(vfs_error)?;
-    let written = write_all(fs, &handle, &body).await;
-    fs.close(&handle);
-    written.map_err(vfs_error)?;
+    let target = vfs_path(&path)?.display().to_string();
+    let before = committed_root(session.as_ref()).await;
+    let result = write_session_file(session.as_ref(), &target, &body).await;
+    let files = files_since(session.as_ref(), before).await;
+    // A write too large for the trace budget is not copied. The trace is marked
+    // incomplete instead.
+    let op = (body.len() <= MAX_TRACE_BYTES).then(|| FsOp::Write {
+        path: target,
+        data: body.to_vec(),
+    });
+    record_fs(&state, own.state.id, op, &result, files).await;
+    if result.is_ok() {
+        state
+            .usage
+            .add(&owner, |c| c.bytes_written += body.len() as u64);
+    }
+    result?;
     save_session(&state, own.state.id, &session).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// Writes every byte, since one VFS write may accept only part of the buffer.
-async fn write_all(
-    fs: &dyn SessionFs,
-    handle: &sandbox_vfs::FileHandle,
-    data: &[u8],
-) -> Result<(), VfsError> {
-    let mut offset = 0usize;
-    while offset < data.len() {
-        let n = fs.write(handle, offset as u64, &data[offset..]).await?;
-        if n == 0 {
-            break;
-        }
-        offset += n;
-    }
-    Ok(())
 }
 
 /// Delete a file or an empty directory in a session's filesystem.
@@ -1012,8 +1357,19 @@ pub async fn delete_file(
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
     let session = own.session;
-    let target = vfs_path(&path)?;
-    session.fs().rm(&target, false).await.map_err(vfs_error)?;
+    let target = vfs_path(&path)?.display().to_string();
+    let before = committed_root(session.as_ref()).await;
+    let result = delete_session_file(session.as_ref(), &target).await;
+    let files = files_since(session.as_ref(), before).await;
+    record_fs(
+        &state,
+        own.state.id,
+        Some(FsOp::Delete { path: target }),
+        &result,
+        files,
+    )
+    .await;
+    result?;
     save_session(&state, own.state.id, &session).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1041,7 +1397,7 @@ pub async fn take_snapshot(
     let _gate = own.gate.lock().await;
     let _admit = admit_snapshot(&state, &owner).await?;
     let root = own.session.snapshot().await?;
-    let snapshot_id = store_snapshot(&state, owner, &own.state, root).await;
+    let snapshot_id = store_snapshot(&state, owner, &own.state, root, own.limits.clone()).await;
     persist(&state).await?;
     Ok((
         StatusCode::CREATED,
@@ -1076,6 +1432,7 @@ async fn store_snapshot(
     owner: KeyId,
     session: &SessionState,
     root: ContentHash,
+    limits: ResourceLimits,
 ) -> SnapshotId {
     let snapshot_id = SnapshotId::new();
     let record = SnapshotRecord {
@@ -1084,6 +1441,7 @@ async fn store_snapshot(
         root,
         created_at: SystemTime::now(),
         labels: session.labels.clone(),
+        limits,
     };
     state
         .snapshots
@@ -1118,37 +1476,51 @@ pub async fn sleep_session(
 ) -> Result<Json<TakeSnapshotResponse>, ApiError> {
     let found = lookup(&state, &owner, &id).await?;
     let session_id = found.state.id;
-    let gate = found.gate.clone();
-    let _gate = gate.lock().await;
+    let _gate = found.gate.clone().lock_owned().await;
+    let snapshot_id = sleep_locked(&state, session_id).await?;
+    Ok(Json(TakeSnapshotResponse { snapshot_id }))
+}
 
-    // Read again under the gate. Another request may have slept or destroyed
-    // the session while this one waited.
-    let (session, live_state) = {
+/// Puts a session to sleep: snapshots its filesystem, records the checkpoint,
+/// and drops the live session. The caller holds the session's gate, so no
+/// command can write between the checkpoint and the drop.
+pub(crate) async fn sleep_locked(
+    state: &AppState,
+    session_id: SessionId,
+) -> Result<SnapshotId, ApiError> {
+    let (owner, session, live_state, limits) = {
         let table = state.sessions.0.read().await;
         let entry = table
             .get(&session_id)
-            .ok_or_else(|| SandboxError::not_found(format!("session {id} not found")))?;
+            .ok_or_else(|| SandboxError::not_found(format!("session {session_id} not found")))?;
         let session = entry.session.clone().ok_or_else(asleep)?;
-        (session, entry.state.clone())
+        (
+            entry.owner.clone(),
+            session,
+            entry.state.clone(),
+            entry.limits.clone(),
+        )
     };
 
-    let _admit = admit_snapshot(&state, &owner).await?;
+    let _admit = admit_snapshot(state, &owner).await?;
     let checkpoint = session.checkpoint().await?;
     let root = checkpoint.root;
-    let snapshot_id = store_snapshot(&state, owner, &live_state, root).await;
+    let snapshot_id = store_snapshot(state, owner.clone(), &live_state, root, limits).await;
 
-    let mut table = state.sessions.0.write().await;
-    if let Some(entry) = table.get_mut(&session_id) {
-        // Dropping the live session here releases its VFS once no other handle
-        // to it remains.
-        entry.session = None;
-        entry.checkpoint = Some(checkpoint);
-        entry.state.status = SessionStatus::Sleeping;
-        entry.state.updated_at = SystemTime::now();
+    {
+        let mut table = state.sessions.0.write().await;
+        if let Some(entry) = table.get_mut(&session_id) {
+            // Dropping the live session here releases its VFS once no other handle
+            // to it remains.
+            entry.session = None;
+            entry.checkpoint = Some(checkpoint);
+            entry.state.status = SessionStatus::Sleeping;
+            entry.state.updated_at = SystemTime::now();
+        }
     }
-    drop(table);
-    persist(&state).await?;
-    Ok(Json(TakeSnapshotResponse { snapshot_id }))
+    state.usage.add(&owner, |c| c.sessions_slept += 1);
+    persist(state).await?;
+    Ok(snapshot_id)
 }
 
 /// Wake a sleeping session. The filesystem is restored from the root that
@@ -1171,30 +1543,53 @@ pub async fn wake_session(
     Extension(owner): Extension<KeyId>,
     Path(id): Path<String>,
 ) -> Result<Json<SessionState>, ApiError> {
-    let not_found = || SandboxError::not_found(format!("session {id} not found"));
-    let session_id: SessionId = id.parse().map_err(|_| not_found())?;
-    // The write lock covers the check and the restore, so two wakes cannot both
-    // succeed.
+    let session_id: SessionId = id
+        .parse()
+        .map_err(|_| SandboxError::not_found(format!("session {id} not found")))?;
+    Ok(Json(wake_entry(&state, session_id, Some(&owner)).await?))
+}
+
+/// Restores a sleeping session from the checkpoint it was put to sleep with. The
+/// table's write lock covers the check and the restore, so two wakes cannot both
+/// restore it. With `explicit_owner`, the session must belong to that key and
+/// must be asleep, as an explicit wake requires. Without it, an awake session is
+/// returned as it is, which is what a request to a sleeping session needs.
+pub(crate) async fn wake_entry(
+    state: &AppState,
+    session_id: SessionId,
+    explicit_owner: Option<&KeyId>,
+) -> Result<SessionState, ApiError> {
     let mut table = state.sessions.0.write().await;
     let entry = match table.get_mut(&session_id) {
-        Some(entry) if entry.owner == owner => entry,
-        _ => return Err(not_found().into()),
+        Some(entry) if explicit_owner.is_none_or(|owner| entry.owner == *owner) => entry,
+        _ => return Err(SandboxError::not_found(format!("session {session_id} not found")).into()),
     };
     if entry.session.is_some() {
-        return Err(SandboxError::new(ErrorCode::InvalidState, "the session is not asleep").into());
+        if explicit_owner.is_some() {
+            return Err(
+                SandboxError::new(ErrorCode::InvalidState, "the session is not asleep").into(),
+            );
+        }
+        return Ok(entry.state.clone());
     }
     let checkpoint = entry
         .checkpoint
         .clone()
         .ok_or_else(|| SandboxError::internal("a sleeping session has no checkpoint"))?;
-    let session: Arc<dyn Session> = restore_checkpoint(checkpoint).await?.into();
+    let limits = entry.limits.clone();
+    let session: Arc<dyn Session> = restore_checkpoint_limited(checkpoint, &limits)
+        .await?
+        .into();
     entry.session = Some(session);
     entry.state.status = SessionStatus::Running;
     entry.state.updated_at = SystemTime::now();
+    entry.touch();
     let woken = entry.state.clone();
+    let owner = entry.owner.clone();
     drop(table);
-    persist(&state).await?;
-    Ok(Json(woken))
+    state.usage.add(&owner, |c| c.sessions_woken += 1);
+    persist(state).await?;
+    Ok(woken)
 }
 
 /// Fork a snapshot into new sessions, each owned by the caller. The caller must
@@ -1230,18 +1625,24 @@ pub async fn fork_snapshot(
 
     let mut session_ids = Vec::with_capacity(request.count as usize);
     for _ in 0..request.count {
-        let session: Arc<dyn Session> = sandbox_session::restore(record.root).await?.into();
+        let session: Arc<dyn Session> =
+            sandbox_session::restore_limited(record.root, &record.limits)
+                .await?
+                .into();
         let session_id = session.id();
         let mut entry = entry(
             owner.clone(),
             session.clone(),
             TenantId::nil(),
             HashMap::new(),
+            record.limits.clone(),
         );
         stamp(&state, &mut entry, &session).await?;
         admit_session(&state, &owner, entry).await?;
+        state.usage.add(&owner, |c| c.sessions_created += 1);
         session_ids.push(session_id);
     }
+    persist(&state).await?;
     Ok(Json(ForkResponse { session_ids }))
 }
 
@@ -1348,17 +1749,6 @@ fn read_flags() -> OpenFlags {
         append: false,
         create: false,
         truncate: false,
-        exclusive: false,
-    }
-}
-
-fn write_flags() -> OpenFlags {
-    OpenFlags {
-        read: false,
-        write: true,
-        append: false,
-        create: true,
-        truncate: true,
         exclusive: false,
     }
 }

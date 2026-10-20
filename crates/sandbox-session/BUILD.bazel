@@ -17,10 +17,11 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:futures",
-    ],
+
+        "//crates/sandbox-trace:sandbox_trace",
+],
     proc_macro_deps = [
         "@crates//:async-trait",
     ],
