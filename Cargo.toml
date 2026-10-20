@@ -42,12 +42,13 @@ parking_lot = "0.12"
 proptest = "1"
 criterion = "0.5"
 dashmap = "6"
-schemars = "1.2"
 ulid = { version = "1", features = ["serde"] }
 blake3 = "1"
 object_store = "0.14"
 zstd = "0.13"
-wasmtime = "36"
+# Wasmtime's default features minus `profiling`: that feature links ittapi
+# (GPL-2.0-only) and fxprof-processed-profile, which deny.toml rejects.
+wasmtime = { version = "36", default-features = false, features = ["async", "cache", "gc", "gc-drc", "gc-null", "wat", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "threads", "stack-switching", "std"] }
 deno_core = "0.412"
 deno_web = "0.290"
 deno_url = "0.222"
@@ -70,7 +71,7 @@ notify = "8"
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
-swc_core = { version = "82", features = ["ecma_ast", "ecma_parser"] }
+swc_core = { version = "82", features = ["common", "ecma_ast", "ecma_parser", "ecma_codegen", "ecma_visit", "ecma_transforms", "ecma_transforms_typescript"] }
 hyperlocal = "0.8"
 prost = "0.14"
 prost-types = "0.14"
@@ -81,14 +82,15 @@ tokio-stream = "0.1"
 hyper-util = "0.1"
 vsock = "0.4"
 redb = "4"
-sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+# Default features are off: they add the MySQL driver (pulls in the `rsa` crate,
+# RUSTSEC-2023-0071, with no fix), which the clustered scheduler does not use.
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 tonic = { version = "0.14", features = ["tls-ring", "transport"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4", features = ["limit", "timeout", "retry"] }
 utoipa = { version = "6", features = ["axum_extras", "chrono", "yaml"] }
 argon2 = "0.5"
 rustls = { version = "0.23", features = ["std"] }
-webpki = "0.22"
 ipnet = "2"
 seccompiler = "0.5"
 rustix = { version = "0.38", features = ["process", "fs", "net", "mount"] }
@@ -96,9 +98,10 @@ nix = { version = "0.28", features = ["fs"] }
 brush-parser = "0.2"
 uutils_core = { version = "0.0.25", features = ["fs"] }
 glob = "0.3"
-wizer = "10"
 wasmtime-wasi = { version = "36", features = ["preview1"] }
 sysinfo = "0.30"
+# grep. The crate is already in Cargo.lock through other dependencies.
+regex = "1"
 hdrhistogram = "7"
 indicatif = "0.17"
 csv = "1"

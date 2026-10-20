@@ -44,6 +44,22 @@ jobs:
       - name: Bench compile check
         run: cargo bench --workspace --no-run
 
+  # PLAN §5: cargo-deny (licenses, advisories, sources) and cargo-audit run on
+  # every change. Versions are pinned to the ones the policy was checked with.
+  supply-chain:
+    name: Supply chain
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2
+      - name: Licenses, advisories, bans, and sources
+        run: cargo deny check
+      - name: Advisory database (.cargo/audit.toml)
+        run: cargo audit --deny warnings
+
   sdk-typescript:
     name: TypeScript SDK
     runs-on: ubuntu-24.04
