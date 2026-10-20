@@ -20,7 +20,16 @@ build --platforms=//bazel/platforms:x86_64_apple_darwin
 # Linux builds select their platform explicitly. The dev container is aarch64, and
 # Buildkite Linux agents are x86_64.
 build:linux_aarch64 --platforms=//bazel/platforms:aarch64_unknown_linux_gnu
+build:linux_aarch64 --host_platform=//bazel/platforms:aarch64_unknown_linux_gnu
+build:linux_aarch64 --extra_execution_platforms=//bazel/platforms:aarch64_unknown_linux_gnu
 build:linux_x86_64 --platforms=//bazel/platforms:x86_64_unknown_linux_gnu
+build:linux_x86_64 --host_platform=//bazel/platforms:x86_64_unknown_linux_gnu
+build:linux_x86_64 --extra_execution_platforms=//bazel/platforms:x86_64_unknown_linux_gnu
+
+# Worker isolation needs a delegated cgroup (ADR 0022). Tests forward the path that
+# the Linux environment provides (docker/run-linux.sh sets it).
+test:linux_aarch64 --test_env=SANDBOX_CGROUP_ROOT
+test:linux_x86_64 --test_env=SANDBOX_CGROUP_ROOT
 
 # Release configuration
 build:release --compilation_mode=opt
