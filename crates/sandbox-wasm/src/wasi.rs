@@ -185,17 +185,34 @@ pub async fn run_module_with_mount(
     limits: WasiLimits,
     mount: Option<Mount>,
 ) -> Result<WasiOutcome, SandboxError> {
+    run_module_with_mount_streamed(wasm, argv, stdin, limits, mount, None).await
+}
+
+/// Like [`run_module_with_mount`], and tells `on_stdout` each piece of stdout as the
+/// guest writes it. The pieces are the ones kept in the outcome, in order.
+pub async fn run_module_with_mount_streamed(
+    wasm: Vec<u8>,
+    argv: Vec<String>,
+    stdin: Vec<u8>,
+    limits: WasiLimits,
+    mount: Option<Mount>,
+    on_stdout: Option<StreamObserver>,
+) -> Result<WasiOutcome, SandboxError> {
     let runtime = tokio::runtime::Handle::current();
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         let _entered = runtime.enter();
-        let result = execute(&wasm, argv, stdin, limits, mount);
+        let result = execute(&wasm, argv, stdin, limits, mount, on_stdout);
         // The receiver is only dropped if the caller stopped waiting.
         let _ = tx.send(result);
     });
     rx.await
         .map_err(|_| SandboxError::new(ErrorCode::WasmError, "wasm worker thread vanished"))?
 }
+
+/// Receives the stdout a guest writes, as it is kept, in order. It runs on the
+/// guest's thread, so it must not block.
+pub type StreamObserver = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync>;
 
 /// Host state for one run. This is the wasmtime store data.
 struct Host {
@@ -206,6 +223,8 @@ struct Host {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     output_cap: usize,
+    /// Told each piece of stdout as it is kept. See [`StreamObserver`].
+    on_stdout: Option<StreamObserver>,
     mount: Option<Mount>,
     fds: BTreeMap<u32, Fd>,
     next_fd: u32,
@@ -236,6 +255,7 @@ fn execute(
     stdin: Vec<u8>,
     limits: WasiLimits,
     mount: Option<Mount>,
+    on_stdout: Option<StreamObserver>,
 ) -> Result<WasiOutcome, SandboxError> {
     let engine = engine()?;
     let module = load_module(engine, wasm)?;
@@ -261,6 +281,7 @@ fn execute(
         stdout: Vec::new(),
         stderr: Vec::new(),
         output_cap: limits.max_output_bytes,
+        on_stdout,
         mount,
         fds,
         next_fd,
@@ -621,7 +642,13 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                             &mut host.stderr
                         };
                         let room = cap.saturating_sub(target.len());
-                        target.extend_from_slice(&data[..data.len().min(room)]);
+                        let kept = &data[..data.len().min(room)];
+                        target.extend_from_slice(kept);
+                        if matches!(entry, Fd::Stdout) {
+                            if let Some(observe) = &host.on_stdout {
+                                observe(kept);
+                            }
+                        }
                         // Report the full write so guests do not retry forever.
                         data.len()
                     }
@@ -1196,6 +1223,22 @@ mod tests {
     (call $proc_exit (i32.const 3))))
 "#;
 
+    /// Writes "one\n" and then "two\n" to stdout in two separate `fd_write` calls.
+    const TWO_WRITES_WAT: &str = r#"
+(module
+  (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 8) "one\0a")
+  (data (i32.const 16) "two\0a")
+  (func (export "_start")
+    (i32.store (i32.const 0) (i32.const 8))
+    (i32.store (i32.const 4) (i32.const 4))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 100)))
+    (i32.store (i32.const 0) (i32.const 16))
+    (i32.store (i32.const 4) (i32.const 4))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 100)))))
+"#;
+
     const SPIN_WAT: &str = r#"
 (module
   (func (export "_start") (loop $l (br $l))))
@@ -1225,6 +1268,31 @@ mod tests {
             stdin.to_vec(),
             limits,
         ))
+    }
+
+    #[test]
+    fn each_stdout_write_reaches_the_observer_in_order() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+        let sink = seen.clone();
+        let observer: StreamObserver =
+            std::sync::Arc::new(move |bytes: &[u8]| sink.lock().unwrap().push(bytes.to_vec()));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let out = rt
+            .block_on(run_module_with_mount_streamed(
+                TWO_WRITES_WAT.as_bytes().to_vec(),
+                vec!["prog".to_string()],
+                Vec::new(),
+                WasiLimits::default(),
+                None,
+                Some(observer),
+            ))
+            .unwrap();
+        assert_eq!(out.stdout, b"one\ntwo\n");
+        // One chunk per write, in order. Together they are the captured stdout.
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![b"one\n".to_vec(), b"two\n".to_vec()]
+        );
     }
 
     #[test]

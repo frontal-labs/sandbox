@@ -4,6 +4,9 @@
 
 use deno_core::{op2, OpState};
 
+/// Receives script output as it is kept, in order. See [`ScriptOutput::push`].
+pub type StreamObserver = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync>;
+
 /// Output captured for one script run. Stored in `OpState` for the run.
 #[derive(Default)]
 pub struct ScriptOutput {
@@ -11,16 +14,22 @@ pub struct ScriptOutput {
     /// Maximum bytes kept in `stdout`. Anything beyond it is dropped.
     pub limit: usize,
     pub truncated: bool,
+    /// Told each piece of output as it is kept. Its pieces concatenate to `stdout`.
+    pub observer: Option<StreamObserver>,
 }
 
 impl ScriptOutput {
     pub fn push(&mut self, text: &str) {
         let room = self.limit.saturating_sub(self.stdout.len());
-        if text.len() <= room {
-            self.stdout.extend_from_slice(text.as_bytes());
+        let kept = if text.len() <= room {
+            text.as_bytes()
         } else {
-            self.stdout.extend_from_slice(&text.as_bytes()[..room]);
             self.truncated = true;
+            &text.as_bytes()[..room]
+        };
+        self.stdout.extend_from_slice(kept);
+        if let Some(observer) = &self.observer {
+            observer(kept);
         }
     }
 }

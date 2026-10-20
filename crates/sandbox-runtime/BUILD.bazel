@@ -12,10 +12,15 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:deno_core",
-    ],
+
+        "@crates//:deno_console",
+        "@crates//:deno_web",
+        "@crates//:deno_url",
+        "@crates//:deno_webidl",
+        "@crates//:swc_core",
+],
     proc_macro_deps = [
         "@crates//:async-trait",
     ],

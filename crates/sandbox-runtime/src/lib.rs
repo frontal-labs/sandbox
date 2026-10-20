@@ -6,5 +6,8 @@
 
 pub mod ops;
 pub mod runtime;
+pub mod typescript;
 
-pub use runtime::{execute_script, ScriptLimits, ScriptOutcome};
+pub use ops::StreamObserver;
+pub use runtime::{execute_script, execute_script_streamed, ScriptLimits, ScriptOutcome};
+pub use typescript::strip_types;
