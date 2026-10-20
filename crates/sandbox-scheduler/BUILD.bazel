@@ -22,13 +22,25 @@ rust_library(
 
 # Optional clustered feature
 rust_library(
+    # The clustered variant: the same sources with the `clustered` feature, plus the Postgres driver.
     name = "sandbox_scheduler_clustered",
+    crate_name = "sandbox_scheduler",
+    crate_features = ["clustered"],
     edition = "2021",
     srcs = glob(["src/**/*.rs"]),
     deps = [
         "//crates/sandbox-types:sandbox_types",
-        ":sandbox_scheduler",
+        "@crates//:tokio",
+        "@crates//:bytes",
+        "@crates//:tracing",
+        "@crates//:thiserror",
+        "@crates//:serde",
+        "@crates//:redb",
+        "@crates//:tonic",
         "@crates//:sqlx",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )

@@ -31,10 +31,23 @@ rust_test(
     edition = "2021",
     compile_data = glob(["fixtures/**"]),
     deps = [
+        "@crates//:bytes",
+        "@crates//:futures",
+        "@crates//:getrandom",
+        "@crates//:parking_lot",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:toml",
+        "@crates//:tracing",
+        "@crates//:wasmtime",
         ":sandbox_wasm",
         "//crates/sandbox-cas:sandbox_cas",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-vfs:sandbox_vfs",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )

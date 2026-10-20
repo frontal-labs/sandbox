@@ -40,4 +40,5 @@ rust_test(
     name = "sandbox_worker_unit_test",
     crate = ":sandbox_worker",
     edition = "2021",
+    visibility = ["//visibility:public"],
 )

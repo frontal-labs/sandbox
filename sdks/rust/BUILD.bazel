@@ -23,6 +23,7 @@ rust_test(
     name = "sandbox_sdk_unit_test",
     crate = ":sandbox_sdk",
     edition = "2021",
+    visibility = ["//visibility:public"],
 )
 
 # tests/against_server.rs starts the real router on a local port.
@@ -31,6 +32,12 @@ rust_test(
     edition = "2021",
     srcs = glob(["tests/**/*.rs"]),
     deps = [
+        "@crates//:bytes",
+        "@crates//:reqwest",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:futures",
         ":sandbox_sdk",
         "//crates/sandbox-server:sandbox_server",
@@ -40,4 +47,5 @@ rust_test(
         "@crates//:axum",
         "@crates//:tokio",
     ],
+    visibility = ["//visibility:public"],
 )

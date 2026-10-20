@@ -47,11 +47,26 @@ rust_test(
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":sandbox"],
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
         ":cli_lib",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -62,11 +77,26 @@ rust_test(
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":sandbox"],
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
         ":cli_lib",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -77,11 +107,26 @@ rust_test(
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":sandbox"],
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
         ":cli_lib",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -92,11 +137,26 @@ rust_test(
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":sandbox"],
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
         ":cli_lib",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -107,9 +167,24 @@ rust_test(
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":sandbox"],
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
         ":cli_lib",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
+    visibility = ["//visibility:public"],
 )

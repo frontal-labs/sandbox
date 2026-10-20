@@ -61,6 +61,7 @@ rust_library(
             "@crates//:serde_json",
         ],
         data = ["//proto:protos"],
+        visibility = ["//visibility:public"],
     )
     for name in ["roundtrip", "compat"]
 ]

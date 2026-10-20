@@ -29,12 +29,30 @@ rust_test(
     srcs = ["tests/conformance.rs"],
     crate_root = "tests/conformance.rs",
     edition = "2021",
+    # The test reads conformance/cases.json through CARGO_MANIFEST_DIR. Bazel runs it
+    # from its runfiles, where the package sits at crates/sandbox-shell.
+    data = glob(["conformance/**"]),
+    rustc_env = {"CARGO_MANIFEST_DIR": "crates/sandbox-shell"},
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:serde_json",
         "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -43,11 +61,25 @@ rust_test(
     crate_root = "tests/features.rs",
     edition = "2021",
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:serde_json",
         "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -56,11 +88,25 @@ rust_test(
     crate_root = "tests/globbing.rs",
     edition = "2021",
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:serde_json",
         "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -69,11 +115,25 @@ rust_test(
     crate_root = "tests/nesting_limit.rs",
     edition = "2021",
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:serde_json",
         "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -82,11 +142,25 @@ rust_test(
     crate_root = "tests/recursion.rs",
     edition = "2021",
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:serde_json",
         "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -95,11 +169,25 @@ rust_test(
     crate_root = "tests/streaming.rs",
     edition = "2021",
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:serde_json",
         "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 rust_test(
@@ -108,9 +196,23 @@ rust_test(
     crate_root = "tests/typescript.rs",
     edition = "2021",
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
         "@crates//:serde_json",
         "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
 )
