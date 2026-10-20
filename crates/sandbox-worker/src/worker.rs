@@ -6,9 +6,13 @@
 //! with the protocol: scripts write to their own captured buffers, not to the
 //! worker's stdout.
 //!
-//! This is process isolation only. Seccomp, cgroups, namespaces, and
-//! `PR_SET_NO_NEW_PRIVS` are not implemented; see plans/PLAN.md section 4.13.
+//! The host starts each worker with an [`Isolation`]: namespaces and seccomp are
+//! applied by the child before its runtime starts, and the host moves the child
+//! into a cgroup with resource limits. See [`crate::isolation`] and PLAN.md §4.13.
 
+#[cfg(target_os = "linux")]
+use crate::isolation::CgroupGuard;
+use crate::isolation::Isolation;
 use sandbox_proto::status::{from_status, to_status};
 use sandbox_proto::v1::types as pb;
 use sandbox_proto::v1::worker::worker_service_client::WorkerServiceClient;
@@ -123,24 +127,85 @@ pub struct Worker {
     child: Child,
     client: WorkerServiceClient<Channel>,
     dir: PathBuf,
+    /// The worker's cgroup, removed on drop once the child has exited.
+    #[cfg(target_os = "linux")]
+    cgroup: Option<CgroupGuard>,
+    isolation: Isolation,
 }
 
 impl Worker {
-    /// Starts `program worker --socket <path>` and waits until it answers `Health`.
+    /// Starts `program worker --socket <path>` with the default isolation, and waits
+    /// until it answers `Health`. On Linux that is the strict isolation.
     pub async fn spawn(program: impl AsRef<std::ffi::OsStr>) -> Result<Self, SandboxError> {
+        Self::spawn_with(program, Isolation::default()).await
+    }
+
+    /// Starts a worker with `isolation`. Fails, and starts nothing, if a layer the
+    /// isolation asks for cannot be applied. A worker is never served without the
+    /// layers it was asked for.
+    pub async fn spawn_with(
+        program: impl AsRef<std::ffi::OsStr>,
+        isolation: Isolation,
+    ) -> Result<Self, SandboxError> {
         let dir = private_dir()?;
         let socket = dir.join("worker.sock");
-        let mut child = Command::new(program)
+        // The cgroup is created before the child starts, so a failure to set its
+        // limits starts nothing.
+        #[cfg(target_os = "linux")]
+        let cgroup = match isolation.cgroup {
+            Some(limits) => {
+                let name = format!("sbx-{}", &ulid::Ulid::new().to_string()[10..]);
+                match CgroupGuard::create(&name, limits) {
+                    Ok(guard) => Some(guard),
+                    Err(e) => {
+                        let _ = std::fs::remove_dir_all(&dir);
+                        return Err(e);
+                    }
+                }
+            }
+            None => None,
+        };
+        #[cfg(not(target_os = "linux"))]
+        if isolation.cgroup.is_some() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(SandboxError::new(
+                ErrorCode::Unsupported,
+                "cgroup limits need Linux",
+            ));
+        }
+        let mut command = Command::new(program);
+        command
             .arg("worker")
             .arg("--socket")
             .arg(&socket)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| SandboxError::unavailable(format!("failed to start worker: {e}")))?;
-
+            .kill_on_drop(true);
+        // The child applies these itself, before its runtime starts (see `enter`).
+        if isolation.namespaces {
+            command.arg("--namespaces");
+        }
+        if isolation.seccomp {
+            command.arg("--seccomp");
+        }
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(SandboxError::unavailable(format!(
+                    "failed to start worker: {e}"
+                )));
+            }
+        };
+        #[cfg(target_os = "linux")]
+        if let (Some(guard), Some(pid)) = (&cgroup, child.id()) {
+            if let Err(e) = guard.add(pid) {
+                let _ = child.kill().await;
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(e);
+            }
+        }
         let channel = match connect_when_ready(&mut child, &socket).await {
             Ok(channel) => channel,
             Err(e) => {
@@ -152,7 +217,19 @@ impl Worker {
         let client = WorkerServiceClient::new(channel)
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES);
-        Ok(Self { child, client, dir })
+        Ok(Self {
+            child,
+            client,
+            dir,
+            #[cfg(target_os = "linux")]
+            cgroup,
+            isolation,
+        })
+    }
+
+    /// The isolation this worker was started with.
+    pub fn isolation(&self) -> &Isolation {
+        &self.isolation
     }
 
     /// Runs a script in the worker. A script error comes back as its own
@@ -207,6 +284,10 @@ impl Drop for Worker {
     fn drop(&mut self) {
         let _ = self.child.start_kill();
         let _ = std::fs::remove_dir_all(&self.dir);
+        // Removed last. The kernel refuses to remove a cgroup while a process is in
+        // it, so the guard's own drop succeeds only once the child has exited.
+        #[cfg(target_os = "linux")]
+        drop(self.cgroup.take());
     }
 }
 
@@ -300,11 +381,12 @@ mod tests {
     #[tokio::test]
     async fn a_child_that_exits_at_once_is_unavailable_not_a_panic() {
         // `true` ignores its arguments and exits, so the worker never becomes ready.
-        let err = match Worker::spawn("true").await {
+        // It is started unisolated, so this checks readiness, not the isolation setup.
+        let err = match Worker::spawn_with("true", Isolation::none()).await {
             Ok(_) => panic!("a non-worker process must not become ready"),
             Err(err) => err,
         };
-        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert_eq!(err.code, ErrorCode::Unavailable, "{}", err.message);
     }
 
     #[test]
@@ -317,6 +399,9 @@ mod tests {
                 child: Command::new("sleep").arg("30").spawn().unwrap(),
                 client: WorkerServiceClient::new(endpoint),
                 dir: std::env::temp_dir(),
+                #[cfg(target_os = "linux")]
+                cgroup: None,
+                isolation: Isolation::none(),
             };
             let big = "x".repeat(MAX_MESSAGE_BYTES + 1);
             let err = worker.run_script(&big).await.unwrap_err();

@@ -21,15 +21,13 @@ bytes = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
-seccompiler = { workspace = true, optional = true }
 rustix = { workspace = true }
 nix = { workspace = true }
 
-[features]
-default = []
-seccomp = ["seccompiler"]
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+seccompiler = { workspace = true }

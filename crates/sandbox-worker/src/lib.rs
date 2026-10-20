@@ -2,6 +2,8 @@
 //! Worker processes for the sandbox system. Each worker runs one session in a
 //! child process, served as gRPC over a private Unix socket. See [`worker`].
 
+pub mod isolation;
 pub mod worker;
 
+pub use isolation::{enter, CgroupLimits, Isolation};
 pub use worker::{serve, Worker, MAX_MESSAGE_BYTES};

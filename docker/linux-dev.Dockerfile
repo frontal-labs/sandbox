@@ -1,0 +1,24 @@
+# Linux build and test environment for the parts of Frontal Sandbox that need
+# Linux: worker isolation (PLAN.md §4.13), cgroups, namespaces, and seccomp, and
+# the Bazel Linux targets (bazel/platforms). Build and run it with
+# docker/run-linux.sh. The container runs privileged, because namespace and
+# cgroup tests need CAP_SYS_ADMIN.
+FROM rust:1.95-bookworm
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    protobuf-compiler libprotobuf-dev \
+    python3 unzip zip curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN rustup component add rustfmt clippy
+
+# Bazelisk reads .bazelversion and fetches the pinned Bazel. Pinned by version, and
+# picked by the container's architecture.
+ARG BAZELISK_VERSION=v1.25.0
+RUN arch="$(dpkg --print-architecture)" \
+ && curl -fsSL -o /usr/local/bin/bazel \
+    "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-${arch}" \
+ && chmod +x /usr/local/bin/bazel
+
+WORKDIR /src
