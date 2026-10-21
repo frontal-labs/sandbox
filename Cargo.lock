@@ -1080,9 +1080,9 @@ dependencies = [
 
 [[package]]
 name = "cranelift-srcgen"
-version = "0.123.17"
+version = "0.123.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89acb09bcb45f1f6fe69b4c5d5e45d9c5a8944a5882acbf9757b1ec5b6a8f94"
+checksum = "d355a35edc49f628db7b793f3527eed31b560e77c3e8ed0e5258aad8df8a5249"
 
 [[package]]
 name = "crc"
