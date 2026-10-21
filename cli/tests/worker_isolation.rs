@@ -8,7 +8,7 @@ use sandbox_types::ExecRequest;
 use sandbox_worker::{CgroupLimits, Isolation, Worker};
 use std::fs;
 
-const WORKER: &str = env!("CARGO_BIN_EXE_sandbox");
+const WORKER: &str = env!("CARGO_BIN_EXE_frontal-sandbox");
 
 /// The value of one `Key:` line in `/proc/<pid>/status`.
 fn status_field(pid: u32, key: &str) -> String {
