@@ -29,7 +29,7 @@ indicatif = { workspace = true }
 csv = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
-rand = "0.8"
+rand = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 
 [profile.release]
