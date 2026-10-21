@@ -3,15 +3,9 @@
 > **Status: early.** Session, exec, filesystem, snapshot, fork, sleep, and wake
 > routes work against in-memory sessions, and every `/v1` route requires a valid
 > API key.
-<<<<<<< HEAD
-> Settings the backend does not enforce (VM tier, custom limits, network policy,
-> secrets, environment, working directory) are refused with `501`, not ignored. The full target API is specified in
-> [plans/PLAN.md section 4.15](../plans/PLAN.md#415-sandbox-server).
-=======
 > Settings the backend does not enforce (VM tier, memory, CPU, process, and open-file limits, network policy,
 > secrets, environment, working directory) are refused with `501`, not ignored. The file size, total size, inode, and path depth limits are enforced (ADR 0014). The full target API is specified in
-> [PLAN.md section 4.15](../PLAN.md#415-sandbox-server).
->>>>>>> 3d98f67 (docs: record the Linux, Postgres, TypeScript, and streaming decisions)
+> [plans/PLAN.md section 4.15](../plans/PLAN.md#415-sandbox-server).
 
 ## Base URL
 
@@ -256,19 +250,14 @@ Response: `200`, `application/x-ndjson`, in the ADR 0007 format. Each command th
 session ran through `exec` is one run, with its argv written as a single-quoted
 script. `X-Trace-Complete` is `false` when a command could not be recorded (it had
 standard input, or an environment name is not a shell name) or when the trace is
-<<<<<<< HEAD
-full (4096 runs). File writes are not recorded. Save the body and replay it with
-`frontal-sandbox replay`. See [ADR 0009](adr/0009-server-exec-traces.md).
-=======
 full (4096 runs). Each run lists the files the command changed, in its `files`
 field, with the operation (`create`, `write`, `delete`, `mkdir`, `symlink`) and the
 content hashes before and after. A rename appears as a delete and a create, and a
 chmod is not reported. Writes and deletes through the filesystem API are runs of their
 own, with the written bytes in an `fs` field. Save the body and replay it with
-`sandbox replay`, which makes the same writes again. See
+`frontal-sandbox replay`, which makes the same writes again. See
 [ADR 0009](adr/0009-server-exec-traces.md), [ADR 0011](adr/0011-file-changes-in-traces.md),
 and [ADR 0012](adr/0012-filesystem-writes-in-traces.md).
->>>>>>> 3d98f67 (docs: record the Linux, Postgres, TypeScript, and streaming decisions)
 
 ### Fork snapshot
 
