@@ -1,5 +1,5 @@
 {
-  "openapi": "3.0.3",
+  "openapi": "3.1.0",
   "info": {
     "title": "Frontal Sandbox API",
     "description": "REST API for sandboxes: sessions, commands, files, and snapshots. Snapshots capture the committed filesystem. Settings the backend does not enforce are refused with 501.",
@@ -7,7 +7,8 @@
       "name": "Frontal Labs"
     },
     "license": {
-      "name": "Apache-2.0"
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
     },
     "version": "v1"
   },
@@ -102,7 +103,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -157,7 +159,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -207,7 +210,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -284,7 +288,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           },
           {
@@ -299,7 +304,10 @@
         ],
         "responses": {
           "200": {
-            "description": "File contents"
+            "description": "File contents",
+            "content": {
+              "application/octet-stream": {}
+            }
           },
           "400": {
             "description": "Path is a directory or contains '..'",
@@ -361,7 +369,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           },
           {
@@ -378,8 +387,12 @@
           "content": {
             "application/octet-stream": {
               "schema": {
-                "type": "string",
-                "format": "binary"
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
               }
             }
           },
@@ -439,7 +452,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           },
           {
@@ -499,8 +513,7 @@
         "tags": [
           "sessions"
         ],
-        "summary": "Put a session to sleep. The filesystem is checkpointed and recorded as a",
-        "description": "snapshot, and the live session is released, so a sleeping session holds no\nVFS in memory. Shell state (working directory and environment) is not kept,\nso a woken session starts with fresh shell state. See ADR 0006.",
+        "summary": "Put a session to sleep. The filesystem is checkpointed and recorded as a\nsnapshot, and the live session is released, so a sleeping session holds no\nVFS in memory. Shell state (working directory and environment) is not kept,\nso a woken session starts with fresh shell state. See ADR 0006.",
         "operationId": "sleep_session",
         "parameters": [
           {
@@ -509,7 +522,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -567,8 +581,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Take a snapshot of a session's committed filesystem. The caller owns the",
-        "description": "snapshot, and only that key can fork it or start a session from it.",
+        "summary": "Take a snapshot of a session's committed filesystem. The caller owns the\nsnapshot, and only that key can fork it or start a session from it.",
         "operationId": "take_snapshot",
         "parameters": [
           {
@@ -577,7 +590,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -634,7 +648,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -694,7 +709,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           },
           {
@@ -703,7 +719,8 @@
             "description": "Snapshot ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -760,7 +777,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -808,8 +826,7 @@
         "tags": [
           "sessions"
         ],
-        "summary": "Wake a sleeping session. The filesystem is restored from the root that",
-        "description": "sleep recorded. The session keeps its ID.",
+        "summary": "Wake a sleeping session. The filesystem is restored from the root that\nsleep recorded. The session keeps its ID.",
         "operationId": "wake_session",
         "parameters": [
           {
@@ -818,7 +835,8 @@
             "description": "Session ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -876,8 +894,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Fork a snapshot into new sessions, each owned by the caller. The caller must",
-        "description": "own the snapshot.",
+        "summary": "Fork a snapshot into new sessions, each owned by the caller. The caller must\nown the snapshot.",
         "operationId": "fork_snapshot",
         "parameters": [
           {
@@ -886,7 +903,8 @@
             "description": "Snapshot ID (ULID)",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
           }
         ],
@@ -1021,32 +1039,41 @@
             }
           },
           "cwd": {
-            "type": "string",
-            "nullable": true
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "env": {
             "type": "object",
             "additionalProperties": {
               "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           },
           "stdin": {
-            "type": "array",
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "integer",
               "format": "int32",
               "minimum": 0
             },
-            "description": "Bytes as an integer array, 0-255 each (serde default).",
-            "nullable": true
+            "description": "Bytes as an integer array, 0-255 each (serde default)."
           },
           "stream": {
             "type": "boolean"
           },
           "timeout_ms": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "nullable": true,
             "minimum": 0
           }
         }
@@ -1156,13 +1183,15 @@
             "type": "string"
           },
           "ports": {
-            "type": "array",
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "integer",
               "format": "int32",
               "minimum": 0
-            },
-            "nullable": true
+            }
           }
         }
       },
@@ -1177,57 +1206,75 @@
         "type": "object",
         "properties": {
           "cpu_ms_per_sec": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "nullable": true,
             "minimum": 0
           },
           "max_file_size": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "nullable": true,
             "minimum": 0
           },
           "max_inodes": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "nullable": true,
             "minimum": 0
           },
           "max_open_files": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
-            "nullable": true,
             "minimum": 0
           },
           "max_path_depth": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
-            "nullable": true,
             "minimum": 0
           },
           "max_processes": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
-            "nullable": true,
             "minimum": 0
           },
           "max_total_size": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "nullable": true,
             "minimum": 0
           },
           "memory_bytes": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "nullable": true,
             "minimum": 0
           },
           "wall_timeout_secs": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "nullable": true,
             "minimum": 0
           }
         }
@@ -1260,6 +1307,9 @@
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/SecretEntry"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           }
         }
@@ -1283,16 +1333,24 @@
             "type": "object",
             "additionalProperties": {
               "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           },
           "initial_snapshot": {
-            "type": "string",
-            "nullable": true,
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "labels": {
             "type": "object",
             "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
               "type": "string"
             }
           },
@@ -1303,12 +1361,14 @@
             "$ref": "#/components/schemas/NetworkPolicy"
           },
           "secrets": {
-            "allOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/SecretsConfig"
+              },
+              {
+                "type": "null"
               }
-            ],
-            "nullable": true
+            ]
           },
           "tenant_id": {
             "type": "string",
@@ -1348,6 +1408,9 @@
             "type": "object",
             "additionalProperties": {
               "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           },
           "status": {
@@ -1365,8 +1428,10 @@
             "format": "date-time"
           },
           "vfs_root": {
-            "type": "string",
-            "nullable": true,
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[0-9a-f]{64}$"
           }
         }
@@ -1405,6 +1470,9 @@
             "type": "object",
             "additionalProperties": {
               "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           },
           "id": {
@@ -1415,16 +1483,23 @@
             "type": "object",
             "additionalProperties": {
               "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           },
           "parent": {
-            "type": "string",
-            "nullable": true,
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "runtime_blob": {
-            "type": "string",
-            "nullable": true,
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[0-9a-f]{64}$"
           },
           "tier": {
