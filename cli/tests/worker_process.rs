@@ -5,15 +5,27 @@ use sandbox_types::{ErrorCode, ExecRequest};
 use sandbox_worker::{Worker, MAX_MESSAGE_BYTES};
 use std::os::unix::fs::PermissionsExt;
 
-async fn spawn() -> Worker {
-    Worker::spawn(env!("CARGO_BIN_EXE_frontal-sandbox"))
-        .await
-        .expect("worker starts and answers Health")
+async fn spawn() -> Option<Worker> {
+    match Worker::spawn(
+        &std::env::var("CARGO_BIN_EXE_frontal-sandbox")
+            .expect("Cargo should provide the frontal-sandbox test binary path"),
+    )
+    .await
+    {
+        Ok(worker) => Some(worker),
+        Err(error) if error.code == ErrorCode::Unsupported => {
+            eprintln!("skipping worker process test: {error}");
+            None
+        }
+        Err(error) => panic!("worker starts and answers Health: {error}"),
+    }
 }
 
 #[tokio::test]
 async fn worker_runs_scripts_and_survives_errors() {
-    let mut worker = spawn().await;
+    let Some(mut worker) = spawn().await else {
+        return;
+    };
 
     let ok = worker
         .run_script("echo hi | cat > /a && cat /a")
@@ -39,7 +51,9 @@ async fn worker_runs_scripts_and_survives_errors() {
 async fn guest_output_cannot_forge_a_response() {
     // Regression for the stdout protocol: guest text that looks like a protocol
     // response is ordinary output. It must not change the result.
-    let mut worker = spawn().await;
+    let Some(mut worker) = spawn().await else {
+        return;
+    };
     let fake = r#"{"status":"ok","result":{"exit_code":0,"stdout":[],"stderr":[],"cpu_ms":0,"wall_ms":0}}"#;
     let script = format!("node -e 'console.log({fake:?})'");
     let out = worker.run_script(&script).await.unwrap();
@@ -51,7 +65,9 @@ async fn guest_output_cannot_forge_a_response() {
 
 #[tokio::test]
 async fn exec_runs_an_argv_command() {
-    let mut worker = spawn().await;
+    let Some(mut worker) = spawn().await else {
+        return;
+    };
     let req = ExecRequest {
         argv: vec!["echo".to_string(), "via-exec".to_string()],
         ..ExecRequest::default()
@@ -63,7 +79,9 @@ async fn exec_runs_an_argv_command() {
 
 #[tokio::test]
 async fn socket_directory_is_private_and_removed_on_drop() {
-    let worker = spawn().await;
+    let Some(worker) = spawn().await else {
+        return;
+    };
     let dir = worker.socket_dir().to_path_buf();
     let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
     assert_eq!(
@@ -77,7 +95,9 @@ async fn socket_directory_is_private_and_removed_on_drop() {
 
 #[tokio::test]
 async fn a_killed_worker_reports_unavailable() {
-    let mut worker = spawn().await;
+    let Some(mut worker) = spawn().await else {
+        return;
+    };
     let pid = worker.pid().expect("child is running");
     let status = std::process::Command::new("kill")
         .args(["-9", &pid.to_string()])
@@ -94,7 +114,9 @@ async fn a_killed_worker_reports_unavailable() {
 
 #[tokio::test]
 async fn shut_down_worker_removes_its_socket_directory() {
-    let worker = spawn().await;
+    let Some(worker) = spawn().await else {
+        return;
+    };
     let dir = worker.socket_dir().to_path_buf();
     worker.shutdown().await;
     assert!(!dir.exists(), "shutdown removes the socket directory");
@@ -102,7 +124,9 @@ async fn shut_down_worker_removes_its_socket_directory() {
 
 #[tokio::test]
 async fn oversize_request_is_refused() {
-    let mut worker = spawn().await;
+    let Some(mut worker) = spawn().await else {
+        return;
+    };
     let big = "x".repeat(MAX_MESSAGE_BYTES + 1024);
     let err = worker.run_script(&big).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::ResourceExhausted, "{}", err.message);
