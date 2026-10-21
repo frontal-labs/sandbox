@@ -42,7 +42,7 @@ parking_lot = "0.12"
 proptest = "1"
 criterion = "0.5"
 dashmap = "6"
-schemars = "0.8"
+schemars = "1.2"
 ulid = { version = "1", features = ["serde"] }
 blake3 = "1"
 object_store = "0.14"
