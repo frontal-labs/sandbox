@@ -80,7 +80,7 @@ tokio-stream = "0.1"
 hyper-util = "0.1"
 vsock = "0.4"
 redb = "4"
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 tonic = { version = "0.12", features = ["tls", "transport"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4", features = ["limit", "timeout", "retry"] }
