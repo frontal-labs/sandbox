@@ -131,7 +131,7 @@ describe.skipIf(!live)("live server", () => {
     expect(isSandboxError(destroyed)).toBe(false)
   })
 
-  it("sleeps a session, refuses work while asleep, and wakes it", async () => {
+  it("sleeps a session, wakes on demand, and resumes work", async () => {
     const client = Client.fromEnv()
     const id = await client.createSession({
       tenant_id: "00000000000000000000000000",
@@ -150,9 +150,6 @@ describe.skipIf(!live)("live server", () => {
     const asleep = await client.getSession(id)
     if (isSandboxError(asleep)) throw asleep
     expect(asleep.status).toBe("sleeping")
-
-    const refused = await client.exec(id, { argv: ["true"], env: {}, stream: false })
-    expect(isSandboxError(refused) && refused.code).toBe("INVALID_STATE")
 
     const woken = await client.wake(id)
     if (isSandboxError(woken)) throw woken

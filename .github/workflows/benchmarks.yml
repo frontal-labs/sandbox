@@ -20,6 +20,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # Keep Cargo's cached v8 build metadata from hiding a missing native archive.
+  RUSTY_V8_MIRROR: https://github.com/denoland/rusty_v8/releases/download
+  V8_FROM_SOURCE: "0"
 
 jobs:
   bench-compile:

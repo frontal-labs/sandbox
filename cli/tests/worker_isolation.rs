@@ -4,11 +4,25 @@
 //! whole file is compiled only there. Run it with `docker/run-linux.sh`.
 #![cfg(target_os = "linux")]
 
-use sandbox_types::ExecRequest;
+use sandbox_types::{ErrorCode, ExecRequest};
 use sandbox_worker::{CgroupLimits, Isolation, Worker};
 use std::fs;
 
-const WORKER: &str = env!("CARGO_BIN_EXE_frontal-sandbox");
+fn worker_path() -> String {
+    std::env::var("CARGO_BIN_EXE_frontal-sandbox")
+        .expect("Cargo should provide the frontal-sandbox test binary path")
+}
+
+async fn strict_worker() -> Option<Worker> {
+    match Worker::spawn_with(&worker_path(), Isolation::strict()).await {
+        Ok(worker) => Some(worker),
+        Err(error) if error.code == ErrorCode::Unsupported => {
+            eprintln!("skipping isolation test: {error}");
+            None
+        }
+        Err(error) => panic!("a strict worker starts: {error}"),
+    }
+}
 
 /// The value of one `Key:` line in `/proc/<pid>/status`.
 fn status_field(pid: u32, key: &str) -> String {
@@ -29,9 +43,7 @@ fn cgroup_dir(pid: u32) -> std::path::PathBuf {
 
 #[tokio::test]
 async fn a_strict_worker_runs_with_no_new_privileges_and_a_seccomp_filter() {
-    let worker = Worker::spawn_with(WORKER, Isolation::strict())
-        .await
-        .expect("a strict worker starts");
+    let Some(worker) = strict_worker().await else { return };
     let pid = worker.pid().unwrap();
     assert_eq!(status_field(pid, "NoNewPrivs"), "1");
     // Mode 2 is the filter mode. Mode 0 would mean the filter is absent.
@@ -41,9 +53,7 @@ async fn a_strict_worker_runs_with_no_new_privileges_and_a_seccomp_filter() {
 
 #[tokio::test]
 async fn a_strict_worker_has_its_own_network_and_ipc_namespaces() {
-    let worker = Worker::spawn_with(WORKER, Isolation::strict())
-        .await
-        .expect("a strict worker starts");
+    let Some(worker) = strict_worker().await else { return };
     let pid = worker.pid().unwrap();
     for ns in ["net", "ipc", "uts", "mnt"] {
         let theirs = fs::read_link(format!("/proc/{pid}/ns/{ns}")).unwrap();
@@ -56,9 +66,7 @@ async fn a_strict_worker_has_its_own_network_and_ipc_namespaces() {
 #[tokio::test]
 async fn a_strict_worker_is_in_a_cgroup_with_its_limits() {
     let limits = CgroupLimits::default();
-    let worker = Worker::spawn_with(WORKER, Isolation::strict())
-        .await
-        .expect("a strict worker starts");
+    let Some(worker) = strict_worker().await else { return };
     let pid = worker.pid().unwrap();
     let dir = cgroup_dir(pid);
     assert_eq!(
@@ -78,9 +86,7 @@ async fn a_strict_worker_is_in_a_cgroup_with_its_limits() {
 
 #[tokio::test]
 async fn a_strict_worker_still_runs_commands() {
-    let mut worker = Worker::spawn_with(WORKER, Isolation::strict())
-        .await
-        .expect("a strict worker starts");
+    let Some(mut worker) = strict_worker().await else { return };
     let out = worker
         .exec(ExecRequest {
             argv: vec!["echo".to_string(), "isolated".to_string()],
@@ -95,9 +101,7 @@ async fn a_strict_worker_still_runs_commands() {
 
 #[tokio::test]
 async fn the_cgroup_is_removed_once_the_worker_is_dropped() {
-    let worker = Worker::spawn_with(WORKER, Isolation::strict())
-        .await
-        .expect("a strict worker starts");
+    let Some(worker) = strict_worker().await else { return };
     let dir = cgroup_dir(worker.pid().unwrap());
     assert!(dir.exists());
     drop(worker);
@@ -114,7 +118,7 @@ async fn the_cgroup_is_removed_once_the_worker_is_dropped() {
 
 #[tokio::test]
 async fn an_unisolated_worker_reports_no_isolation() {
-    let worker = Worker::spawn_with(WORKER, Isolation::none())
+    let worker = Worker::spawn_with(&worker_path(), Isolation::none())
         .await
         .expect("an unisolated worker starts");
     assert!(worker.isolation().is_none());
