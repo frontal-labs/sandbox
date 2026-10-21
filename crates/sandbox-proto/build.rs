@@ -85,7 +85,7 @@ fn main() {
     let descriptor_path = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by cargo"))
         .join("descriptor.bin");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(true)
         .build_client(true)
         .file_descriptor_set_path(&descriptor_path)
