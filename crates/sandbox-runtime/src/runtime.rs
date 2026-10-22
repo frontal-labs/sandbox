@@ -97,6 +97,9 @@ pub async fn execute_script_streamed(
 /// can unwind after termination.
 const HEAP_HEADROOM: usize = 16 * 1024 * 1024;
 struct HeapGuard {
+    /// Terminates the script when the heap limit is reached. A thread-safe handle,
+    /// so it stays valid as long as the guard does.
+    handle: deno_core::v8::IsolateHandle,
     hit: std::sync::atomic::AtomicBool,
 }
 
@@ -114,7 +117,11 @@ unsafe extern "C" fn on_near_heap_limit(
     // SAFETY: see the function's safety contract; `data` is the pointer
     // created from `Box::into_raw` in `run_isolate`.
     let guard = unsafe { &*(data as *const HeapGuard) };
-    guard.hit.store(true, std::sync::atomic::Ordering::SeqCst);
+    if guard.hit.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        // Already terminating. No more headroom: V8 may then fail the allocation fatally.
+        return current;
+    }
+    guard.handle.terminate_execution();
     current + HEAP_HEADROOM
 }
 
@@ -159,6 +166,7 @@ fn build(limits: ScriptLimits) -> Result<Built, String> {
     });
 
     let guard = Box::into_raw(Box::new(HeapGuard {
+        handle: runtime.v8_isolate().thread_safe_handle(),
         hit: std::sync::atomic::AtomicBool::new(false),
     }));
     // SAFETY: `guard` is a valid pointer to a live HeapGuard. `Built::drop` frees it
