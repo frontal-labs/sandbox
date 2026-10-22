@@ -1,12 +1,12 @@
 [
   {
     "name": "runtime_script/cold_isolate_console_log",
-    "mean": 8168506.021428572,
-    "p99": 9807539.285714285
+    "mean": 7293651.694285715,
+    "p99": 7617614.0
   },
   {
     "name": "runtime_script/loop_10k_iterations",
-    "mean": 8348198.964285715,
-    "p99": 8815009.0
+    "mean": 7732494.624285715,
+    "p99": 9143147.0
   }
 ]
