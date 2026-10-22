@@ -18,8 +18,8 @@
         "tags": [
           "admin"
         ],
-        "summary": "Start a garbage collection of the blob store. It runs in the background, so",
-        "description": "the request does not wait for it (PLAN §4.2). The report is written to the\nlog when it finishes.\n\nAny key may call it. A collection holds every session's gate for a moment,\nso the server allows one per minute, and a call inside that window gets\n`RESOURCE_EXHAUSTED`.",
+        "summary": "Start a garbage collection of the blob store. It runs in the background, so\nthe request does not wait for it (PLAN §4.2). The report is written to the\nlog when it finishes.",
+        "description": "Any key may call it. A collection holds every session's gate for a moment,\nso the server allows one per minute, and a call inside that window gets\n`RESOURCE_EXHAUSTED`.",
         "operationId": "run_gc",
         "responses": {
           "202": {
@@ -241,8 +241,7 @@
         "tags": [
           "exec"
         ],
-        "summary": "Run one command in a session. With `stream`, the output comes as NDJSON",
-        "description": "`ExecEvent` lines while the command runs (PLAN §4.15).",
+        "summary": "Run one command in a session. With `stream`, the output comes as NDJSON\n`ExecEvent` lines while the command runs (PLAN §4.15).",
         "operationId": "exec_command",
         "parameters": [
           {
@@ -1233,10 +1232,7 @@
             }
           }
         ],
-        "description": "One line of a streamed exec response (NDJSON, PLAN §4.15). Output lines arrive\nwhile the command runs. Exactly one `Exit` or `Error` line ends the response.",
-        "discriminator": {
-          "propertyName": "type"
-        }
+        "description": "One line of a streamed exec response (NDJSON, PLAN §4.15). Output lines arrive\nwhile the command runs. Exactly one `Exit` or `Error` line ends the response."
       },
       "ExecRequest": {
         "type": "object",

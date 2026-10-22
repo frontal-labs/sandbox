@@ -14,17 +14,19 @@ build does not mean the feature works.
 - **Node.js 20+** (`engines` in the root `package.json`).
 - **Bun 1.3.3** (`packageManager` in the root `package.json`). Used to install
   JavaScript dependencies.
-- **Bazel** (via `MODULE.bazel`, `.bazelrc`, and `BUILD.bazel`). Required only
-  for the TypeScript SDK targets. No `.bazelversion` file is committed, so use
-  a Bazel or Bazelisk version compatible with `bazel_dep` entries in
-  `MODULE.bazel`.
+- **Bazel** (via `MODULE.bazel`, `.bazelrc`, and `BUILD.bazel`). Bazelisk reads
+  the pinned `.bazelversion`, so install Bazelisk, not Bazel. Bazel builds the
+  whole workspace and its tests. See [build-system.md](build-system.md).
+- **Nix** (optional). `nix develop` gives a dev shell with Bazelisk, the pinned
+  Rust toolchain, and the formatters and linters. See [build-system.md](build-system.md).
 - **Python 3.11+** for the Python SDK (`sdks/python/pyproject.toml`).
 - **protoc** (Protocol Buffers compiler), on `PATH` or set as `PROTOC`. Needed
   to build `crates/sandbox-proto`. Bazel builds protoc itself from the
   `protobuf` module. Optional: **buf**, for `buf lint proto`.
 
-There is no Nix flake. `flake.nix` and `flake.lock` have been removed, and CI
-installs the toolchain through `rust-toolchain.toml` instead of `nix develop`.
+The Nix flake (`flake.nix`, `flake.lock`, and `nix/`) is back. Its dev shell is
+one way to get these tools, and it is optional. The Cargo and Bazel commands in
+this guide work without it. See [build-system.md](build-system.md).
 
 ## Quick Start (Rust)
 
@@ -71,9 +73,9 @@ Notes:
   `//sdks/typescript:lint`, but `sdks/typescript/BUILD.bazel` defines only
   `tsconfig`, `sandbox_sdk`, `sandbox_sdk_test`, `test`, and `all`. Verify the
   lint target before relying on it.
-- `.bazelrc` sets `build --platforms=//bazel/platforms:x86_64_apple_darwin`, so Bazel builds
-  target x86_64 macOS by default. On Apple Silicon or Linux, override it with
-  `--platforms=` (or remove the line locally) before building.
+- `.bazelrc` picks the target platform from the host OS: x86_64 macOS on a Mac,
+  x86_64 Linux on Linux. Pass `--config=linux_aarch64` for aarch64 Linux. See
+  [build-system.md](build-system.md).
 
 ## Project Structure
 
@@ -219,8 +221,9 @@ confirmed.
 files under `sdks/`. The older semver-label check is still there.
 
 Other workflows in `.github/workflows/`: `benchmarks.yml`, `codeql-analysis.yml`,
-and `release-binaries.yml`. The former `update-flake.yml` (weekly
-`nix flake update`) was deleted because the flake it updated no longer exists.
+and `release-binaries.yml`. `bazel.yml` runs the Nix flake checks and the Bazel
+build and tests, with and without Nix. No workflow runs `nix flake update` on a
+schedule yet; the pins move only when someone runs it.
 
 ## Releasing the SDKs
 
@@ -279,7 +282,6 @@ Whether the CLI or tests actually install a subscriber has not been verified.
 
 ## Known gaps
 
-- Nothing in this guide should be run with `nix develop`.
 - `docs/` and `.github/` may still reference tools not in this repo (for
   example `sandbox-admin`, `tools/`, `images/`, `deploy/`, `bench/`,
   `tests/`). They do not exist yet.

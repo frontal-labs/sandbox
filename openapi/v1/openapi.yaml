@@ -13,11 +13,11 @@ paths:
     post:
       tags:
       - admin
-      summary: Start a garbage collection of the blob store. It runs in the background, so
-      description: |-
+      summary: |-
+        Start a garbage collection of the blob store. It runs in the background, so
         the request does not wait for it (PLAN §4.2). The report is written to the
         log when it finishes.
-
+      description: |-
         Any key may call it. A collection holds every session's gate for a moment,
         so the server allows one per minute, and a call inside that window gets
         `RESOURCE_EXHAUSTED`.
@@ -153,8 +153,9 @@ paths:
     post:
       tags:
       - exec
-      summary: Run one command in a session. With `stream`, the output comes as NDJSON
-      description: '`ExecEvent` lines while the command runs (PLAN §4.15).'
+      summary: |-
+        Run one command in a session. With `stream`, the output comes as NDJSON
+        `ExecEvent` lines while the command runs (PLAN §4.15).
       operationId: exec_command
       parameters:
       - name: id
@@ -797,8 +798,6 @@ components:
       description: |-
         One line of a streamed exec response (NDJSON, PLAN §4.15). Output lines arrive
         while the command runs. Exactly one `Exit` or `Error` line ends the response.
-      discriminator:
-        propertyName: type
     ExecRequest:
       type: object
       required:
@@ -923,9 +922,13 @@ components:
           items:
             type: integer
             format: int32
-minimum: 0
-            nullable: true
+            minimum: 0
     OutputStream:
+      type: string
+      description: Which output stream a streamed chunk came from.
+      enum:
+      - stdout
+      - stderr
     PolicyAction:
       type: string
       enum:

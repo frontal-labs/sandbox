@@ -6,7 +6,7 @@
 //! sweeps. No session can write a blob in between, and a blob written after the
 //! collector lists the store is never swept.
 
-use crate::api::{ApiError, AppState};
+use crate::api::{ApiError, AppState, ErrorBody};
 use crate::auth::KeyId;
 use axum::{extract::State, http::StatusCode, Extension};
 use sandbox_session::{blob_store, committed_root, vfs_error};
