@@ -97,9 +97,6 @@ pub async fn execute_script_streamed(
 /// can unwind after termination.
 const HEAP_HEADROOM: usize = 16 * 1024 * 1024;
 struct HeapGuard {
-    /// The isolate the callback may terminate. Held as a raw pointer because
-    /// the guard outlives the isolate (see `Built::drop`).
-    isolate: *mut deno_core::v8::OwnedIsolate,
     hit: std::sync::atomic::AtomicBool,
 }
 
