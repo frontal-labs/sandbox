@@ -20,7 +20,7 @@ cargo_build_script(
         "//proto:wkt/google/protobuf/empty.proto",
     ],
     deps = [
-        "@crates//:tonic-build",
+        "@crates//:tonic-prost-build",
     ],
     edition = "2021",
 )
@@ -65,3 +65,16 @@ rust_library(
     )
     for name in ["roundtrip", "compat"]
 ]
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_proto_unit_test",
+    crate = ":sandbox_proto",
+    edition = "2021",
+    deps = [
+        "@crates//:proptest",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+    visibility = ["//visibility:public"],
+)

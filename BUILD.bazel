@@ -39,7 +39,7 @@ alias(
 
 alias(
     name = "build_all",
-    actual = "//cli:sandbox",
+    actual = "//cli:frontal-sandbox",
     visibility = ["//visibility:public"],
 )
 
@@ -61,6 +61,25 @@ alias(
 test_suite(
     name = "test_rust",
     tests = [
+        "//benchmarks/load:sandbox_load_unit_test",
+        "//cli:cli_unit_test",
+        "//crates/sandbox-cas:sandbox_cas_unit_test",
+        "//crates/sandbox-proto:sandbox_proto_unit_test",
+        "//crates/sandbox-runtime:sandbox_runtime_unit_test",
+        "//crates/sandbox-server:sandbox_server_durable_test",
+        "//crates/sandbox-server:sandbox_server_durable_limits_test",
+        "//crates/sandbox-server:sandbox_server_gc_test",
+        "//crates/sandbox-server:sandbox_server_idle_test",
+        "//crates/sandbox-server:sandbox_server_limits_test",
+        "//crates/sandbox-server:sandbox_server_openapi_test",
+        "//crates/sandbox-server:sandbox_server_rest_test",
+        "//crates/sandbox-server:sandbox_server_unit_test",
+        "//crates/sandbox-session:sandbox_session_unit_test",
+        "//crates/sandbox-shell:sandbox_shell_unit_test",
+        "//crates/sandbox-trace:sandbox_trace_unit_test",
+        "//crates/sandbox-types:sandbox_types_unit_test",
+        "//crates/sandbox-vfs:sandbox_vfs_unit_test",
+        "//crates/sandbox-wasm:sandbox_wasm_unit_test",
         "//cli:cli_bench_process_test",
         "//cli:cli_serve_process_test",
         "//cli:cli_trace_process_test",

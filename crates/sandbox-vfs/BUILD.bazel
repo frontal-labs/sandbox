@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_vfs",
@@ -19,5 +19,14 @@ rust_library(
     proc_macro_deps = [
         "@crates//:async-trait",
     ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_vfs_unit_test",
+    crate = ":sandbox_vfs",
+    edition = "2021",
+    deps = ["@crates//:proptest"],
     visibility = ["//visibility:public"],
 )

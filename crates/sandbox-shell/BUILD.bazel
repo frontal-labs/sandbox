@@ -216,3 +216,17 @@ rust_test(
     ],
     visibility = ["//visibility:public"],
 )
+
+# Unit tests in src/. tests.rs embeds the wasm tool from sandbox-wasm with
+# include_bytes!, so that fixture must be a compile input.
+rust_test(
+    name = "sandbox_shell_unit_test",
+    crate = ":sandbox_shell",
+    edition = "2021",
+    compile_data = ["//crates/sandbox-wasm:fixtures"],
+    deps = [
+        "//crates/sandbox-cas:sandbox_cas",
+        "@crates//:serde_json",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -15,3 +15,10 @@
 # Keep a local disk cache outside the output base. .bazelrc does not expand
 # $HOME or ~, so use an absolute path.
 # build --disk_cache=/Users/you/.cache/bazel-disk
+
+# On a machine whose home volume is nearly full, move Bazel's output root (the
+# output bases and external repositories) to a volume with space. Bazel selects
+# its server by output root, so after changing this, run `bazel shutdown` once.
+# Setting this as a startup option in an rc file is unverified; passing
+# --output_user_root on the command line is the tested route.
+# startup --output_user_root=/Volumes/scratch/bazel-root

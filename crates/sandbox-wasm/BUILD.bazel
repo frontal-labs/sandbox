@@ -51,3 +51,19 @@ rust_test(
     ],
     visibility = ["//visibility:public"],
 )
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_wasm_unit_test",
+    crate = ":sandbox_wasm",
+    edition = "2021",
+    deps = ["//crates/sandbox-cas:sandbox_cas"],
+    visibility = ["//visibility:public"],
+)
+
+# The wasm tool that sandbox-shell's tests embed with include_bytes!.
+filegroup(
+    name = "fixtures",
+    srcs = glob(["fixtures/**"]),
+    visibility = ["//visibility:public"],
+)

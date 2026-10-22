@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_session",
@@ -25,5 +25,13 @@ rust_library(
     proc_macro_deps = [
         "@crates//:async-trait",
     ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_session_unit_test",
+    crate = ":sandbox_session",
+    edition = "2021",
     visibility = ["//visibility:public"],
 )

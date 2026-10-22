@@ -45,7 +45,7 @@ rust_test(
     crate_root = "tests/bench_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":sandbox"],
+    data = [":frontal-sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -75,7 +75,7 @@ rust_test(
     crate_root = "tests/serve_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":sandbox"],
+    data = [":frontal-sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -105,7 +105,7 @@ rust_test(
     crate_root = "tests/trace_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":sandbox"],
+    data = [":frontal-sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -135,7 +135,7 @@ rust_test(
     crate_root = "tests/worker_isolation.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":sandbox"],
+    data = [":frontal-sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -165,7 +165,7 @@ rust_test(
     crate_root = "tests/worker_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":sandbox"],
+    data = [":frontal-sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -186,5 +186,13 @@ rust_test(
         "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the cli lib, without main.rs).
+rust_test(
+    name = "cli_unit_test",
+    crate = ":cli_lib",
+    edition = "2021",
     visibility = ["//visibility:public"],
 )

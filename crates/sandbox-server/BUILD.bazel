@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_server",
@@ -41,5 +41,59 @@ rust_binary(
     deps = [":sandbox_server"],
 )
 
-# Contract tests (tests/openapi.rs) read openapi/v1 through CARGO_MANIFEST_DIR,
-# which only Cargo sets. They run under `cargo test -p sandbox-server`.
+# Dependencies of the integration tests. Each file in tests/ is its own crate, so
+# each one lists what it uses, as Cargo's dev-dependencies do.
+_SERVER_TEST_DEPS = [
+    ":sandbox_server",
+    "//crates/sandbox-cas:sandbox_cas",
+    "//crates/sandbox-scheduler:sandbox_scheduler",
+    "//crates/sandbox-session:sandbox_session",
+    "//crates/sandbox-trace:sandbox_trace",
+    "//crates/sandbox-types:sandbox_types",
+    "//crates/sandbox-vfs:sandbox_vfs",
+    "@crates//:axum",
+    "@crates//:bytes",
+    "@crates//:serde",
+    "@crates//:serde_json",
+    "@crates//:tokio",
+    "@crates//:tower",
+    "@crates//:utoipa",
+]
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_server_unit_test",
+    crate = ":sandbox_server",
+    edition = "2021",
+    deps = [
+        "@crates//:tower",
+        "@crates//:serde_json",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Contract tests read the committed spec at openapi/v1 through CARGO_MANIFEST_DIR,
+# which only Cargo sets. rustc_env supplies the same value, relative to the runfiles
+# root, and data puts the spec files in the runfiles.
+[
+    rust_test(
+        name = "sandbox_server_%s_test" % name,
+        srcs = ["tests/%s.rs" % name],
+        crate_root = "tests/%s.rs" % name,
+        edition = "2021",
+        data = ["//openapi:v1_spec"],
+        rustc_env = {"CARGO_MANIFEST_DIR": "crates/sandbox-server"},
+        deps = _SERVER_TEST_DEPS,
+        visibility = ["//visibility:public"],
+    )
+    for name in [
+        "durable",
+        "durable_limits",
+        "gc",
+        "idle",
+        "limits",
+        "openapi",
+        "rest",
+    ]
+]

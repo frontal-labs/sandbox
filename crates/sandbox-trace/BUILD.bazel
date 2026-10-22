@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_trace",
@@ -18,5 +18,13 @@ rust_library(
 ],
     proc_macro_deps = [
     ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_trace_unit_test",
+    crate = ":sandbox_trace",
+    edition = "2021",
     visibility = ["//visibility:public"],
 )
