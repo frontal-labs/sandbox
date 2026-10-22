@@ -73,6 +73,14 @@ pub async fn execute_script(
 
 /// Like [`execute_script`], and tells `observer` each piece of stdout as the script
 /// writes it. The pieces are the ones kept in the outcome, in order.
+///
+/// # Containment limits
+///
+/// Scripts run in the host process. `max_heap_bytes` is enforced by terminating the
+/// script at the limit, but it does not bound everything a script can allocate:
+/// string growth and off-heap buffers can exceed it, and a single allocation past the
+/// limit is a fatal V8 out-of-memory that aborts the host. Untrusted code that needs
+/// a hard memory bound must run in a worker process with an OS-level limit.
 pub async fn execute_script_streamed(
     code: &str,
     limits: ScriptLimits,
@@ -96,11 +104,16 @@ pub async fn execute_script_streamed(
 /// Extra heap V8 may use after the near-limit callback fires, so the script
 /// can unwind after termination.
 const HEAP_HEADROOM: usize = 16 * 1024 * 1024;
+/// How many times the callback grants `HEAP_HEADROOM` while a script is terminating.
+const MAX_HEADROOM_GRANTS: usize = 4;
 struct HeapGuard {
     /// Terminates the script when the heap limit is reached. A thread-safe handle,
     /// so it stays valid as long as the guard does.
     handle: deno_core::v8::IsolateHandle,
     hit: std::sync::atomic::AtomicBool,
+    /// Headroom grants so far. Capped at `MAX_HEADROOM_GRANTS`, so the heap cannot
+    /// grow without bound while termination is pending.
+    grants: std::sync::atomic::AtomicUsize,
 }
 
 /// Called by V8 when the heap is close to its limit.
@@ -117,11 +130,14 @@ unsafe extern "C" fn on_near_heap_limit(
     // SAFETY: see the function's safety contract; `data` is the pointer
     // created from `Box::into_raw` in `run_isolate`.
     let guard = unsafe { &*(data as *const HeapGuard) };
-    if guard.hit.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        // Already terminating. No more headroom: V8 may then fail the allocation fatally.
+    guard.hit.store(true, std::sync::atomic::Ordering::SeqCst);
+    guard.handle.terminate_execution();
+    let granted = guard.grants.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if granted >= MAX_HEADROOM_GRANTS {
+        // Termination is still pending and the grants are spent. V8 may now fail the
+        // allocation fatally. That is the one case in-process isolation cannot contain.
         return current;
     }
-    guard.handle.terminate_execution();
     current + HEAP_HEADROOM
 }
 
@@ -168,6 +184,7 @@ fn build(limits: ScriptLimits) -> Result<Built, String> {
     let guard = Box::into_raw(Box::new(HeapGuard {
         handle: runtime.v8_isolate().thread_safe_handle(),
         hit: std::sync::atomic::AtomicBool::new(false),
+        grants: std::sync::atomic::AtomicUsize::new(0),
     }));
     // SAFETY: `guard` is a valid pointer to a live HeapGuard. `Built::drop` frees it
     // only after the isolate is gone.
