@@ -140,6 +140,29 @@ Rust unit tests in `src/` use a `rust_test` with `crate = ":<lib>"`. Each file i
 `tests/` gets its own `rust_test`. The Cargo dev-dependencies are listed in the
 test's `deps`.
 
+Measured on the committed HEAD with the Bazel changes applied (macOS, arm64
+host, x86_64 target):
+
+| Suite | Result |
+|-------|--------|
+| `cargo test --workspace` (old suite) | 383 passed, 0 failed, 1 ignored |
+| `bazel test //...` Rust test cases | 383 passed, 0 failed |
+| `bazel test //...` Python (pytest) | 11 passed |
+
+The one ignored item in Cargo is a doctest. `bazel test` does not run doctests,
+and no doctest passes under Cargo, so the 383 match.
+
+Three Bazel-only settings replace what Cargo provides:
+
+- `sandbox_server` sets `CARGO_PKG_AUTHORS` and `CARGO_PKG_LICENSE` at compile
+  time. utoipa reads them to fill the OpenAPI `contact` and `license`, and the
+  committed spec was generated with them. The values repeat `Cargo.toml`, and
+  `tests/openapi.rs` fails if they drift.
+- `cli_worker_process_test` sets `CARGO_BIN_EXE_frontal-sandbox` at run time.
+  Bazel sets that variable only at compile time for the `env!` tests.
+- `sdks/python` runs pytest from the workspace root, so its path is
+  workspace-relative.
+
 ## CI
 
 `.github/workflows/bazel.yml` runs two jobs:
@@ -154,9 +177,16 @@ Cargo.
 
 ## Known gaps
 
-- The Linux configurations are not verified on a Linux machine. The verification
-  so far ran on macOS.
+- **Nix is not verified.** No `flake.lock` is committed yet, because generating
+  it needs Nix, and Nix is not installed on the machine used for these checks.
+  `nix flake check` and `nix develop` have not run. Run `nix flake lock` once,
+  then commit the lock.
+- **Linux is not verified** on a Linux machine. The Linux targets and the CI job
+  without Nix have not run.
+- **The `ci.yml` workflows are unchanged** and still use Cargo. `bazel.yml` has
+  not run on GitHub.
 - Worker isolation tests need cgroups. Without them they skip, as they do under
   Cargo.
 - Remote execution is not configured. The toolchains target the host
   architecture, and the remote cache is cache-only.
+- Doctests are not run under Bazel.

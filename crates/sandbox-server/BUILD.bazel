@@ -2,6 +2,13 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_server",
+    # utoipa reads these at compile time to fill the spec's contact and license, as
+    # Cargo sets them from Cargo.toml. Without them the Bazel spec differs, and the
+    # openapi contract test fails. The test keeps these values honest.
+    rustc_env = {
+        "CARGO_PKG_AUTHORS": "Frontal Labs",
+        "CARGO_PKG_LICENSE": "Apache-2.0",
+    },
     edition = "2021",
     srcs = glob(["src/**/*.rs"]),
     deps = [

@@ -20,7 +20,9 @@ py_test(
     name = "sandbox_sdk_test",
     srcs = ["tools/run_module.py"] + glob(["tests/**/*.py"], allow_empty = True),
     main = "tools/run_module.py",
-    args = ["pytest", "-q", "tests"],
+    # Bazel runs the test from the workspace root, not the package, so the path
+    # is workspace-relative.
+    args = ["pytest", "-q", "sdks/python/tests"],
     deps = [
         ":sandbox_sdk",
         "@pypi//pytest",

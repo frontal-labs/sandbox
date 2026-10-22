@@ -2,6 +2,9 @@ load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_sdk",
+    # The Cargo package is frontal-sandbox-sdk. cli and the tests import it by that
+    # crate name, so Bazel uses the same one.
+    crate_name = "frontal_sandbox_sdk",
     edition = "2021",
     srcs = glob(["src/**/*.rs"]),
     deps = [

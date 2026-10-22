@@ -9,7 +9,6 @@ build --jobs=auto
 # Test configuration
 test --test_output=errors
 test --test_timeout=300
-test --test_arg=--nocapture
 test --runs_per_test=1
 test --flaky_test_attempts=3
 test --keep_going

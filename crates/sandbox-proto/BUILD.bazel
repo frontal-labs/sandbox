@@ -37,6 +37,8 @@ rust_library(
         "@crates//:prost",
         "@crates//:prost-types",
         "@crates//:tonic",
+        # The generated code names this crate directly, so it is a normal dependency.
+        "@crates//:tonic-prost",
         "@crates//:ulid",
     ],
     visibility = ["//visibility:public"],

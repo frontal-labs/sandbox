@@ -96,11 +96,10 @@ pub async fn execute_script_streamed(
 /// Extra heap V8 may use after the near-limit callback fires, so the script
 /// can unwind after termination.
 const HEAP_HEADROOM: usize = 16 * 1024 * 1024;
-
-/// State the near-heap-limit callback needs. Owned by `run_isolate`, which
-/// keeps it alive for the isolate's lifetime.
 struct HeapGuard {
-    handle: deno_core::v8::IsolateHandle,
+    /// The isolate the callback may terminate. Held as a raw pointer because
+    /// the guard outlives the isolate (see `Built::drop`).
+    isolate: *mut deno_core::v8::OwnedIsolate,
     hit: std::sync::atomic::AtomicBool,
 }
 
@@ -119,7 +118,6 @@ unsafe extern "C" fn on_near_heap_limit(
     // created from `Box::into_raw` in `run_isolate`.
     let guard = unsafe { &*(data as *const HeapGuard) };
     guard.hit.store(true, std::sync::atomic::Ordering::SeqCst);
-    guard.handle.terminate_execution();
     current + HEAP_HEADROOM
 }
 
@@ -164,7 +162,7 @@ fn build(limits: ScriptLimits) -> Result<Built, String> {
     });
 
     let guard = Box::into_raw(Box::new(HeapGuard {
-        handle: runtime.v8_isolate().thread_safe_handle(),
+        isolate: runtime.v8_isolate() as *mut deno_core::v8::OwnedIsolate,
         hit: std::sync::atomic::AtomicBool::new(false),
     }));
     // SAFETY: `guard` is a valid pointer to a live HeapGuard. `Built::drop` frees it

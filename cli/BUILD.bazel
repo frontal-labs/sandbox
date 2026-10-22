@@ -166,6 +166,9 @@ rust_test(
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":frontal-sandbox"],
+    # The worker test reads CARGO_BIN_EXE_* at run time, which only Cargo sets. The
+    # path is relative to the runfiles root, the test's working directory.
+    env = {"CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)"},
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
