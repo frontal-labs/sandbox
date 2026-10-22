@@ -159,7 +159,6 @@ fn build(limits: ScriptLimits) -> Result<Built, String> {
     });
 
     let guard = Box::into_raw(Box::new(HeapGuard {
-        isolate: runtime.v8_isolate() as *mut deno_core::v8::OwnedIsolate,
         hit: std::sync::atomic::AtomicBool::new(false),
     }));
     // SAFETY: `guard` is a valid pointer to a live HeapGuard. `Built::drop` frees it
@@ -290,6 +289,15 @@ fn spawn_warm(pool: std::sync::Arc<WarmPool>) {
     let spawned = std::thread::Builder::new()
         .name("sandbox-warm-isolate".to_string())
         .spawn(move || {
+            // V8 posts delayed tasks (heap-limit handling) to tokio's timer, so the
+            // isolate must be built inside a tokio runtime context. A plain thread has none.
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            let _entered = rt.enter();
             let Ok(built) = build(ScriptLimits::default()) else {
                 return;
             };
