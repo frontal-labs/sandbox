@@ -12,12 +12,13 @@ sandbox-types = { path = "../sandbox-types" }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 bytes = { workspace = true }
 blake3 = { workspace = true }
 ulid = { workspace = true }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
