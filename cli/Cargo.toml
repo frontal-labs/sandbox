@@ -40,6 +40,10 @@ serde_json = { workspace = true }
 default = []
 # The Postgres state store (PLAN §4.8, M5). See `serve --database-url`.
 clustered = ["sandbox-server/clustered"]
+# Contained runner tests require Linux with delegated cgroup v2.
+# Enable with `--features contained-tests` when running in a suitable environment.
+contained-tests = []
+
 # The worker serves gRPC over a Unix socket, so only Unix builds have it.
 [target.'cfg(unix)'.dependencies]
 sandbox-worker = { path = "../crates/sandbox-worker" }
