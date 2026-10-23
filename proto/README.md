@@ -1,4 +1,4 @@
-# proto
+# Frontal Sandbox Proto
 
 Versioned wire contracts for the sandbox. Packages mirror directories: `sandbox/v1/<area>/` is package `sandbox.v1.<area>`.
 
