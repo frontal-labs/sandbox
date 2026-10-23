@@ -3981,7 +3981,6 @@ dependencies = [
  "axum 0.7.9",
  "blake3",
  "bytes",
- "getrandom 0.4.3",
  "hyper 1.12.0",
  "sandbox-cas",
  "sandbox-runtime",

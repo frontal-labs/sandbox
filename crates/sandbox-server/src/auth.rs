@@ -133,7 +133,9 @@ fn fill_random(buf: &mut [u8]) {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     for b in buf.iter_mut() {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         *b = (state >> 33) as u8;
     }
 }

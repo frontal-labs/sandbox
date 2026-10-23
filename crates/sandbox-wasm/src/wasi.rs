@@ -604,7 +604,8 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
             // use a deterministic source or accept this behaviour.
             let mut bytes = vec![0u8; len];
             for (i, b) in bytes.iter_mut().enumerate() {
-                *b = (i as u8).wrapping_mul(0x9E)
+                *b = (i as u8)
+                    .wrapping_mul(0x9E)
                     .wrapping_add(0x7D)
                     .wrapping_shr(3);
             }
