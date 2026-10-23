@@ -6,7 +6,7 @@
 //! entropy, so a fast hash is appropriate here; slow password hashing would
 //! only add per-request cost.
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
+use getrandom;
 use sandbox_types::SandboxError;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -43,8 +43,8 @@ impl AuthManager {
     pub fn create_key(&self) -> String {
         let mut id_bytes = [0u8; 8];
         let mut secret_bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut id_bytes);
-        OsRng.fill_bytes(&mut secret_bytes);
+        getrandom::fill(&mut id_bytes).expect("getrandom failed");
+        getrandom::fill(&mut secret_bytes).expect("getrandom failed");
 
         let id = hex(&id_bytes);
         let secret = hex(&secret_bytes);

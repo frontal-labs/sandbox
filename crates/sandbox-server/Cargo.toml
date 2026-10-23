@@ -30,6 +30,7 @@ utoipa = { workspace = true }
 argon2 = { workspace = true }
 blake3 = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
+getrandom = "0.4"
 
 [dev-dependencies]
 sandbox-runtime = { path = "../sandbox-runtime" }
