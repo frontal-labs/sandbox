@@ -20,6 +20,13 @@ common --enable_platform_specific_config
 build:macos --platforms=//bazel/platforms:x86_64_apple_darwin
 build:linux --platforms=//bazel/platforms:x86_64_unknown_linux_gnu
 
+# Execution platform. MODULE.bazel registers the Darwin platform first, so without this
+# a Linux host picks Darwin toolchains (coreutils, tar) that cannot run there. The host
+# platform is detected by Bazel, so it is correct on x86_64 and aarch64 alike, and it is
+# tried before the registered ones.
+common:macos --extra_execution_platforms=@bazel_tools//tools:host_platform
+common:linux --extra_execution_platforms=@bazel_tools//tools:host_platform
+
 build:linux_aarch64 --platforms=//bazel/platforms:aarch64_unknown_linux_gnu
 build:linux_aarch64 --host_platform=//bazel/platforms:aarch64_unknown_linux_gnu
 build:linux_aarch64 --extra_execution_platforms=//bazel/platforms:aarch64_unknown_linux_gnu
