@@ -149,6 +149,12 @@ host, x86_64 target):
 | `bazel test //...` Rust test cases | 383 passed, 0 failed |
 | `bazel test //...` Python (pytest) | 11 passed |
 
+One clean run of `bazel test //... --cache_test_results=no` had a single failure:
+the `sandbox_cas` property test `an_insertion_stores_a_small_part_of_the_blob`
+found a random input where a 938-byte insertion rewrote 409 KB of chunks. Three
+earlier runs passed. This is an open issue, not a build problem. It needs a
+decision on the chunking bound or the property.
+
 The one ignored item in Cargo is a doctest. `bazel test` does not run doctests,
 and no doctest passes under Cargo, so the 383 match.
 
@@ -177,10 +183,17 @@ Cargo.
 
 ## Known gaps
 
-- **Nix is not verified.** No `flake.lock` is committed yet, because generating
-  it needs Nix, and Nix is not installed on the machine used for these checks.
-  `nix flake check` and `nix develop` have not run. Run `nix flake lock` once,
-  then commit the lock.
+- **Nix is checked in a container, not on the Mac.** `flake.lock` was generated
+  with `nix flake lock` in `nixos/nix` (linux/aarch64). `nix flake check` passes
+  `nix-fmt`, `shell-lint` and `toml-fmt` there. `rust-fmt` fails on
+  `crates/sandbox-runtime/tests/heap_limits.rs`, which is committed unformatted.
+  `nix develop` has run only inside the container. The checks evaluated only
+  for aarch64-linux.
+- **Sandboxing is off for Bazel actions on macOS and Linux.** `--spawn_strategy=local`
+  keeps the execroot path fixed, so two clean builds produce identical outputs.
+  Under the darwin and linux sandboxes, each action runs in a directory named
+  for its PID, and C and Rust debug info record that path. The trade-off: an
+  action that reads an undeclared input is not caught.
 - **Linux is not verified** on a Linux machine. The Linux targets and the CI job
   without Nix have not run.
 - **The `ci.yml` workflows are unchanged** and still use Cargo. `bazel.yml` has
