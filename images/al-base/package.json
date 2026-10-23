@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-al-base",
+  "version": "1.0.0",
+  "description": "Amazon Linux 2023 base image for Frontal Sandbox",
+  "license": "MIT",
+  "private": true
+}

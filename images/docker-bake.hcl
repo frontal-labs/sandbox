@@ -1,0 +1,169 @@
+variable "REGISTRY" {
+  default = "fcr.frontal.com/frontal/sandbox"
+}
+
+variable "TAG_SUFFIX" {
+  default = ""
+}
+
+variable "PUSH" {
+  default = false
+}
+
+group "default" {
+  targets = ["runtimes", "vmi"]
+}
+
+group "runtimes" {
+  targets = ["al-node", "al-python"]
+}
+
+group "vmi" {
+  targets = ["ubuntu", "node", "python", "universal", "arch"]
+}
+
+target "_common" {
+  platforms = ["linux/amd64"]
+  attest = [
+    "type=provenance,disabled=true",
+    "type=sbom,disabled=true"
+  ]
+  output = [
+    "type=image,push=${PUSH},oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true"
+  ]
+}
+
+target "ubuntu" {
+  inherits = ["_common"]
+  context = "ubuntu"
+  tags = ["${REGISTRY}/ubuntu:latest${TAG_SUFFIX}"]
+}
+
+target "node" {
+  matrix = {
+    node = [
+      {
+        major = "22"
+        version = "22.23.4"
+      },
+      {
+        major = "24"
+        version = "24.22.1"
+      },
+      {
+        major = "26"
+        version = "26.12.1"
+      },
+    ]
+  }
+  name = "node-${node.major}"
+  inherits = ["_common"]
+  context = "node"
+  tags = [
+    "${REGISTRY}/node:${node.major}${TAG_SUFFIX}",
+    "${REGISTRY}/node:${node.version}${TAG_SUFFIX}",
+  ]
+  contexts = {
+    base = "target:ubuntu"
+  }
+  args = {
+    NODE_VERSION = node.version
+  }
+}
+
+target "python" {
+  inherits = ["_common"]
+  context = "python"
+  tags = ["${REGISTRY}/python:3.14${TAG_SUFFIX}"]
+  contexts = {
+    base = "target:ubuntu"
+  }
+  args = {
+    PYTHON_VERSION = "3.14"
+  }
+}
+
+target "universal" {
+  inherits = ["_common"]
+  context = "universal"
+  tags = ["${REGISTRY}/universal:latest${TAG_SUFFIX}"]
+  contexts = {
+    base = "target:ubuntu"
+  }
+  args = {
+    NODE_VERSION = "24.22.1"
+    PYTHON_VERSION = "3.14"
+  }
+}
+
+target "arch" {
+  inherits = ["_common"]
+  context = "arch"
+  tags = ["${REGISTRY}/arch:latest${TAG_SUFFIX}"]
+}
+
+target "al-builder-base" {
+  inherits = ["_common"]
+  context = "al-base"
+  dockerfile = "Dockerfile"
+  target = "builder-base"
+}
+
+target "al-base" {
+  inherits = ["_common"]
+  context = "al-base"
+  dockerfile = "Dockerfile"
+  target = "sandbox-base"
+  contexts = {
+    src = "al-base"
+  }
+}
+
+target "al-node" {
+  matrix = {
+    node = [
+      {
+        major = "22"
+        version = "22.23.4"
+      },
+      {
+        major = "24"
+        version = "24.22.1"
+      },
+      {
+        major = "26"
+        version = "26.12.1"
+      },
+    ]
+  }
+  name = "al-node-${node.major}"
+  inherits = ["_common"]
+  context = "al-node"
+  dockerfile = "Dockerfile"
+  tags = [
+    "${REGISTRY}/node:al-${node.major}${TAG_SUFFIX}",
+    "${REGISTRY}/node:al-${node.version}${TAG_SUFFIX}",
+  ]
+  contexts = {
+    sandbox-base = "target:al-base"
+  }
+  args = {
+    NODE_ARCH = "x64"
+    NODE_MAJOR = node.major
+    NODE_VERSION = node.version
+  }
+}
+
+target "al-python" {
+  inherits = ["_common"]
+  context = "al-python"
+  dockerfile = "Dockerfile"
+  tags = ["${REGISTRY}/python:al-3.13.1${TAG_SUFFIX}"]
+  contexts = {
+    builder-base = "target:al-builder-base"
+    sandbox-base = "target:al-base"
+  }
+  args = {
+    PYTHON_VERSION = "3.13.1"
+  }
+}

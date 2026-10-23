@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-python",
+  "version": "1.0.0",
+  "description": "Python image for Frontal Sandbox",
+  "license": "MIT",
+  "private": true
+}
