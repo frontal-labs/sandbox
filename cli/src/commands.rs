@@ -519,39 +519,6 @@ fn fork(snapshot_id: &str, count: usize) -> Result<i32, SandboxError> {
     Ok(0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn replay_refuses_a_missing_trace_as_invalid_argument() {
-        let replay =
-            Cli::try_parse_from(["frontal-sandbox", "replay", "no-such-trace.jsonl"]).unwrap();
-        assert_eq!(
-            replay.execute().unwrap_err().code,
-            sandbox_types::ErrorCode::InvalidArgument
-        );
-    }
-
-    #[test]
-    fn run_returns_the_script_exit_code() {
-        let ok = Cli::try_parse_from(["frontal-sandbox", "run", "true"]).unwrap();
-        assert_eq!(ok.execute().unwrap(), 0);
-
-        let failed = Cli::try_parse_from(["frontal-sandbox", "run", "false"]).unwrap();
-        assert_eq!(failed.execute().unwrap(), 1);
-    }
-
-    #[test]
-    fn run_reports_syntax_errors() {
-        let cli = Cli::try_parse_from(["frontal-sandbox", "run", "echo", "'unterminated"]).unwrap();
-        assert_eq!(
-            cli.execute().unwrap_err().code,
-            sandbox_types::ErrorCode::ShellError
-        );
-    }
-}
-
 /// Chooses where `node` scripts run on this host.
 ///
 /// On Linux the top-level process runs each script in a child process with
@@ -588,4 +555,37 @@ fn install_script_runner(command: &Commands) -> Result<(), SandboxError> {
 #[cfg(not(unix))]
 fn install_script_runner(_command: &Commands) -> Result<(), SandboxError> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_refuses_a_missing_trace_as_invalid_argument() {
+        let replay =
+            Cli::try_parse_from(["frontal-sandbox", "replay", "no-such-trace.jsonl"]).unwrap();
+        assert_eq!(
+            replay.execute().unwrap_err().code,
+            sandbox_types::ErrorCode::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn run_returns_the_script_exit_code() {
+        let ok = Cli::try_parse_from(["frontal-sandbox", "run", "true"]).unwrap();
+        assert_eq!(ok.execute().unwrap(), 0);
+
+        let failed = Cli::try_parse_from(["frontal-sandbox", "run", "false"]).unwrap();
+        assert_eq!(failed.execute().unwrap(), 1);
+    }
+
+    #[test]
+    fn run_reports_syntax_errors() {
+        let cli = Cli::try_parse_from(["frontal-sandbox", "run", "echo", "'unterminated"]).unwrap();
+        assert_eq!(
+            cli.execute().unwrap_err().code,
+            sandbox_types::ErrorCode::ShellError
+        );
+    }
 }
