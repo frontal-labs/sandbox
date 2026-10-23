@@ -47,7 +47,11 @@ Current state: `crates/sandbox-worker/src/worker.rs` spawns the `sandbox worker 
 
 Planned: heap limit through `CreateParams`, a near-heap-limit callback, a CPU watchdog that calls `terminate_execution`, a wall timeout, a cap on pending ops, and a fresh context per tenant execution.
 
-Current state: `crates/sandbox-runtime/src/runtime.rs` runs each script in a fresh `deno_core` isolate. A watchdog terminates the isolate after `ScriptLimits::timeout`, and output is capped at `max_output_bytes`. The heap is capped at `max_heap_bytes` by V8 heap limits, and a near-limit callback terminates the script before V8 would abort the process. The only op is `op_sandbox_print`, which writes captured output. There is no filesystem, environment, or network access. Tests check that `Deno`, `process`, and `require` are not host capabilities.
+Current state: `crates/sandbox-runtime/src/runtime.rs` runs each script in a fresh `deno_core` isolate.
+
+**`node` is contained.** The shell's `node` builtin runs each script in a child process, through `crates/sandbox-worker/src/script.rs`. The child gets namespaces and a seccomp denylist, and the host moves it into a cgroup with `memory.max` set to the heap limit plus 128 MiB, and `memory.swap.max` set to 0. A script that exhausts that memory is killed by the kernel, and the host reports it as a script failure. A fatal V8 out-of-memory in the child cannot take down the host. Without a contained runner, `node` is refused (`ErrorCode::Unsupported`). A runner is installed on Linux only, with `FRONTAL_SANDBOX_UNSAFE_IN_PROCESS_SCRIPTS=1` as the only way to run scripts in-process, and that is for development only. A worker process is already isolated, so `node` inside a worker runs in that process, under the worker's cgroup cap.
+
+The in-process path (`execute_script`) still has the limits described above: a fatal V8 out-of-memory aborts the host, and string growth is not bounded by the heap limit. Hosts must not use it for untrusted code. A watchdog terminates the isolate after `ScriptLimits::timeout`, and output is capped at `max_output_bytes`. The heap is capped at `max_heap_bytes` by V8 heap limits, and a near-limit callback terminates the script before V8 would abort the process. The only op is `op_sandbox_print`, which writes captured output. There is no filesystem, environment, or network access. Tests check that `Deno`, `process`, and `require` are not host capabilities.
 
 ### Wasmtime (Tier 1)
 

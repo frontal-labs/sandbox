@@ -8,6 +8,7 @@ use sandbox_vfs::Vfs;
 use std::sync::Arc;
 
 async fn run(script: &str) -> (String, String, i32) {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let fs = Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())));
     let mut shell = Shell::new(fs, ShellConfig::default());
     let out = shell.run(script).await.expect("the shell script parses");

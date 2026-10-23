@@ -268,6 +268,10 @@ impl CgroupGuard {
         let guard = Self { path };
         let writes = [
             ("memory.max", limits.memory_bytes.to_string()),
+            // Without this the kernel swaps the excess out instead of killing the
+            // process, so the limit would not hold. A host with swap would then let a
+            // script run past its memory budget.
+            ("memory.swap.max", "0".to_string()),
             ("pids.max", limits.max_pids.to_string()),
             (
                 "cpu.max",
@@ -287,6 +291,20 @@ impl CgroupGuard {
     pub(crate) fn add(&self, pid: u32) -> Result<(), SandboxError> {
         std::fs::write(self.path.join("cgroup.procs"), pid.to_string())
             .map_err(|e| SandboxError::internal(format!("moving worker into its cgroup: {e}")))
+    }
+
+    /// How many processes the kernel has OOM-killed in this cgroup. Zero if the
+    /// count cannot be read, so a caller never reports a kill it cannot confirm.
+    pub(crate) fn oom_kills(&self) -> u64 {
+        std::fs::read_to_string(self.path.join("memory.events"))
+            .ok()
+            .and_then(|events| {
+                events
+                    .lines()
+                    .find_map(|line| line.strip_prefix("oom_kill "))
+                    .and_then(|count| count.trim().parse().ok())
+            })
+            .unwrap_or(0)
     }
 }
 

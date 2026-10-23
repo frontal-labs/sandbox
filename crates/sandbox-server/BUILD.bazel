@@ -52,6 +52,7 @@ rust_binary(
 # each one lists what it uses, as Cargo's dev-dependencies do.
 _SERVER_TEST_DEPS = [
     ":sandbox_server",
+    "//crates/sandbox-runtime:sandbox_runtime",
     "//crates/sandbox-cas:sandbox_cas",
     "//crates/sandbox-scheduler:sandbox_scheduler",
     "//crates/sandbox-session:sandbox_session",

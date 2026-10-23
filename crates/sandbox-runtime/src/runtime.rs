@@ -76,11 +76,12 @@ pub async fn execute_script(
 ///
 /// # Containment limits
 ///
-/// Scripts run in the host process. `max_heap_bytes` is enforced by terminating the
-/// script at the limit, but it does not bound everything a script can allocate:
+/// This runs the script in the host process, with no OS-level containment. The heap
+/// limit terminates the script at `max_heap_bytes`, but it does not bound all memory:
 /// string growth and off-heap buffers can exceed it, and a single allocation past the
-/// limit is a fatal V8 out-of-memory that aborts the host. Untrusted code that needs
-/// a hard memory bound must run in a worker process with an OS-level limit.
+/// limit is a fatal V8 out-of-memory that aborts the host. The `node` builtin does not
+/// use this path. It goes through [`crate::execute_script_contained`], which runs each
+/// script in a child process with an OS memory limit.
 pub async fn execute_script_streamed(
     code: &str,
     limits: ScriptLimits,
@@ -132,7 +133,9 @@ unsafe extern "C" fn on_near_heap_limit(
     let guard = unsafe { &*(data as *const HeapGuard) };
     guard.hit.store(true, std::sync::atomic::Ordering::SeqCst);
     guard.handle.terminate_execution();
-    let granted = guard.grants.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let granted = guard
+        .grants
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if granted >= MAX_HEADROOM_GRANTS {
         // Termination is still pending and the grants are spent. V8 may now fail the
         // allocation fatally. That is the one case in-process isolation cannot contain.

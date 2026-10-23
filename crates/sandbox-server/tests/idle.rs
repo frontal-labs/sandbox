@@ -54,6 +54,7 @@ fn exec(argv: &[&str], timeout_ms: Option<u64>) -> Value {
 
 #[tokio::test]
 async fn an_idle_session_sleeps_and_the_next_request_wakes_it() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let auth = Arc::new(AuthManager::new());
     let key = auth.create_key();
     let (app, state) = create_router_with_state(Arc::new(Scheduler::new()), auth);

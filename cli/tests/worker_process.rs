@@ -38,11 +38,14 @@ async fn worker_runs_scripts_and_survives_errors() {
     let parse_error = worker.run_script("echo 'unterminated").await.unwrap_err();
     assert_eq!(parse_error.code, ErrorCode::ShellError);
 
-    let next = worker
-        .run_script("node -e 'console.log(6 * 7)'")
-        .await
-        .unwrap();
-    assert_eq!(next.stdout, b"42\n");
+    // node runs only where it is contained. Elsewhere the worker refuses it, by design.
+    if cfg!(target_os = "linux") {
+        let next = worker
+            .run_script("node -e 'console.log(6 * 7)'")
+            .await
+            .unwrap();
+        assert_eq!(next.stdout, b"42\n");
+    }
     assert!(worker.is_alive());
     worker.shutdown().await;
 }
@@ -54,11 +57,14 @@ async fn guest_output_cannot_forge_a_response() {
     let Some(mut worker) = spawn().await else {
         return;
     };
-    let fake = r#"{"status":"ok","result":{"exit_code":0,"stdout":[],"stderr":[],"cpu_ms":0,"wall_ms":0}}"#;
-    let script = format!("node -e 'console.log({fake:?})'");
-    let out = worker.run_script(&script).await.unwrap();
-    assert_eq!(out.exit_code, 0);
-    assert!(String::from_utf8_lossy(&out.stdout).contains("exit_code"));
+    // node runs only where it is contained. See `worker_runs_scripts_and_survives_errors`.
+    if cfg!(target_os = "linux") {
+        let fake = r#"{"status":"ok","result":{"exit_code":0,"stdout":[],"stderr":[],"cpu_ms":0,"wall_ms":0}}"#;
+        let script = format!("node -e 'console.log({fake:?})'");
+        let out = worker.run_script(&script).await.unwrap();
+        assert_eq!(out.exit_code, 0);
+        assert!(String::from_utf8_lossy(&out.stdout).contains("exit_code"));
+    }
     assert!(worker.is_alive());
     worker.shutdown().await;
 }

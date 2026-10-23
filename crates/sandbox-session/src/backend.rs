@@ -366,6 +366,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_timeout_stops_a_long_command_with_a_timeout_error() {
+        let _ = sandbox_runtime::install_in_process_script_runner();
         let backend = new_backend().await;
         let started = Instant::now();
         let mut req = argv(&["node", "-e", "let i=0; while(i<1000000000){i++}"]);
@@ -404,6 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_timed_out_streamed_exec_releases_its_observer() {
+        let _ = sandbox_runtime::install_in_process_script_runner();
         // The stream ends when the observer's sender is dropped. A command cut short
         // by its timeout must not keep the observer alive inside the shell.
         let backend = new_backend().await;

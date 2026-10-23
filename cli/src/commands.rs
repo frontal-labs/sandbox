@@ -63,6 +63,19 @@ pub enum Commands {
         trace_file: PathBuf,
     },
 
+    /// Internal: run one `node` script from stdin in a contained child process.
+    /// Frames go to stdout. See `sandbox_worker::script`.
+    #[cfg(unix)]
+    #[command(hide = true)]
+    ScriptRun {
+        /// Unshare the network, IPC, UTS, and mount namespaces before running.
+        #[arg(long)]
+        namespaces: bool,
+        /// Install the seccomp denylist before running.
+        #[arg(long)]
+        seccomp: bool,
+    },
+
     /// Internal: serve one session as gRPC on a Unix socket, for a worker host.
     /// Unix only, because the socket is a Unix domain socket.
     #[cfg(unix)]
@@ -115,6 +128,10 @@ impl Cli {
     /// Parses arguments, runs the command, and exits with its status.
     pub fn run() {
         let cli = Cli::parse();
+        if let Err(e) = install_script_runner(&cli.command) {
+            eprintln!("Error: {}", e.message);
+            std::process::exit(1);
+        }
         match cli.execute() {
             Ok(code) => std::process::exit(code),
             Err(e) => {
@@ -135,6 +152,20 @@ impl Cli {
             Commands::Bench { name } => {
                 let rt = runtime()?;
                 rt.block_on(crate::bench::run(name.as_deref()))
+            }
+            #[cfg(unix)]
+            Commands::ScriptRun {
+                namespaces,
+                seccomp,
+            } => {
+                // Applies the isolation before any thread exists. See `run_script_child`.
+                let isolation = sandbox_worker::Isolation {
+                    namespaces: *namespaces,
+                    seccomp: *seccomp,
+                    cgroup: None,
+                };
+                sandbox_worker::run_script_child(&isolation)?;
+                Ok(0)
             }
             #[cfg(unix)]
             Commands::Worker {
@@ -519,4 +550,39 @@ mod tests {
             sandbox_types::ErrorCode::ShellError
         );
     }
+}
+
+/// Chooses where `node` scripts run on this host.
+///
+/// On Linux the top-level process runs each script in a child process with
+/// namespaces, seccomp, and a cgroup memory limit. Elsewhere no runner is installed,
+/// so `node` is disabled. `FRONTAL_SANDBOX_UNSAFE_IN_PROCESS_SCRIPTS=1` runs scripts
+/// in this process with no containment. It is for development only.
+///
+/// A worker, and a script child, already run inside an isolated process: the worker
+/// process is the boundary, with its own cgroup memory cap. Those run scripts in
+/// their own process. A second containment layer inside them would be nested, and
+/// the worker's inherited seccomp filter and undelegated cgroup make that impossible.
+#[cfg(unix)]
+fn install_script_runner(command: &Commands) -> Result<(), SandboxError> {
+    if std::env::var_os("FRONTAL_SANDBOX_UNSAFE_IN_PROCESS_SCRIPTS").is_some_and(|v| v == "1") {
+        eprintln!("warning: node scripts run in-process without containment");
+        return sandbox_runtime::install_in_process_script_runner();
+    }
+    if matches!(command, Commands::Worker { .. } | Commands::ScriptRun { .. }) {
+        return sandbox_runtime::install_in_process_script_runner();
+    }
+    if cfg!(target_os = "linux") {
+        let program = std::env::current_exe().map_err(|e| {
+            SandboxError::internal(format!("locating the script runner binary: {e}"))
+        })?;
+        let runner = sandbox_worker::ScriptProcess::new(program);
+        return sandbox_runtime::install_script_runner(std::sync::Arc::new(runner));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn install_script_runner(_command: &Commands) -> Result<(), SandboxError> {
+    Ok(())
 }

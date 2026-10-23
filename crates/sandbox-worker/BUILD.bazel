@@ -8,6 +8,7 @@ rust_library(
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-session:sandbox_session",
         "//crates/sandbox-proto:sandbox_proto",
+        "//crates/sandbox-runtime:sandbox_runtime",
         "@crates//:tokio",
         "@crates//:tokio-stream",
         "@crates//:bytes",

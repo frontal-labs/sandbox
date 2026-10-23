@@ -584,6 +584,7 @@ async fn query_flag_streams_the_same_way() {
 
 #[tokio::test]
 async fn a_streamed_command_cut_short_ends_with_an_error_line() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     // The status is already 200 when the timeout fires, so the failure is a line.
     let (app, key, _) = router();
     let id = create(&app, &key).await;
@@ -889,6 +890,7 @@ async fn the_trace_lists_the_files_each_command_changed() {
 
 #[tokio::test]
 async fn an_exec_past_its_timeout_returns_504_with_the_timeout_code() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let (app, key, _) = router();
     let id = create(&app, &key).await;
     let (status, body) = call(

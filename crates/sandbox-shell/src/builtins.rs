@@ -923,7 +923,7 @@ impl Shell {
             }
             _ => return failure("node: usage: node [-e CODE | FILE]".to_string()),
         };
-        match sandbox_runtime::execute_script_streamed(
+        match sandbox_runtime::execute_script_contained(
             &code,
             sandbox_runtime::ScriptLimits::default(),
             self.tool_stdout(),

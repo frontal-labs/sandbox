@@ -55,6 +55,20 @@ rust_test(
     visibility = ["//visibility:public"],
 )
 
+# Without an installed runner, node is refused (fail closed).
+rust_test(
+    name = "sandbox_runtime_contain_default_test",
+    srcs = ["tests/contain_default.rs"],
+    crate_root = "tests/contain_default.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        ":sandbox_runtime",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # Unit tests in src/ (the lib compiled with cfg(test)).
 rust_test(
     name = "sandbox_runtime_unit_test",

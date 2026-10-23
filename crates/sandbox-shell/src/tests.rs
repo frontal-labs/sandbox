@@ -163,6 +163,7 @@ async fn run_argv_passes_stdin_through() {
 
 #[tokio::test]
 async fn node_runs_inline_code_and_files() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let mut sh = shell();
     let (code, out, _) = run(&mut sh, r#"node -e 'console.log(6 * 7)'"#).await;
     assert_eq!((code, out.as_str()), (0, "42\n"));
@@ -174,6 +175,7 @@ async fn node_runs_inline_code_and_files() {
 
 #[tokio::test]
 async fn node_reports_script_errors_with_exit_1() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let mut sh = shell();
     let (code, _, err) = run(&mut sh, "node -e 'throw new Error(\"nope\")'").await;
     assert_eq!(code, 1);

@@ -172,6 +172,7 @@ async fn an_argv_command_is_one_chunk_per_stream() {
 
 #[tokio::test]
 async fn a_node_script_streams_each_line_as_it_is_printed() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     // Each `console.log` is one chunk, sent while the script runs. The end of the
     // command is not waited for.
     let (chunks, result) =
@@ -182,6 +183,7 @@ async fn a_node_script_streams_each_line_as_it_is_printed() {
 
 #[tokio::test]
 async fn a_node_error_after_output_keeps_the_output_streamed() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let (chunks, result) =
         streamed("node -e \"console.log('before'); throw new Error('boom')\"").await;
     assert_eq!(text(&chunks, 1), ["before\n"]);
@@ -192,6 +194,7 @@ async fn a_node_error_after_output_keeps_the_output_streamed() {
 
 #[tokio::test]
 async fn node_output_redirected_to_a_file_is_not_streamed() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let (chunks, _) = streamed("node -e \"console.log('kept')\" > out; cat out").await;
     assert_eq!(
         text(&chunks, 1),
@@ -202,6 +205,7 @@ async fn node_output_redirected_to_a_file_is_not_streamed() {
 
 #[tokio::test]
 async fn node_output_inside_a_pipe_is_not_streamed() {
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let (chunks, result) = streamed("node -e \"console.log('a'); console.log('b')\" | cat").await;
     assert_eq!(
         text(&chunks, 1),
