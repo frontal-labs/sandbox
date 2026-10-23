@@ -569,7 +569,10 @@ fn install_script_runner(command: &Commands) -> Result<(), SandboxError> {
         eprintln!("warning: node scripts run in-process without containment");
         return sandbox_runtime::install_in_process_script_runner();
     }
-    if matches!(command, Commands::Worker { .. } | Commands::ScriptRun { .. }) {
+    if matches!(
+        command,
+        Commands::Worker { .. } | Commands::ScriptRun { .. }
+    ) {
         return sandbox_runtime::install_in_process_script_runner();
     }
     if cfg!(target_os = "linux") {
