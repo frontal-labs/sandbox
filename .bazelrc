@@ -20,6 +20,14 @@ common --enable_platform_specific_config
 build:macos --platforms=//bazel/platforms:x86_64_apple_darwin
 build:linux --platforms=//bazel/platforms:x86_64_unknown_linux_gnu
 
+# Reproducible outputs. A sandboxed action runs in a directory named for its PID
+# (for example sandbox/darwin-sandbox/1405/execroot/_main), and C and Rust debug
+# info record that directory. Two clean builds then differ. Running actions
+# locally keeps the execroot path fixed. This gives up sandbox isolation, so an
+# action that reads undeclared inputs is not caught. See docs/build-system.md.
+build:macos --spawn_strategy=local
+build:linux --spawn_strategy=local
+
 # Execution platform. MODULE.bazel registers the Darwin platform first, so without this
 # a Linux host picks Darwin toolchains (coreutils, tar) that cannot run there. The host
 # platform is detected by Bazel, so it is correct on x86_64 and aarch64 alike, and it is

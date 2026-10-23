@@ -14,15 +14,24 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      rust-overlay,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = import nixpkgs {
           inherit system;
           overlays = import ./nix/overlays.nix { inherit rust-overlay; };
         };
         customPackages = import ./nix/packages { inherit pkgs; };
-      in {
+      in
+      {
         packages = customPackages;
         devShells.default = import ./nix/devshell.nix {
           inherit pkgs;
@@ -30,5 +39,6 @@
         };
         checks = import ./nix/checks.nix { inherit pkgs; };
         formatter = pkgs.nixfmt-rfc-style;
-      });
+      }
+    );
 }

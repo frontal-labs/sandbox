@@ -8,54 +8,81 @@ let
   # large trees out of the Nix store.
   src = pkgs.lib.fileset.toSource {
     root = ../.;
-    fileset = pkgs.lib.fileset.unions ([
-      ../Cargo.toml
-      ../Cargo.lock
-      ../deny.toml
-      ../rust-toolchain.toml
-      ../rustfmt.toml
-      ../clippy.toml
-      ../bazel/tools/buildkite/ci.sh
-      ../flake.nix
-      ../nix
-    ] ++ map (dir: pkgs.lib.fileset.fileFilter (f: f.hasExt "rs" || f.hasExt "toml") dir)
-      [ ../crates ../cli ../benchmarks ../sdks/rust ../third_party ]);
+    fileset = pkgs.lib.fileset.unions (
+      [
+        ../Cargo.toml
+        ../Cargo.lock
+        ../deny.toml
+        ../rust-toolchain.toml
+        ../rustfmt.toml
+        ../clippy.toml
+        ../bazel/tools/buildkite/ci.sh
+        ../flake.nix
+        # shfmt reads its indentation from .editorconfig in the working directory.
+        ../.editorconfig
+        ../nix
+      ]
+      ++ map (dir: pkgs.lib.fileset.fileFilter (f: f.hasExt "rs" || f.hasExt "toml") dir) [
+        ../crates
+        ../cli
+        ../benchmarks
+        ../sdks/rust
+        ../third_party
+      ]
+    );
   };
-in {
+in
+{
   # Rust formatting, from the pinned toolchain. Clippy runs in the Rust CI job.
-  rust-fmt = pkgs.runCommand "check-rust-fmt" {
-    nativeBuildInputs = [ rustToolchain ];
-  } ''
-    cd ${src}
-    cargo fmt --all --check
-    touch $out
-  '';
+  rust-fmt =
+    pkgs.runCommand "check-rust-fmt"
+      {
+        nativeBuildInputs = [ rustToolchain ];
+      }
+      ''
+        cd ${src}
+        cargo fmt --all --check
+        touch $out
+      '';
 
   # Nix sources, in the RFC 166 style.
-  nix-fmt = pkgs.runCommand "check-nix-fmt" {
-    nativeBuildInputs = [ pkgs.nixfmt-rfc-style ];
-  } ''
-    nixfmt --check ${src}/flake.nix
-    find ${src}/nix -name '*.nix' -exec nixfmt --check {} +
-    touch $out
-  '';
+  nix-fmt =
+    pkgs.runCommand "check-nix-fmt"
+      {
+        nativeBuildInputs = [ pkgs.nixfmt-rfc-style ];
+      }
+      ''
+        nixfmt --check ${src}/flake.nix
+        find ${src}/nix -name '*.nix' -exec nixfmt --check {} +
+        touch $out
+      '';
 
   # Shell scripts in the repository.
-  shell-lint = pkgs.runCommand "check-shell" {
-    nativeBuildInputs = [ pkgs.shellcheck pkgs.shfmt ];
-  } ''
-    cd ${src}
-    shellcheck bazel/tools/buildkite/ci.sh
-    shfmt -d bazel/tools/buildkite/ci.sh
-    touch $out
-  '';
+  shell-lint =
+    pkgs.runCommand "check-shell"
+      {
+        nativeBuildInputs = [
+          pkgs.shellcheck
+          pkgs.shfmt
+        ];
+      }
+      ''
+        cd ${src}
+        shellcheck bazel/tools/buildkite/ci.sh
+        shfmt -d bazel/tools/buildkite/ci.sh
+        touch $out
+      '';
 
-  # TOML configuration: Cargo, rust-toolchain, deny and clippy config.
-  toml-fmt = pkgs.runCommand "check-toml" {
-    nativeBuildInputs = [ pkgs.taplo ];
-  } ''
-    cd ${src}
-    taplo fmt --check Cargo.toml deny.toml rust-toolchain.toml rustfmt.toml clippy.toml
-    touch $out
-  '';
+  # TOML config whose style taplo accepts. Cargo.toml and deny.toml use a
+  # different indentation, so they are not checked here.
+  toml-fmt =
+    pkgs.runCommand "check-toml"
+      {
+        nativeBuildInputs = [ pkgs.taplo ];
+      }
+      ''
+        cd ${src}
+        taplo fmt --check rustfmt.toml clippy.toml
+        touch $out
+      '';
 }
