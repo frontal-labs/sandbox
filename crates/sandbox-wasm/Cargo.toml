@@ -19,9 +19,8 @@ thiserror = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 wasmtime = { workspace = true }
-futures = { workspace = true }
-getrandom = "0.2"
-toml = "0.8"
+    futures = { workspace = true }
+    toml = "0.8"
 
 [dev-dependencies]
 sandbox-cas = { path = "../sandbox-cas" }

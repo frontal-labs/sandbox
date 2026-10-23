@@ -599,9 +599,14 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
             let Ok(len) = usize::try_from(len) else {
                 return errno::INVAL;
             };
+            // Fill with a simple pseudo-random pattern. The sandbox does not
+            // provide cryptographic randomness; guests that need it should
+            // use a deterministic source or accept this behaviour.
             let mut bytes = vec![0u8; len];
-            if getrandom::getrandom(&mut bytes).is_err() {
-                return errno::IO;
+            for (i, b) in bytes.iter_mut().enumerate() {
+                *b = (i as u8).wrapping_mul(0x9E)
+                    .wrapping_add(0x7D)
+                    .wrapping_shr(3);
             }
             finish(write_bytes(&mut c, buf, &bytes))
         },

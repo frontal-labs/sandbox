@@ -15,7 +15,6 @@ rust_library(
         "@crates//:serde",
         "@crates//:wasmtime",
         "@crates//:futures",
-        "@crates//:getrandom",
         "@crates//:toml",
     ],
     proc_macro_deps = [
@@ -33,7 +32,6 @@ rust_test(
     deps = [
         "@crates//:bytes",
         "@crates//:futures",
-        "@crates//:getrandom",
         "@crates//:parking_lot",
         "@crates//:serde",
         "@crates//:thiserror",

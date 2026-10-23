@@ -25,8 +25,17 @@ rust_library(
     edition = "2021",
     srcs = glob(["src/**/*.rs"]),
     deps = [
-        ":sandbox_guest",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:tokio",
+        "@crates//:bytes",
+        "@crates//:tracing",
+        "@crates//:thiserror",
+        "@crates//:serde",
+        "@crates//:prost",
+        "@crates//:prost-types",
         "@crates//:vsock",
+    ],
+    proc_macro_deps = [
     ],
     visibility = ["//visibility:public"],
     target_compatible_with = ["@platforms//os:linux"],
