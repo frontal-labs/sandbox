@@ -17,7 +17,15 @@ mod linux {
         let _ = install_script_runner(Arc::new(runner));
     }
 
+    fn check_contained_test_enabled() {
+        if std::env::var("SANDBOX_TEST_CONTAINED").is_err() {
+            eprintln!("Skipping contained test: set SANDBOX_TEST_CONTAINED=1 to run (requires delegated cgroup v2)");
+            panic!("test skipped: SANDBOX_TEST_CONTAINED not set");
+        }
+    }
+
     async fn run(code: &str, limits: ScriptLimits) -> ScriptOutcome {
+        check_contained_test_enabled();
         install();
         execute_script_contained(code, limits, None)
             .await
