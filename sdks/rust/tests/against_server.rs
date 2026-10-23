@@ -14,6 +14,9 @@ use std::sync::Arc;
 
 /// Starts the server on a free port. Returns its base URL and a fresh key.
 async fn start() -> (String, String) {
+    // This server runs in the test process, which has no contained script runner. Scripts
+    // run in-process here, as in the sandbox-server tests.
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let auth = Arc::new(AuthManager::new());
     let key = auth.create_key();
     let app = create_router(Arc::new(Scheduler::new()), auth);

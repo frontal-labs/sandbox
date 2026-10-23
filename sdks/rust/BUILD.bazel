@@ -47,6 +47,7 @@ rust_test(
         "//crates/sandbox-scheduler:sandbox_scheduler",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-runtime:sandbox_runtime",
         "@crates//:axum",
         "@crates//:tokio",
     ],

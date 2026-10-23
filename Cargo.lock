@@ -1677,6 +1677,7 @@ dependencies = [
  "bytes",
  "futures",
  "reqwest",
+ "sandbox-runtime",
  "sandbox-scheduler",
  "sandbox-server",
  "sandbox-session",

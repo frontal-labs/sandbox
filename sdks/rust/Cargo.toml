@@ -24,3 +24,4 @@ axum = { workspace = true }
 sandbox-server = { path = "../../crates/sandbox-server" }
 sandbox-scheduler = { path = "../../crates/sandbox-scheduler" }
 sandbox-session = { path = "../../crates/sandbox-session" }
+sandbox-runtime = { path = "../../crates/sandbox-runtime" }
