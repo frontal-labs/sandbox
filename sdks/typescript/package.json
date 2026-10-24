@@ -61,7 +61,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
     "typescript": "^5.6.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@ulid/ulid": "^0.1.0",
