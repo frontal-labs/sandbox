@@ -71,6 +71,7 @@ query --order_output=no
 # Test configuration
 test --test_summary=detailed
 test --noverbose_failures
+test --test_tag_filters=-manual
 
 # Shared settings live in bazel/config. try-import skips a missing file, so
 # a fresh checkout still builds. Per-machine settings go in user.bazelrc, which
