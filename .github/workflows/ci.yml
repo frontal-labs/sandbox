@@ -19,6 +19,7 @@ env:
   # Make the v8 build script rerun when the Rust cache contains build metadata
   # but not the downloaded native archive.
   RUSTY_V8_MIRROR: https://github.com/denoland/rusty_v8/releases/download
+  RUSTY_V8_MIRROR_FALLBACK: "1"
   V8_FROM_SOURCE: "0"
 
 jobs:
