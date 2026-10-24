@@ -156,6 +156,10 @@ rust_test(
         "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
+    # These tests need Linux cgroup v2, namespaces, and seccomp, and are run
+    # via `docker/run-linux.sh`, not on the standard CI runner.
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//visibility:public"],
 )
 
