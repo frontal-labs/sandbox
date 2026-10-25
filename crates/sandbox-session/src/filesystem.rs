@@ -28,7 +28,12 @@ pub async fn write_file(
     path: &str,
     data: &[u8],
 ) -> Result<(), SandboxError> {
-    let fs = session.fs();
+    write_path(session.fs(), path, data).await
+}
+
+/// Creates or replaces the file at `path` in `fs`. The owner of a session's
+/// filesystem uses this before the session is running (see `agent_env`).
+pub async fn write_path(fs: &dyn SessionFs, path: &str, data: &[u8]) -> Result<(), SandboxError> {
     let flags = OpenFlags {
         read: false,
         write: true,

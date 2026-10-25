@@ -4018,6 +4018,7 @@ dependencies = [
  "sandbox-vfs",
  "sandbox-wasm",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

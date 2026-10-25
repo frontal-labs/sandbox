@@ -1,3 +1,4 @@
+pub mod agent_env;
 pub mod error;
 pub mod event;
 pub mod hash;

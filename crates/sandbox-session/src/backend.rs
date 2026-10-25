@@ -1,3 +1,4 @@
+use crate::agent_env;
 use crate::session::{Checkpoint, Session, SessionFs};
 use async_trait::async_trait;
 use sandbox_cas::{BlobStore, MemStore};
@@ -5,7 +6,7 @@ use sandbox_shell::{ExecutionResult, OutputObserver, Shell, ShellConfig};
 use sandbox_types::hash::ContentHash;
 use sandbox_types::policy::ResourceLimits;
 use sandbox_types::{
-    ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, Tier,
+    ErrorCode, ExecRequest, ExecResult, NetworkPolicy, SandboxError, SessionConfig, SessionId, Tier,
 };
 use sandbox_vfs::Vfs;
 use std::sync::{Arc, OnceLock};
@@ -57,17 +58,30 @@ pub struct IsolateBackend {
 
 impl IsolateBackend {
     pub async fn new(config: SessionConfig) -> Result<Self, SandboxError> {
-        Ok(Self::with_checkpoint(
+        Self::start(
+            SessionId::new(),
             Checkpoint::root_only(ContentHash::nil()),
             &config.limits,
-        ))
+            &config.network,
+        )
+        .await
     }
 
-    /// A session that starts from a checkpoint: its filesystem root, working
-    /// directory, and environment.
-    fn with_checkpoint(checkpoint: Checkpoint, limits: &ResourceLimits) -> Self {
-        let fs =
-            Arc::new(Vfs::new(checkpoint.root, shared_store()).with_quotas(quotas_for(limits)));
+    /// A session with `id` that starts from a checkpoint: its filesystem root,
+    /// working directory, and environment. It writes `/etc/agent/env.json` for
+    /// `id` before any command runs (IMAGE §4.5).
+    async fn start(
+        id: SessionId,
+        checkpoint: Checkpoint,
+        limits: &ResourceLimits,
+        network: &NetworkPolicy,
+    ) -> Result<Self, SandboxError> {
+        let vfs = Vfs::new(checkpoint.root, shared_store());
+        // The file is written before the session's quotas apply, so a session
+        // with a small quota still has one.
+        let env_file = agent_env::describe(id, network, session_wall_secs());
+        agent_env::write(&vfs, &env_file).await?;
+        let fs = Arc::new(vfs.with_quotas(quotas_for(limits)));
         let shell = Shell::new(
             fs.clone(),
             ShellConfig {
@@ -76,12 +90,12 @@ impl IsolateBackend {
                 ..ShellConfig::default()
             },
         );
-        Self {
-            id: SessionId::new(),
+        Ok(Self {
+            id,
             tier: Tier::Isolate,
             fs,
             shell: Mutex::new(shell),
-        }
+        })
     }
 }
 
@@ -237,14 +251,26 @@ pub async fn restore_checkpoint(checkpoint: Checkpoint) -> Result<Box<dyn Sessio
     restore_checkpoint_limited(checkpoint, &ResourceLimits::default()).await
 }
 
-/// Starts a session from a checkpoint, under `limits`.
+/// Starts a session from a checkpoint, under `limits`. The session gets a new ID.
+/// Use [`restore_session_limited`] to bring a session back under its own ID.
 pub async fn restore_checkpoint_limited(
     checkpoint: Checkpoint,
     limits: &ResourceLimits,
 ) -> Result<Box<dyn Session>, SandboxError> {
-    Ok(Box::new(IsolateBackend::with_checkpoint(
-        checkpoint, limits,
-    )))
+    restore_session_limited(SessionId::new(), checkpoint, limits).await
+}
+
+/// Starts session `id` from a checkpoint, under `limits`. A wake and a restart
+/// use this, so the session keeps the ID its owner knows. The network policy is
+/// the default, because Tier 1 accepts no other, and the checkpoint does not
+/// record one.
+pub async fn restore_session_limited(
+    id: SessionId,
+    checkpoint: Checkpoint,
+    limits: &ResourceLimits,
+) -> Result<Box<dyn Session>, SandboxError> {
+    let session = IsolateBackend::start(id, checkpoint, limits, &NetworkPolicy::default()).await?;
+    Ok(Box::new(session))
 }
 
 /// The filesystem quotas a session's limits set. A limit the caller leaves
@@ -282,6 +308,7 @@ pub async fn changed_since(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sandbox_types::agent_env::{AgentEnv, AGENT_ENV_PATH};
     use sandbox_types::event::FileOp;
     use sandbox_types::TenantId;
     use sandbox_vfs::OpenFlags;
@@ -565,5 +592,74 @@ mod tests {
 
         // The original keeps its own later state.
         assert_eq!(read_text(backend.fs(), "/a.txt").await, "two");
+    }
+
+    /// The environment file, read whole and parsed.
+    async fn env_of(session: &dyn Session) -> AgentEnv {
+        let handle = session
+            .fs()
+            .open(Path::new(AGENT_ENV_PATH), OpenFlags::default())
+            .await
+            .unwrap();
+        let bytes = session.fs().read(&handle, 0, 64 * 1024).await.unwrap();
+        session.fs().close(&handle);
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn every_new_session_has_an_environment_file_for_its_own_id() {
+        let backend = new_backend().await;
+        let env = env_of(&backend).await;
+        assert_eq!(env.schema, 1);
+        assert_eq!(env.session, backend.id());
+        assert_eq!(env.tier, Tier::Isolate);
+        assert_eq!(env.user, "agent");
+        assert_eq!(env.network.default, "deny");
+        assert!(env.network.allow.is_empty());
+        assert_eq!(env.limits.wall_timeout_s, Some(300));
+        assert_eq!(env.limits.memory_mib, None);
+        assert_eq!(env.limits.cpu_ms_budget, None);
+        assert_eq!(env.commands, ["sandbox"]);
+    }
+
+    #[tokio::test]
+    async fn a_session_restored_under_its_id_keeps_the_same_file_and_root() {
+        let backend = new_backend().await;
+        let root = backend.snapshot().await.unwrap();
+        let restored = restore_session_limited(
+            backend.id(),
+            Checkpoint::root_only(root),
+            &ResourceLimits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.id(), backend.id());
+        assert_eq!(env_of(restored.as_ref()).await.session, backend.id());
+        // Rewriting the same file must not change the state a snapshot records.
+        assert_eq!(restored.snapshot().await.unwrap(), root);
+    }
+
+    #[tokio::test]
+    async fn a_restore_under_a_new_id_describes_that_id() {
+        let backend = new_backend().await;
+        let root = backend.snapshot().await.unwrap();
+        let forked = restore(root).await.unwrap();
+        assert_ne!(forked.id(), backend.id());
+        assert_eq!(env_of(forked.as_ref()).await.session, forked.id());
+        // The parent's file is not changed by the fork.
+        assert_eq!(env_of(&backend).await.session, backend.id());
+    }
+
+    #[tokio::test]
+    async fn the_environment_file_is_written_even_under_a_tiny_quota() {
+        let config = SessionConfig {
+            limits: ResourceLimits {
+                max_total_size: Some(16),
+                ..ResourceLimits::default()
+            },
+            ..SessionConfig::default()
+        };
+        let backend = IsolateBackend::new(config).await.unwrap();
+        assert_eq!(env_of(&backend).await.session, backend.id());
     }
 }

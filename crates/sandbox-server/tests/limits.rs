@@ -181,16 +181,46 @@ async fn a_fork_keeps_the_quota_of_the_session_it_came_from() {
     );
 }
 
+/// The bytes of the environment file a session starts with (IMAGE §4.5). Every
+/// session has the same length, because its one variable field is a fixed-width ID.
+async fn environment_file_len(app: &axum::Router, key: &str) -> usize {
+    let id = create_with(app, key, json!({})).await;
+    let (status, body) = call(
+        app,
+        "GET",
+        &format!("/v1/sessions/{id}/fs/etc/agent/env.json"),
+        key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    body.len()
+}
+
 #[tokio::test]
 async fn a_total_size_quota_counts_every_file() {
     let (app, key) = router();
-    let id = create_with(&app, &key, json!({ "max_total_size": 10 })).await;
+    // The environment file counts too, so the quota leaves room for it and 10 bytes more.
+    let quota = environment_file_len(&app, &key).await as u64 + 10;
+    let id = create_with(&app, &key, json!({ "max_total_size": quota })).await;
     assert_eq!(
         put(&app, &key, &id, "a.txt", b"123456").await,
         StatusCode::NO_CONTENT
     );
     assert_eq!(
         put(&app, &key, &id, "b.txt", b"123456").await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+#[tokio::test]
+async fn the_environment_file_counts_against_a_quota_smaller_than_it() {
+    // A quota below the file's size refuses writes. The session still starts,
+    // because the file is written before quotas apply.
+    let (app, key) = router();
+    let id = create_with(&app, &key, json!({ "max_total_size": 10 })).await;
+    assert_eq!(
+        put(&app, &key, &id, "a.txt", b"1").await,
         StatusCode::TOO_MANY_REQUESTS
     );
 }

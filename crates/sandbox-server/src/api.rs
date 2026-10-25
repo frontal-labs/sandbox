@@ -13,7 +13,7 @@ use axum::{
 };
 use sandbox_scheduler::Scheduler;
 use sandbox_session::{
-    changed_since, committed_root, delete_file as delete_session_file, restore_checkpoint_limited,
+    changed_since, committed_root, delete_file as delete_session_file, restore_session_limited,
     vfs_error, write_file as write_session_file, Checkpoint, IsolateBackend, OutputChunk,
     OutputObserver, Session,
 };
@@ -618,16 +618,16 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
         };
         // A live session comes back running from its checkpoint. A sleeping one
         // waits for a wake.
+        let id = saved_session.state.id;
         let session: Option<Arc<dyn Session>> = if saved_session.sleeping {
             None
         } else {
             Some(
-                restore_checkpoint_limited(checkpoint.clone(), &saved_session.limits)
+                restore_session_limited(id, checkpoint.clone(), &saved_session.limits)
                     .await?
                     .into(),
             )
         };
-        let id = saved_session.state.id;
         table.insert(
             id,
             Entry {
@@ -1577,7 +1577,7 @@ pub(crate) async fn wake_entry(
         .clone()
         .ok_or_else(|| SandboxError::internal("a sleeping session has no checkpoint"))?;
     let limits = entry.limits.clone();
-    let session: Arc<dyn Session> = restore_checkpoint_limited(checkpoint, &limits)
+    let session: Arc<dyn Session> = restore_session_limited(session_id, checkpoint, &limits)
         .await?
         .into();
     entry.session = Some(session);

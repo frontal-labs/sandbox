@@ -1082,3 +1082,54 @@ async fn a_trace_stops_recording_at_its_byte_budget_and_says_so() {
     );
     assert!(recorded * 1024 * 1024 <= MAX_TRACE_BYTES);
 }
+
+/// A session's environment file, read through the filesystem route.
+async fn env_file(app: &axum::Router, key: &str, id: &str) -> Value {
+    let (status, body) = read_file(app, key, id, "etc/agent/env.json").await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn every_session_has_an_environment_file_for_its_own_id() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let env = env_file(&app, &key, &id).await;
+    assert_eq!(env["schema"], 1);
+    assert_eq!(env["session"], id);
+    assert_eq!(env["tier"], "isolate");
+    assert_eq!(env["user"], "agent");
+}
+
+#[tokio::test]
+async fn sleep_and_wake_keep_the_environment_file_for_the_same_id() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let (status, _) = sleep(&app, &key, &id).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = wake(&app, &key, &id).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(env_file(&app, &key, &id).await["session"], id);
+}
+
+#[tokio::test]
+async fn each_fork_gets_an_environment_file_for_its_own_id() {
+    let (app, key, _) = router();
+    let parent = create(&app, &key).await;
+    let snapshot_id = snapshot(&app, &key, &parent).await;
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/snapshots/{snapshot_id}/fork"),
+        &key,
+        json_body(&json!({ "count": 2 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let forked: Value = serde_json::from_slice(&body).unwrap();
+    for session in forked["session_ids"].as_array().unwrap() {
+        let session = session.as_str().unwrap();
+        assert_ne!(session, parent);
+        assert_eq!(env_file(&app, &key, session).await["session"], session);
+    }
+}
