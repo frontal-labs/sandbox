@@ -42,7 +42,7 @@ export const SecretEntrySchema = z.object({
 export type SecretEntry = z.infer<typeof SecretEntrySchema>
 
 export const SecretsConfigSchema = z.object({
-  secrets: z.record(SecretEntrySchema),
+  secrets: z.record(z.string(), SecretEntrySchema),
 })
 export type SecretsConfig = z.infer<typeof SecretsConfigSchema>
 
@@ -51,11 +51,11 @@ export const SessionConfigSchema = z.object({
   tier_preference: TierPreferenceSchema.default("auto"),
   limits: ResourceLimitsSchema.default({}),
   network: NetworkPolicySchema.default({ default_deny: true, rules: [] }),
-  env: z.record(z.string()).default({}),
+  env: z.record(z.string(), z.string()).default({}),
   cwd: z.string().default("/work"),
   initial_snapshot: z.string().optional(),
   secrets: SecretsConfigSchema.optional(),
-  labels: z.record(z.string()).default({}),
+  labels: z.record(z.string(), z.string()).default({}),
 })
 export type SessionConfig = z.infer<typeof SessionConfigSchema>
 
@@ -78,7 +78,7 @@ export const SessionStateSchema = z.object({
   vfs_root: z.string().nullable().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
-  labels: z.record(z.string()),
+  labels: z.record(z.string(), z.string()),
 })
 export type SessionState = z.infer<typeof SessionStateSchema>
 
@@ -90,7 +90,7 @@ const ByteArraySchema = z
 
 export const ExecRequestSchema = z.object({
   argv: z.array(z.string().min(1)).min(1),
-  env: z.record(z.string()).default({}),
+  env: z.record(z.string(), z.string()).default({}),
   cwd: z.string().optional(),
   stdin: z.instanceof(Uint8Array).optional(),
   timeout_ms: z.number().int().positive().optional(),
@@ -111,12 +111,12 @@ export const SnapshotSchema = z.object({
   id: z.string().min(1),
   parent: z.string().optional(),
   vfs_root: z.string().min(1),
-  env: z.record(z.string()),
+  env: z.record(z.string(), z.string()),
   cwd: z.string().min(1),
   tier: TierSchema,
   runtime_blob: z.string().optional(),
   created_at: z.string().datetime(),
-  labels: z.record(z.string()),
+  labels: z.record(z.string(), z.string()),
 })
 export type Snapshot = z.infer<typeof SnapshotSchema>
 
