@@ -57,10 +57,10 @@ export class Client {
     return headers
   }
 
-  private async request<T>(
+private async request<T>(
     path: string,
     options: RequestInit = {},
-    responseSchema?: z.ZodType<T, z.ZodTypeDef, unknown>,
+    responseSchema?: z.ZodType<T>,
   ): Promise<Result<T>> {
     const url = `${this.baseUrlValue}${path}`
     try {
@@ -86,7 +86,7 @@ export class Client {
             `Response validation failed: ${parseResult.error.message}`,
           )
         }
-        return parseResult.data
+        return parseResult.data as T
       }
 
       return data as T
