@@ -2,6 +2,7 @@
 
 use crate::interpreter::{describe, failure, ExecutionResult, Flow, Input, Shell};
 use crate::{expand, printf};
+use sandbox_types::agent_env::AGENT_ENV_PATH;
 use sandbox_vfs::{SessionFs, VfsError};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -10,7 +11,7 @@ use std::path::Path;
 const BUILTINS: &[&str] = &[
     "true", "false", "echo", "printf", "read", "pwd", "cd", "cat", "ls", "mkdir", "rm", "mv", "cp",
     "touch", "head", "tail", "wc", "grep", "node", "wasm", "tools", ":", "test", "[", "break",
-    "continue", "return", "exit", "export", "unset", "type",
+    "continue", "return", "exit", "export", "unset", "type", "sandbox",
 ];
 
 /// Whether `name` is a builtin.
@@ -138,6 +139,7 @@ impl Shell {
             "node" => self.node(args, stdin).await,
             "wasm" => self.wasm(args, stdin).await,
             "tools" => self.tools().await,
+            "sandbox" => self.sandbox(args).await,
             ":" => ok(Vec::new()),
             "test" => self.test(args).await,
             "[" => match args.split_last() {
@@ -420,6 +422,30 @@ impl Shell {
                 .iter()
                 .flat_map(|l| format!("{l}\n").into_bytes())
                 .collect(),
+        }
+    }
+
+    /// `sandbox`, the agent's own command. `sandbox info` prints the session's
+    /// environment file (IMAGE §4.5). `--json` is accepted, because the file is
+    /// JSON already.
+    async fn sandbox(&self, args: &[String]) -> ExecutionResult {
+        match args.first().map(String::as_str) {
+            Some("info") => self.sandbox_info(&args[1..]).await,
+            Some(other) => failure_status(format!("sandbox: unknown command '{other}'"), 2),
+            None => failure_status("usage: sandbox info [--json]".to_string(), 2),
+        }
+    }
+
+    async fn sandbox_info(&self, args: &[String]) -> ExecutionResult {
+        if let Some(bad) = args.iter().find(|arg| arg.as_str() != "--json") {
+            return failure_status(format!("sandbox info: unknown option '{bad}'"), 2);
+        }
+        match self.read_file(AGENT_ENV_PATH).await {
+            Ok(data) => ok(data),
+            Err(e) => failure_status(
+                format!("sandbox info: {AGENT_ENV_PATH}: {}", describe(&e)),
+                1,
+            ),
         }
     }
 

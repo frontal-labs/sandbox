@@ -595,3 +595,39 @@ async fn export_and_unset_manage_variables() {
     assert_eq!(code, 1);
     assert!(err.contains("not a valid name"), "{err}");
 }
+
+#[tokio::test]
+async fn sandbox_info_prints_the_environment_file() {
+    let mut sh = shell();
+    run(&mut sh, "mkdir /etc; mkdir /etc/agent").await;
+    run(&mut sh, "echo '{\"schema\":1}' > /etc/agent/env.json").await;
+    assert_eq!(run(&mut sh, "sandbox info").await.1, "{\"schema\":1}\n");
+    assert_eq!(
+        run(&mut sh, "sandbox info --json").await.1,
+        "{\"schema\":1}\n"
+    );
+}
+
+#[tokio::test]
+async fn sandbox_refuses_unknown_commands_and_options() {
+    let mut sh = shell();
+    run(&mut sh, "mkdir /etc; mkdir /etc/agent").await;
+    run(&mut sh, "echo '{}' > /etc/agent/env.json").await;
+    let (code, _, err) = run(&mut sh, "sandbox").await;
+    assert_eq!(code, 2);
+    assert!(err.contains("usage: sandbox info"), "{err}");
+    let (code, _, err) = run(&mut sh, "sandbox nap").await;
+    assert_eq!(code, 2);
+    assert!(err.contains("unknown command 'nap'"), "{err}");
+    let (code, _, err) = run(&mut sh, "sandbox info --yaml").await;
+    assert_eq!(code, 2);
+    assert!(err.contains("unknown option '--yaml'"), "{err}");
+}
+
+#[tokio::test]
+async fn sandbox_info_reports_a_missing_file_as_an_error() {
+    let mut sh = shell();
+    let (code, _, err) = run(&mut sh, "sandbox info").await;
+    assert_eq!(code, 1);
+    assert!(err.contains("sandbox info: /etc/agent/env.json"), "{err}");
+}
