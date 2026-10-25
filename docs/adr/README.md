@@ -67,6 +67,7 @@ What is the change that we're proposing and/or doing?
 | [0023](0023-clustered-state-on-postgres.md) | Clustered durable state on Postgres | Accepted | 2026-10-20 |
 | [0024](0024-typescript-type-stripping.md) | TypeScript by type stripping | Accepted | 2026-10-20 |
 | [0025](0025-warm-isolate-pool.md) | Warm isolate pool and the cold-start measurements | Accepted | 2026-10-20 |
+| [0028](0028-agent-environment-file.md) | Agent environment file | Proposed | 2026-10-25 |
 
 Add rows here as `NNNN-title.md` files are created.
 
