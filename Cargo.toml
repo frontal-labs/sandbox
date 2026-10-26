@@ -86,7 +86,7 @@ tonic = { version = "0.14", features = ["tls-ring", "transport"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.4", features = ["limit", "timeout", "retry"] }
 utoipa = { version = "6", features = ["axum_extras", "chrono", "yaml"] }
-argon2 = "0.5"
+argon2 = "0.6"
 rustls = { version = "0.23", features = ["std"] }
 webpki = "0.22"
 ipnet = "2"
