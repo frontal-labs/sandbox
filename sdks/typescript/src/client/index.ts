@@ -118,14 +118,14 @@ private async request<T>(
 
   async getSession(sessionId: string): Promise<Result<SessionState>> {
     return this.request<SessionState>(
-      `/v1/sessions/${sessionId}`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}`,
       {},
       wireResponseSchemas.SessionState,
     )
   }
 
   async destroySession(sessionId: string): Promise<Result<void>> {
-    return this.request<void>(`/v1/sessions/${sessionId}`, {
+    return this.request<void>(`/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
     })
   }
@@ -140,7 +140,7 @@ private async request<T>(
 
     const wire = parseResult.data
     return this.request<ExecResult>(
-      `/v1/sessions/${sessionId}/exec`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/exec`,
       { method: "POST", body: JSON.stringify(wire) },
       wireResponseSchemas.ExecResult,
     )
@@ -157,7 +157,7 @@ private async request<T>(
 
   async snapshot(sessionId: string): Promise<Result<Snapshot>> {
     const taken = await this.request(
-      `/v1/sessions/${sessionId}/snapshot`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/snapshot`,
       { method: "POST" },
       wireResponseSchemas.TakeSnapshotResponse,
     )
@@ -170,7 +170,7 @@ private async request<T>(
   /** Puts the session to sleep and returns the id of the snapshot it wakes from. */
   async sleep(sessionId: string): Promise<Result<string>> {
     const taken = await this.request(
-      `/v1/sessions/${sessionId}/sleep`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/sleep`,
       { method: "POST" },
       wireResponseSchemas.TakeSnapshotResponse,
     )
@@ -183,7 +183,7 @@ private async request<T>(
   /** Wakes a sleeping session. Its files come back; shell state starts fresh. */
   async wake(sessionId: string): Promise<Result<SessionState>> {
     return this.request<SessionState>(
-      `/v1/sessions/${sessionId}/wake`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/wake`,
       { method: "POST" },
       wireResponseSchemas.SessionState,
     )
@@ -191,7 +191,7 @@ private async request<T>(
 
   async listSnapshots(sessionId: string): Promise<Result<Snapshot[]>> {
     return this.request<Snapshot[]>(
-      `/v1/sessions/${sessionId}/snapshots`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/snapshots`,
       {},
       z.array(wireResponseSchemas.Snapshot),
     )
@@ -199,7 +199,7 @@ private async request<T>(
 
   async getSnapshot(sessionId: string, snapshotId: string): Promise<Result<Snapshot>> {
     return this.request<Snapshot>(
-      `/v1/sessions/${sessionId}/snapshots/${snapshotId}`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/snapshots/${snapshotId}`,
       {},
       wireResponseSchemas.Snapshot,
     )
@@ -220,7 +220,9 @@ private async request<T>(
 
   /// Reads a file from the session's filesystem. Returns the raw bytes.
   async readFile(sessionId: string, path: string): Promise<Result<Uint8Array>> {
-    const url = `/v1/sessions/${sessionId}/fs/${encodeFsPath(path)}`
+    const encoded = encodeFsPath(path)
+    if (isSandboxError(encoded)) return encoded
+    const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
     const response = await this.fetch(url, { method: "GET" })
     if (isSandboxError(response)) {
       return response
@@ -234,7 +236,9 @@ private async request<T>(
     path: string,
     bytes: Uint8Array,
   ): Promise<Result<void>> {
-    const url = `/v1/sessions/${sessionId}/fs/${encodeFsPath(path)}`
+    const encoded = encodeFsPath(path)
+    if (isSandboxError(encoded)) return encoded
+    const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
     const response = await this.fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/octet-stream" },
@@ -245,7 +249,9 @@ private async request<T>(
 
   /// Deletes a file or an empty directory.
   async deleteFile(sessionId: string, path: string): Promise<Result<void>> {
-    const url = `/v1/sessions/${sessionId}/fs/${encodeFsPath(path)}`
+    const encoded = encodeFsPath(path)
+    if (isSandboxError(encoded)) return encoded
+    const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
     const response = await this.fetch(url, { method: "DELETE" })
     return isSandboxError(response) ? response : (undefined as void)
   }
@@ -301,11 +307,14 @@ private async request<T>(
   }
 }
 
-/// Percent-encodes one path segment for the filesystem API.
-function encodeFsPath(path: string): string {
-  return path
-    .trimStart()
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")
+/// Percent-encodes a path for the filesystem API. Dot segments are refused: an HTTP
+/// client resolves them before sending, so the request could reach another route.
+function encodeFsPath(path: string): string | SandboxError {
+  const segments = path.trimStart().split("/")
+  for (const segment of segments) {
+    if (segment === "." || segment === "..") {
+      return createSandboxError("INVALID_ARGUMENT", `path segment "${segment}" is not allowed`)
+    }
+  }
+  return segments.map((segment) => encodeURIComponent(segment)).join("/")
 }

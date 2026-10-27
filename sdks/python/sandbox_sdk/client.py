@@ -12,6 +12,7 @@ from urllib.parse import quote
 import httpx
 
 from .errors import (
+    invalid_argument,
     Result,
     SandboxError,
     internal,
@@ -29,8 +30,16 @@ from .types import (
 
 
 def _encode_path(path: str) -> str:
-    """URL-encode a filesystem path, preserving slashes."""
-    return "/".join(quote(segment) for segment in path.strip().split("/"))
+    """URL-encode a filesystem path, preserving slashes.
+
+    Dot segments are refused: an HTTP client resolves them before sending, so the
+    request could reach another route.
+    """
+    segments = path.strip().split("/")
+    for segment in segments:
+        if segment in (".", ".."):
+            raise invalid_argument(f"path segment {segment!r} is not allowed")
+    return "/".join(quote(segment, safe="") for segment in segments)
 
 
 @dataclass(frozen=True)
@@ -131,18 +140,18 @@ class Client:
         return internal("Invalid response")
 
     async def get_session(self, session_id: str) -> Result[SessionState]:
-        result = await self._request("GET", f"/v1/sessions/{session_id}")
+        result = await self._request("GET", f"/v1/sessions/{quote(session_id, safe='')}")
         if is_sandbox_error(result):
             return result
         return SessionState(**result) if isinstance(result, dict) else internal("Invalid response")
 
     async def destroy_session(self, session_id: str) -> Result[None]:
-        return await self._request("DELETE", f"/v1/sessions/{session_id}")
+        return await self._request("DELETE", f"/v1/sessions/{quote(session_id, safe='')}")
 
     async def exec(self, session_id: str, request: ExecRequest) -> Result[ExecResult]:
         result = await self._request(
             "POST",
-            f"/v1/sessions/{session_id}/exec",
+            f"/v1/sessions/{quote(session_id, safe='')}/exec",
             json_body=_wire(request),
         )
         if is_sandbox_error(result):
@@ -157,7 +166,7 @@ class Client:
         yield unsupported("streaming exec is not implemented yet")
 
     async def snapshot(self, session_id: str) -> Result[Snapshot]:
-        taken = await self._request("POST", f"/v1/sessions/{session_id}/snapshot")
+        taken = await self._request("POST", f"/v1/sessions/{quote(session_id, safe='')}/snapshot")
         if is_sandbox_error(taken):
             return taken
         if not (isinstance(taken, dict) and isinstance(taken.get("snapshot_id"), str)):
@@ -166,7 +175,7 @@ class Client:
 
     async def sleep(self, session_id: str) -> Result[str]:
         """Puts the session to sleep and returns the id of the snapshot it wakes from."""
-        result = await self._request("POST", f"/v1/sessions/{session_id}/sleep")
+        result = await self._request("POST", f"/v1/sessions/{quote(session_id, safe='')}/sleep")
         if is_sandbox_error(result):
             return result
         if isinstance(result, dict) and isinstance(result.get("snapshot_id"), str):
@@ -175,20 +184,20 @@ class Client:
 
     async def wake(self, session_id: str) -> Result[SessionState]:
         """Wakes a sleeping session. Its files come back; shell state starts fresh."""
-        result = await self._request("POST", f"/v1/sessions/{session_id}/wake")
+        result = await self._request("POST", f"/v1/sessions/{quote(session_id, safe='')}/wake")
         if is_sandbox_error(result):
             return result
         return SessionState(**result) if isinstance(result, dict) else internal("Invalid response")
 
     async def list_snapshots(self, session_id: str) -> Result[list[Snapshot]]:
-        result = await self._request("GET", f"/v1/sessions/{session_id}/snapshots")
+        result = await self._request("GET", f"/v1/sessions/{quote(session_id, safe='')}/snapshots")
         if is_sandbox_error(result):
             return result
         return [Snapshot(**s) for s in result] if isinstance(result, list) else internal("Invalid response")
 
     async def get_snapshot(self, session_id: str, snapshot_id: str) -> Result[Snapshot]:
         result = await self._request(
-            "GET", f"/v1/sessions/{session_id}/snapshots/{snapshot_id}"
+            "GET", f"/v1/sessions/{quote(session_id, safe='')}/snapshots/{snapshot_id}"
         )
         if is_sandbox_error(result):
             return result
@@ -207,8 +216,8 @@ class Client:
 
     async def read_file(self, session_id: str, path: str) -> Result[bytes]:
         """Reads a file from the session's filesystem."""
-        url = f"{self.base_url}/v1/sessions/{session_id}/fs/{_encode_path(path)}"
         try:
+            url = f"{self.base_url}/v1/sessions/{quote(session_id, safe='')}/fs/{_encode_path(path)}"
             response = await self._client.request("GET", url)
             if response.is_success:
                 return response.content
@@ -224,8 +233,8 @@ class Client:
         self, session_id: str, path: str, bytes_data: bytes
     ) -> Result[None]:
         """Writes a file, creating it or replacing it."""
-        url = f"{self.base_url}/v1/sessions/{session_id}/fs/{_encode_path(path)}"
         try:
+            url = f"{self.base_url}/v1/sessions/{quote(session_id, safe='')}/fs/{_encode_path(path)}"
             response = await self._client.request(
                 "PUT",
                 url,
@@ -244,8 +253,8 @@ class Client:
 
     async def delete_file(self, session_id: str, path: str) -> Result[None]:
         """Deletes a file or an empty directory."""
-        url = f"{self.base_url}/v1/sessions/{session_id}/fs/{_encode_path(path)}"
         try:
+            url = f"{self.base_url}/v1/sessions/{quote(session_id, safe='')}/fs/{_encode_path(path)}"
             response = await self._client.request("DELETE", url)
             if response.is_success:
                 return None
