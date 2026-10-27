@@ -217,7 +217,7 @@ async fn a_long_output_is_capped_and_its_full_stream_is_in_the_trace() {
     let (app, key) = setup();
     let id = create(&app, &key, None).await;
 
-    let big: Vec<u8> = (0..20_000)
+    let big: Vec<u8> = (0..100_000)
         .flat_map(|i| format!("line {i}\n").into_bytes())
         .collect();
     let (status, body) = call(
@@ -265,7 +265,8 @@ async fn a_long_output_is_capped_and_its_full_stream_is_in_the_trace() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&full));
-    assert_eq!(full, big);
+    assert_eq!(full.len(), big.len(), "full stream length");
+    assert!(full == big, "full stream content");
 }
 
 #[tokio::test]

@@ -388,3 +388,74 @@ async fn sandbox_commands_typed_inside_the_session_run_the_host_operations() {
         "a fork without a command is a usage error"
     );
 }
+
+#[tokio::test]
+async fn undo_returns_the_root_it_restored() {
+    // The spec's check: `sandbox undo 1` restores the previous root hash.
+    let (app, key) = setup();
+    let id = create(&app, &key, json!({})).await;
+    put(&app, &key, &id, "a.txt", "one").await;
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/checkpoint"),
+        &key,
+        None,
+    )
+    .await;
+    let previous = json_of(&body)["root"].as_str().unwrap().to_string();
+    put(&app, &key, &id, "a.txt", "two").await;
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/checkpoint"),
+        &key,
+        None,
+    )
+    .await;
+    assert_ne!(json_of(&body)["root"].as_str().unwrap(), previous);
+
+    let (status, body) = undo(&app, &key, &id, 1).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(json_of(&body)["root"].as_str().unwrap(), previous);
+    assert_eq!(get(&app, &key, &id, "a.txt").await.as_deref(), Some("one"));
+}
+
+#[tokio::test]
+async fn the_spec_fork_example_gives_children_with_independent_random_files() {
+    // sandbox fork 3 -- sh -c 'echo $RANDOM > /r' yields 3 sessions, each with its own /r.
+    let (app, key) = setup();
+    let id = create(&app, &key, json!({})).await;
+    let forked = exec_ok(
+        &app,
+        &key,
+        &id,
+        &[
+            "sandbox",
+            "fork",
+            "3",
+            "--",
+            "sh",
+            "-c",
+            "echo $RANDOM > /r",
+        ],
+    )
+    .await;
+    assert_eq!(forked["exit_code"], 0, "{forked}");
+    let children: Vec<String> = stdout_text(&forked)
+        .lines()
+        .map(|line| line.split(' ').next().unwrap().to_string())
+        .collect();
+    assert_eq!(children.len(), 3);
+    let mut values = Vec::new();
+    for child in &children {
+        let r = get(&app, &key, child, "r")
+            .await
+            .expect("each child wrote /r");
+        values.push(r.trim().to_string());
+    }
+    assert!(
+        !(values[0] == values[1] && values[1] == values[2]),
+        "the children should not all draw the same value: {values:?}"
+    );
+}
