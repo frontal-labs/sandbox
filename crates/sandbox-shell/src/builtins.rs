@@ -9,8 +9,8 @@ use std::path::Path;
 /// Every builtin name. `type` reports these, so keep it in step with `builtin`.
 const BUILTINS: &[&str] = &[
     "true", "false", "echo", "printf", "read", "pwd", "cd", "cat", "ls", "mkdir", "rm", "mv", "cp",
-    "touch", "head", "tail", "wc", "grep", "node", "wasm", "tools", "sandbox", ":", "test", "[",
-    "break", "continue", "return", "exit", "export", "unset", "type",
+    "touch", "head", "tail", "wc", "grep", "node", "wasm", "tools", "sandbox", "sh", ":", "test",
+    "[", "break", "continue", "return", "exit", "export", "unset", "type",
 ];
 
 /// Whether `name` is a builtin.
@@ -139,6 +139,7 @@ impl Shell {
             "wasm" => self.wasm(args, stdin).await,
             "tools" => self.tools().await,
             "sandbox" => self.sandbox(args).await,
+            "sh" => self.sh_c(args, stdin).await,
             ":" => ok(Vec::new()),
             "test" => self.test(args).await,
             "[" => match args.split_last() {
