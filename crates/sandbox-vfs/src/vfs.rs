@@ -46,6 +46,9 @@ pub struct Vfs {
     /// nobody watches allocates nothing for events. See ADR 0005.
     events: std::sync::OnceLock<tokio::sync::broadcast::Sender<WatchEvent>>,
     quotas: Quotas,
+    /// Absolute paths, in canonical form, exempt from quotas. The host writes them
+    /// (for example `/etc/agent/env.json`), so they never use up a session's limits.
+    exempt: Vec<String>,
 }
 
 #[derive(Default)]
@@ -98,6 +101,7 @@ impl Vfs {
             next_handle: AtomicU64::new(1),
             events: std::sync::OnceLock::new(),
             quotas: Quotas::default(),
+            exempt: Vec::new(),
         }
     }
 
@@ -120,6 +124,50 @@ impl Vfs {
     pub fn with_quotas(mut self, quotas: Quotas) -> Self {
         self.quotas = quotas;
         self
+    }
+
+    /// Exempts files from quotas. They still take space in the tree, but writes to
+    /// them are not checked and they are not counted in the usage that limits see.
+    pub fn with_exempt_files(mut self, paths: &[&str]) -> Self {
+        self.exempt = paths.iter().map(|path| path.to_string()).collect();
+        self
+    }
+
+    fn is_exempt(&self, path: &str) -> bool {
+        self.exempt.iter().any(|exempt| exempt == path)
+    }
+
+    /// Refuses an agent change to a host-owned file, or to a directory that holds
+    /// one, so `rm -r /etc` cannot remove `env.json`. Host-owned files change only
+    /// through `write_system_file`.
+    fn guard_host_owned(&self, path: &str) -> VfsResult<()> {
+        let guarded = self
+            .exempt
+            .iter()
+            .any(|exempt| exempt == path || exempt.starts_with(&format!("{path}/")));
+        if guarded {
+            return Err(VfsError::PermissionDenied(format!(
+                "{path} is managed by the host"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Writes a host-owned file. Its size is not checked against quotas, so the
+    /// host must keep the file small. Agent writes to it are refused.
+    pub async fn write_system_file(&self, path: &str, data: &[u8]) -> VfsResult<()> {
+        if !self.is_exempt(path) {
+            return Err(VfsError::InvalidPath(format!(
+                "{path} is not a host-owned file"
+            )));
+        }
+        self.require_parent_dir(path).await?;
+        if matches!(self.kind(path).await?, Some(Kind::Dir | Kind::Symlink(_))) {
+            return Err(VfsError::InvalidPath(format!("not a regular file: {path}")));
+        }
+        self.put_file(path, data.to_vec());
+        self.emit(|| WatchEvent::Modified(path.to_string()));
+        Ok(())
     }
 
     /// Normalizes a path to `/a/b` form. `.` and empty segments are dropped.
@@ -384,6 +432,23 @@ impl Vfs {
     /// path is one lookup, so the cost is proportional to the changes, not
     /// the tree.
     async fn usage(&self) -> VfsResult<(u64, u64)> {
+        let (bytes, inodes) = self.raw_usage().await?;
+        let (mut exempt_bytes, mut exempt_inodes) = (0u64, 0u64);
+        for path in &self.exempt {
+            if let Some(Kind::File(len)) = self.kind(path).await? {
+                exempt_bytes += len;
+                exempt_inodes += 1;
+            }
+        }
+        Ok((
+            bytes.saturating_sub(exempt_bytes),
+            inodes.saturating_sub(exempt_inodes),
+        ))
+    }
+
+    /// Total bytes and inodes of the tree, exempt files included. The committed
+    /// totals cache holds this value.
+    async fn raw_usage(&self) -> VfsResult<(u64, u64)> {
         let (mut bytes, mut inodes) = self.committed_totals().await?;
 
         let (shadowed, overlay_nodes): (BTreeSet<String>, Vec<(String, Node)>) = {
@@ -541,12 +606,19 @@ fn kind_stat(path: &str, kind: &Kind) -> FileStat {
 
 #[async_trait]
 impl SessionFs for Vfs {
+    async fn total_bytes(&self) -> VfsResult<u64> {
+        Ok(self.usage().await?.0)
+    }
+
     async fn open(&self, path: &Path, flags: OpenFlags) -> VfsResult<FileHandle> {
         let path = self.resolve_path(path, true).await?;
         if !flags.read && !flags.write {
             return Err(VfsError::InvalidPath(
                 "open needs read or write access".to_string(),
             ));
+        }
+        if flags.write || flags.create || flags.truncate {
+            self.guard_host_owned(&path)?;
         }
 
         match self.kind(&path).await? {
@@ -725,6 +797,7 @@ impl SessionFs for Vfs {
         if path == "/" {
             return Err(VfsError::InvalidPath("cannot remove the root".to_string()));
         }
+        self.guard_host_owned(&path)?;
         let kind = self
             .kind(&path)
             .await?
@@ -761,6 +834,8 @@ impl SessionFs for Vfs {
         if from == "/" || to == "/" {
             return Err(VfsError::InvalidPath("cannot rename the root".to_string()));
         }
+        self.guard_host_owned(&from)?;
+        self.guard_host_owned(&to)?;
         if to.starts_with(&child_prefix(&from)) {
             return Err(VfsError::InvalidPath(format!(
                 "cannot move {from} into itself"
@@ -815,6 +890,7 @@ impl SessionFs for Vfs {
             .to_str()
             .ok_or_else(|| VfsError::InvalidPath("symlink target is not valid UTF-8".to_string()))?
             .to_string();
+        self.guard_host_owned(&link)?;
         if self.kind(&link).await?.is_some() {
             return Err(VfsError::AlreadyExists(link));
         }
@@ -840,6 +916,7 @@ impl SessionFs for Vfs {
 
     async fn truncate(&self, path: &Path, size: u64) -> VfsResult<()> {
         let path = self.resolve_path(path, true).await?;
+        self.guard_host_owned(&path)?;
         let old = match self.kind(&path).await? {
             Some(Kind::File(len)) => len,
             Some(_) => return Err(VfsError::InvalidPath(format!("not a regular file: {path}"))),
@@ -897,7 +974,7 @@ impl Vfs {
     /// session keeps working afterwards. Writes made while this runs may not be
     /// in the returned root, so take snapshots while the session is idle.
     pub async fn checkpoint(&self) -> VfsResult<ContentHash> {
-        let visible = self.usage().await?;
+        let visible = self.raw_usage().await?;
         let (overlay_nodes, whiteouts) = {
             let overlay = self.overlay.read();
             (overlay.nodes.clone(), overlay.whiteouts.clone())

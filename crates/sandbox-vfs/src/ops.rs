@@ -5,6 +5,8 @@ use std::path::Path;
 
 #[async_trait]
 pub trait SessionFs: Send + Sync {
+    /// Bytes of file content visible to the session, after quotas' exemptions.
+    async fn total_bytes(&self) -> VfsResult<u64>;
     async fn open(&self, path: &Path, flags: OpenFlags) -> VfsResult<FileHandle>;
     async fn read(&self, handle: &FileHandle, offset: u64, len: usize) -> VfsResult<Bytes>;
     async fn write(&self, handle: &FileHandle, offset: u64, data: &[u8]) -> VfsResult<usize>;
