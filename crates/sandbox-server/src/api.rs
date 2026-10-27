@@ -643,6 +643,13 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
             )
         };
         let id = saved_session.state.id;
+        // Saved state is not trusted to respect the retention bounds, so clamp them.
+        let retain = saved_session
+            .checkpoint_retain
+            .clamp(1, MAX_CHECKPOINT_RETAIN);
+        let mut roots = saved_session.roots;
+        let excess = roots.len().saturating_sub(retain as usize);
+        roots.drain(..excess);
         table.insert(
             id,
             Entry {
@@ -656,8 +663,8 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
                 gate: Arc::new(tokio::sync::Mutex::new(())),
                 limits: saved_session.limits,
                 checkpoint_policy: saved_session.checkpoint_policy,
-                checkpoint_retain: saved_session.checkpoint_retain,
-                roots: saved_session.roots,
+                checkpoint_retain: retain,
+                roots,
                 last_active: Arc::new(std::sync::atomic::AtomicU64::new(now_millis())),
             },
         );
