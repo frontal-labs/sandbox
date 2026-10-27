@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass, is_dataclass
+from urllib.parse import quote
 
 import httpx
 
@@ -25,6 +26,11 @@ from .types import (
     SessionState,
     Snapshot,
 )
+
+
+def _encode_path(path: str) -> str:
+    """URL-encode a filesystem path, preserving slashes."""
+    return "/".join(quote(segment) for segment in path.strip().split("/"))
 
 
 @dataclass(frozen=True)
@@ -187,3 +193,80 @@ class Client:
         if is_sandbox_error(result):
             return result
         return Snapshot(**result) if isinstance(result, dict) else internal("Invalid response")
+
+    async def fork(self, snapshot_id: str, count: int) -> Result[list[str]]:
+        """Starts `count` sessions from a snapshot. Returns their IDs."""
+        result = await self._request(
+            "POST", f"/v1/snapshots/{snapshot_id}/fork", json_body={"count": count}
+        )
+        if is_sandbox_error(result):
+            return result
+        if isinstance(result, dict) and isinstance(result.get("session_ids"), list):
+            return result["session_ids"]
+        return internal("Invalid response")
+
+    async def read_file(self, session_id: str, path: str) -> Result[bytes]:
+        """Reads a file from the session's filesystem."""
+        url = f"{self.base_url}/v1/sessions/{session_id}/fs/{_encode_path(path)}"
+        try:
+            response = await self._client.request("GET", url)
+            if response.is_success:
+                return response.content
+            return await self._error_from_response(response)
+        except httpx.RequestError as e:
+            return network_error(str(e), e)
+        except Exception as e:
+            if is_sandbox_error(e):
+                return e
+            return internal(f"Request failed: {e}", e)
+
+    async def write_file(
+        self, session_id: str, path: str, bytes_data: bytes
+    ) -> Result[None]:
+        """Writes a file, creating it or replacing it."""
+        url = f"{self.base_url}/v1/sessions/{session_id}/fs/{_encode_path(path)}"
+        try:
+            response = await self._client.request(
+                "PUT",
+                url,
+                content=bytes_data,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+            if response.is_success:
+                return None
+            return await self._error_from_response(response)
+        except httpx.RequestError as e:
+            return network_error(str(e), e)
+        except Exception as e:
+            if is_sandbox_error(e):
+                return e
+            return internal(f"Request failed: {e}", e)
+
+    async def delete_file(self, session_id: str, path: str) -> Result[None]:
+        """Deletes a file or an empty directory."""
+        url = f"{self.base_url}/v1/sessions/{session_id}/fs/{_encode_path(path)}"
+        try:
+            response = await self._client.request("DELETE", url)
+            if response.is_success:
+                return None
+            return await self._error_from_response(response)
+        except httpx.RequestError as e:
+            return network_error(str(e), e)
+        except Exception as e:
+            if is_sandbox_error(e):
+                return e
+            return internal(f"Request failed: {e}", e)
+
+    async def _error_from_response(self, response: httpx.Response) -> SandboxError:
+        error_data = (
+            response.json()
+            if response.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
+        code = error_data.get("code") if isinstance(error_data, dict) else None
+        message = (
+            error_data.get("message")
+            if isinstance(error_data, dict)
+            else f"HTTP {response.status_code}: {response.reason_phrase}"
+        )
+        return SandboxError(code or "INTERNAL", message)
