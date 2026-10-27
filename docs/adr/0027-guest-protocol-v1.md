@@ -1,7 +1,7 @@
-# 0012: Guest protocol v1
+# 0027: Guest protocol v1
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-10-25

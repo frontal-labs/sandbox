@@ -1,7 +1,7 @@
-# 0011: Package layers and lockfile
+# 0026: Package layers and lockfile
 
 ## Status
-Proposed
+Accepted
 
 ## Date
 2026-10-25
