@@ -10,11 +10,11 @@ async function main(): Promise<void> {
 
   // Session configuration
   const sessionConfig: SessionConfig = {
-    tenant_id: "code-runner",
-    tier_preference: "auto",
+    tenantId: "code-runner",
+    tierPreference: "auto",
     cwd: "/work",
     limits: {},
-    network: { default_deny: true, rules: [] },
+    network: { defaultDeny: true, rules: [] },
     env: {},
     labels: {},
   }
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
 
   // Output results
   console.log("Stdout:", new TextDecoder().decode(execResult.stdout).trim())
-  console.log("Exit code:", execResult.exit_code)
+  console.log("Exit code:", execResult.exitCode)
 
   // Clean up the session
   await client.destroySession(sessionId)

@@ -10,11 +10,11 @@ async function main(): Promise<void> {
 
   // Session configuration with custom environment variables
   const sessionConfig: SessionConfig = {
-    tenant_id: "env-vars",
-    tier_preference: "auto",
+    tenantId: "env-vars",
+    tierPreference: "auto",
     cwd: "/work",
     limits: {},
-    network: { default_deny: true, rules: [] },
+    network: { defaultDeny: true, rules: [] },
     env: { GREETING: "hello", COUNT: "42" },
     labels: {},
   }
