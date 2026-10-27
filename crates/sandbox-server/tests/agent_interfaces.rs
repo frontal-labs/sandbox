@@ -346,3 +346,22 @@ async fn the_agent_cannot_change_or_remove_env_json() {
 
     assert_eq!(read_env_json(&app, &key, &id).await, before);
 }
+
+#[tokio::test]
+async fn the_shell_prints_env_json_and_refuses_server_only_commands() {
+    let (app, key) = setup();
+    let id = create(&app, &key, None).await;
+    let result = exec(&app, &key, &id, &["sandbox", "info"]).await;
+    assert_eq!(result["exit_code"], 0);
+    let stdout: Vec<u8> = result["stdout"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b.as_u64().unwrap() as u8)
+        .collect();
+    let env = json_of(&stdout);
+    assert_eq!(env["session"], id);
+
+    let result = exec(&app, &key, &id, &["sandbox", "undo"]).await;
+    assert_eq!(result["exit_code"], 2);
+}
