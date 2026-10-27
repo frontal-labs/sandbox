@@ -87,6 +87,7 @@ pub async fn collect_garbage(state: &AppState) -> Result<GcReport, SandboxError>
         }
 
         let mut roots = Vec::new();
+        let mut raw_blobs: Vec<sandbox_types::hash::ContentHash> = Vec::new();
         for (id, _) in &members {
             let Some(entry) = table.get(id) else {
                 continue;
@@ -99,15 +100,23 @@ pub async fn collect_garbage(state: &AppState) -> Result<GcReport, SandboxError>
             }
             // Pinned checkpoints keep their blobs alive, so undo still has them.
             roots.extend(entry.roots.iter().map(|pinned| pinned.root));
+            // Spilled outputs are plain blobs, not trees, so they are marked directly.
+            raw_blobs.extend(
+                entry
+                    .spilled
+                    .iter()
+                    .flat_map(|run| [run.stdout, run.stderr]),
+            );
         }
         {
             let records = state.snapshots.records.read().await;
             roots.extend(records.values().map(|record| record.root));
         }
 
-        let live = sandbox_vfs::reachable_blobs(store.as_ref(), &roots)
+        let mut live = sandbox_vfs::reachable_blobs(store.as_ref(), &roots)
             .await
             .map_err(vfs_error)?;
+        live.extend(raw_blobs);
         let mut blobs_removed = 0;
         for hash in &listed {
             if !live.contains(hash) && store.delete(hash).await? {

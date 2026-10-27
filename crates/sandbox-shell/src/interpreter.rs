@@ -1336,6 +1336,19 @@ impl Shell {
         }
     }
 
+    /// The generator state behind `$RANDOM`. A run that records it can be replayed
+    /// with the same `$RANDOM` values (IMAGE.md §4.5).
+    pub fn random_state(&self) -> u64 {
+        self.random.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Sets the generator state behind `$RANDOM`. A zero state would repeat 0 forever,
+    /// so it is replaced with a nonzero one.
+    pub fn set_random_state(&self, state: u64) {
+        self.random
+            .store(state.max(1), std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// The next value of `$RANDOM`, 0 to 32767. An xorshift generator: it is
     /// predictable, so it is only for scripts that need variety, not secrets.
     fn next_random(&self) -> u32 {

@@ -85,6 +85,7 @@ mod tests {
         Trace {
             runs: vec![
                 RunRecord {
+                    random_state: None,
                     seq: 1,
                     script: "echo a".to_string(),
                     outcome: Outcome::Completed {
@@ -96,6 +97,7 @@ mod tests {
                     fs: None,
                 },
                 RunRecord {
+                    random_state: None,
                     seq: 2,
                     script: "echo b".to_string(),
                     outcome: Outcome::Completed {
@@ -177,6 +179,7 @@ mod tests {
     async fn a_filesystem_run_reaches_the_callback_with_its_operation() {
         let mut trace = trace();
         trace.runs[1] = RunRecord {
+            random_state: None,
             seq: 2,
             script: String::new(),
             fs: Some(FsOp::Write {

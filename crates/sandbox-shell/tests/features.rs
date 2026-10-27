@@ -327,3 +327,15 @@ async fn random_is_a_number_in_range_and_varies() {
 async fn an_assigned_random_is_not_replaced() {
     assert_eq!(stdout_of("RANDOM=7; echo $RANDOM").await, "7\n");
 }
+
+#[tokio::test]
+async fn a_saved_random_state_draws_the_same_values_again() {
+    let fs = Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())));
+    let mut shell = Shell::new(fs, ShellConfig::default());
+    shell.set_random_state(12345);
+    let first = shell.run("echo $RANDOM $RANDOM").await.unwrap();
+    shell.set_random_state(12345);
+    let second = shell.run("echo $RANDOM $RANDOM").await.unwrap();
+    assert_eq!(first.stdout, second.stdout);
+    assert_ne!(shell.random_state(), 12345, "the sequence advanced");
+}

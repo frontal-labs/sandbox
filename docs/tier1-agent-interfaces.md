@@ -46,8 +46,13 @@ is in the session's trace, so it is served at `GET /v1/sessions/{id}/fs/trace/ex
 for stdout and `.err` for stderr. If the run was not recorded, the marker says
 `full output not recorded` and names no path.
 
-A single run may produce up to 8 MiB of output. The trace also holds 8 MiB per
-session, so the full stream of a run is recorded only while that budget lasts.
+A single run may produce up to 8 MiB of output. The trace holds 8 MiB per session.
+A run that does not fit there keeps its output as blobs instead, so its full stream
+still reads at `trace/exec/<seq>.out`. The blobs are capped at 64 MiB per session,
+and beyond that the marker says `full output not recorded`. Such a run is not in the
+trace, so the trace reports itself incomplete and cannot be replayed faithfully.
+Blobs are collected like any other blob: a run's output is kept while the session
+still pins a checkpoint that needs it, and otherwise the next GC removes it.
 Streamed `exec` output is not capped.
 
 ## Checkpoints
@@ -67,7 +72,8 @@ of every pinned root.
 twice, so the figure is not the storage the server holds.
 
 Each key's pinned checkpoints are bounded at 1 GiB of logical bytes across all its
-sessions. Over that, the key's oldest checkpoints are dropped first. A per-exec pin
+sessions. `FRONTAL_SANDBOX_CHECKPOINT_BYTES_PER_KEY` sets the bound, in bytes, and the
+server reads it once at startup. Over that, the key's oldest checkpoints are dropped first. A per-exec pin
 that still does not fit is skipped, and an explicit checkpoint, undo, or fork fails
 with `RESOURCE_EXHAUSTED`.
 
@@ -95,8 +101,11 @@ run through the shell does not reach them: `sandbox` in a script runs only `info
 
 `sh -c <script>` runs a script in a subshell, as `( ... )` does: its variables do not
 leak out, and `exit` ends only the `sh`. `$RANDOM` is a value from 0 to 32767, seeded per
-shell, and an explicit assignment overrides it. Scripts that use `$RANDOM` will not
-replay to the same output, because the trace replays against the values recorded.
+shell, and an explicit assignment overrides it.
+
+Each recorded run stores the generator state it started from. A replay restores that
+state first, so the replayed run draws the same `$RANDOM` values. The state is optional
+in the trace format, so traces written before it existed still replay.
 
 ## Fork with a command
 

@@ -2,7 +2,7 @@
 //! key that did not create a session sees it as not found.
 
 use crate::auth::{AuthManager, KeyId};
-use crate::persist::CheckpointRoot;
+use crate::persist::{CheckpointRoot, SpilledRun};
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Query, Request, State},
@@ -185,6 +185,12 @@ pub(crate) struct Entry {
     pub(crate) checkpoint_retain: u32,
     /// Pinned checkpoint roots, oldest first. The last one is the newest checkpoint.
     pub(crate) roots: Vec<CheckpointRoot>,
+    /// The sequence number of the session's next recorded or spilled run.
+    pub(crate) next_seq: u64,
+    /// Outputs of runs that did not fit in the trace, kept as blobs.
+    pub(crate) spilled: Vec<SpilledRun>,
+    /// Bytes of the spilled outputs, counted against `MAX_SPILLED_BYTES_PER_SESSION`.
+    pub(crate) spilled_bytes: u64,
 }
 
 impl Entry {
@@ -393,6 +399,9 @@ fn entry(
         checkpoint_policy: CheckpointPolicy::default(),
         checkpoint_retain: DEFAULT_CHECKPOINT_RETAIN,
         roots: Vec::new(),
+        next_seq: 1,
+        spilled: Vec::new(),
+        spilled_bytes: 0,
     }
 }
 
@@ -622,6 +631,7 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
             checkpoint_policy: CheckpointPolicy::default(),
             checkpoint_retain: DEFAULT_CHECKPOINT_RETAIN,
             roots: Vec::new(),
+            spilled: Vec::new(),
         });
     let mut table = state.sessions.0.write().await;
     for saved_session in saved.sessions.into_iter().chain(legacy) {
@@ -645,6 +655,9 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
             )
         };
         let id = saved_session.state.id;
+        let next_seq = next_seq_after(&trace.runs, &saved_session.spilled);
+        let spilled_bytes = saved_session.spilled.iter().map(|s| s.bytes).sum();
+        let spilled = saved_session.spilled;
         // Saved state is not trusted to respect the retention bounds, so clamp them.
         let retain = saved_session
             .checkpoint_retain
@@ -667,6 +680,9 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
                 checkpoint_policy: saved_session.checkpoint_policy,
                 checkpoint_retain: retain,
                 roots,
+                next_seq,
+                spilled,
+                spilled_bytes,
                 last_active: Arc::new(std::sync::atomic::AtomicU64::new(now_millis())),
             },
         );
@@ -723,6 +739,7 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
                     checkpoint_policy: e.checkpoint_policy,
                     checkpoint_retain: e.checkpoint_retain,
                     roots: e.roots.clone(),
+                    spilled: e.spilled.clone(),
                 })
             })
             .collect()
@@ -1143,6 +1160,8 @@ async fn run_exec(
 ) -> Result<(ExecResult, Option<u64>), ApiError> {
     let session = own.session.clone();
     let before = committed_root(session.as_ref()).await;
+    // The generator state at the start of the run, so a replay draws the same $RANDOM values.
+    let random_state = Some(session.random_state().await);
     let result = match observer {
         Some(observer) => session.exec_streamed(request.clone(), observer).await,
         None => session.exec(request.clone()).await,
@@ -1154,7 +1173,7 @@ async fn run_exec(
         }
     });
     let files = files_since(session.as_ref(), before).await;
-    let seq = record_exec(state, own.state.id, &request, &result, files).await;
+    let seq = record_exec(state, own.state.id, &request, &result, files, random_state).await;
     checkpoint_after_exec(state, owner, own.state.id, &session).await?;
     save_session(state, own.state.id, &session).await?;
     Ok((result?, seq))
@@ -1240,40 +1259,89 @@ struct Ran {
     result: Result<(i32, Vec<u8>, Vec<u8>), SandboxError>,
     /// The files the run changed, or the error that stopped them being read.
     files: Result<Vec<FileChange>, SandboxError>,
+    /// The `$RANDOM` generator state when the run started, for a script run.
+    random_state: Option<u64>,
 }
 
-/// Appends one run to the session's trace (ADR 0009, ADR 0012).
+/// The most output, in bytes, a session may keep as spilled blobs. Runs past the trace's
+/// budget keep their outputs here, so the full stream stays readable.
+pub const MAX_SPILLED_BYTES_PER_SESSION: u64 = 64 * 1024 * 1024;
+
+/// The sequence number after the last run the session has recorded or spilled.
+fn next_seq_after(runs: &[RunRecord], spilled: &[SpilledRun]) -> u64 {
+    runs.iter()
+        .map(|run| run.seq)
+        .chain(spilled.iter().map(|run| run.seq))
+        .max()
+        .map_or(1, |last| last + 1)
+}
+
+/// Appends one run to the session's trace (ADR 0009, ADR 0012). A run that does not fit
+/// keeps its outputs as blobs instead (IMAGE.md §4.5), and the trace is marked
+/// incomplete. Returns the run's sequence number, or `None` when no output was kept.
 async fn append_run(state: &AppState, id: SessionId, ran: Ran) -> Option<u64> {
+    let (seq, outcome) = {
+        let mut table = state.sessions.0.write().await;
+        let entry = table.get_mut(&id)?;
+        let seq = entry.next_seq;
+        entry.next_seq += 1;
+        let outcome = outcome_of(ran.result);
+        let files = ran.files.unwrap_or_else(|_| {
+            entry.trace_complete = false;
+            Vec::new()
+        });
+        match ran.script {
+            Some(script) => {
+                let run = RunRecord {
+                    seq,
+                    script,
+                    fs: ran.fs,
+                    outcome,
+                    files,
+                    random_state: ran.random_state,
+                };
+                let size = run_size(&run);
+                if entry.trace.len() < MAX_TRACE_RUNS && entry.trace_bytes + size <= MAX_TRACE_BYTES
+                {
+                    entry.trace_bytes += size;
+                    entry.trace.push(run);
+                    return Some(seq);
+                }
+                entry.trace_complete = false;
+                (seq, run.outcome)
+            }
+            None => {
+                // A run that cannot be replayed is not recorded, but its output is kept.
+                entry.trace_complete = false;
+                (seq, outcome)
+            }
+        }
+    };
+    let sandbox_trace::Outcome::Completed { stdout, stderr, .. } = outcome else {
+        return None;
+    };
+    let bytes = (stdout.len() + stderr.len()) as u64;
+    {
+        let table = state.sessions.0.read().await;
+        if table.get(&id)?.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION {
+            return None;
+        }
+    }
+    let store = sandbox_session::blob_store();
+    let stdout_hash = store.put(&stdout, Default::default()).await.ok()?;
+    let stderr_hash = store.put(&stderr, Default::default()).await.ok()?;
     let mut table = state.sessions.0.write().await;
     let entry = table.get_mut(&id)?;
-    let Some(script) = ran.script else {
-        entry.trace_complete = false;
-        return None;
-    };
-    if entry.trace.len() >= MAX_TRACE_RUNS {
-        entry.trace_complete = false;
+    if entry.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION {
         return None;
     }
-    let outcome = outcome_of(ran.result);
-    let files = ran.files.unwrap_or_else(|_| {
-        entry.trace_complete = false;
-        Vec::new()
-    });
-    let seq = entry.trace.len() as u64 + 1;
-    let run = RunRecord {
+    entry.spilled_bytes += bytes;
+    entry.spilled.push(SpilledRun {
         seq,
-        script,
-        fs: ran.fs,
-        outcome,
-        files,
-    };
-    let size = run_size(&run);
-    if entry.trace_bytes + size > MAX_TRACE_BYTES {
-        entry.trace_complete = false;
-        return None;
-    }
-    entry.trace_bytes += size;
-    entry.trace.push(run);
+        stdout: stdout_hash,
+        stderr: stderr_hash,
+        bytes,
+    });
     Some(seq)
 }
 
@@ -1284,6 +1352,7 @@ async fn record_exec(
     request: &ExecRequest,
     result: &Result<ExecResult, SandboxError>,
     files: Result<Vec<FileChange>, SandboxError>,
+    random_state: Option<u64>,
 ) -> Option<u64> {
     if request.argv.is_empty() {
         return None;
@@ -1306,6 +1375,7 @@ async fn record_exec(
             fs: None,
             result,
             files,
+            random_state,
         },
     )
     .await
@@ -1333,6 +1403,7 @@ async fn record_fs(
             fs: op,
             result,
             files,
+            random_state: None,
         },
     )
     .await;
@@ -1497,17 +1568,39 @@ async fn trace_output(
     seq: u64,
     stream: OutputStream,
 ) -> Result<Response, ApiError> {
-    let table = state.sessions.0.read().await;
-    let run = table
-        .get(id)
-        .and_then(|entry| entry.trace.iter().find(|run| run.seq == seq))
-        .ok_or_else(|| SandboxError::not_found(format!("no recorded command {seq}")))?;
-    let sandbox_trace::Outcome::Completed { stdout, stderr, .. } = &run.outcome else {
-        return Err(SandboxError::not_found(format!("command {seq} did not complete")).into());
+    // The trace's copy is preferred. A run that did not fit there keeps its output as a blob.
+    let stored = {
+        let table = state.sessions.0.read().await;
+        let entry = table
+            .get(id)
+            .ok_or_else(|| SandboxError::not_found("session not found"))?;
+        if let Some(run) = entry.trace.iter().find(|run| run.seq == seq) {
+            let sandbox_trace::Outcome::Completed { stdout, stderr, .. } = &run.outcome else {
+                return Err(
+                    SandboxError::not_found(format!("command {seq} did not complete")).into(),
+                );
+            };
+            Ok(match stream {
+                OutputStream::Stdout => stdout.clone(),
+                OutputStream::Stderr => stderr.clone(),
+            })
+        } else if let Some(spill) = entry.spilled.iter().find(|run| run.seq == seq) {
+            Err(match stream {
+                OutputStream::Stdout => spill.stdout,
+                OutputStream::Stderr => spill.stderr,
+            })
+        } else {
+            return Err(SandboxError::not_found(format!("no recorded command {seq}")).into());
+        }
     };
-    let bytes = match stream {
-        OutputStream::Stdout => stdout.clone(),
-        OutputStream::Stderr => stderr.clone(),
+    let bytes = match stored {
+        Ok(bytes) => bytes,
+        Err(hash) => sandbox_session::blob_store()
+            .get(&hash)
+            .await
+            .map_err(|e| SandboxError::internal(format!("reading spilled output: {e}")))?
+            .ok_or_else(|| SandboxError::internal("a spilled output is missing from the store"))?
+            .to_vec(),
     };
     Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }
@@ -1882,7 +1975,29 @@ pub async fn fork_snapshot(
 pub const MAX_CHECKPOINT_RETAIN: u32 = 256;
 
 /// The logical bytes of checkpoints one key may keep pinned, across all its sessions.
-pub const MAX_CHECKPOINT_BYTES_PER_KEY: u64 = 1024 * 1024 * 1024;
+pub const DEFAULT_CHECKPOINT_BYTES_PER_KEY: u64 = 1024 * 1024 * 1024;
+
+/// The per-key checkpoint budget. `FRONTAL_SANDBOX_CHECKPOINT_BYTES_PER_KEY` sets it,
+/// in bytes, and read once. An unset or invalid value gives the default.
+fn checkpoint_budget_per_key() -> u64 {
+    static BUDGET: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *BUDGET.get_or_init(|| {
+        parse_checkpoint_budget(
+            std::env::var("FRONTAL_SANDBOX_CHECKPOINT_BYTES_PER_KEY")
+                .ok()
+                .as_deref(),
+        )
+    })
+}
+
+/// Parses a byte budget. A zero or unparseable value is refused in favour of the default,
+/// since a zero budget would refuse every checkpoint.
+fn parse_checkpoint_budget(raw: Option<&str>) -> u64 {
+    match raw.and_then(|value| value.trim().parse::<u64>().ok()) {
+        Some(bytes) if bytes > 0 => bytes,
+        _ => DEFAULT_CHECKPOINT_BYTES_PER_KEY,
+    }
+}
 
 /// Drops the oldest pinned roots across `lists` until their total is within `budget`.
 /// Each list keeps its newest root. When the newest roots alone are over budget,
@@ -1913,7 +2028,7 @@ fn evict_to_budget(lists: &mut [&mut Vec<CheckpointRoot>], budget: u64) -> bool 
 
 /// Pins a checkpoint for the session's current state, and returns it. A state equal
 /// to the newest checkpoint is not pinned again. The key's total pinned bytes stay
-/// within `MAX_CHECKPOINT_BYTES_PER_KEY`, by dropping its oldest checkpoints. When
+/// within the per-key budget, by dropping its oldest checkpoints. When
 /// even the newest checkpoints do not fit, nothing is pinned and this fails with
 /// `ResourceExhausted`.
 async fn checkpoint_now(
@@ -1936,13 +2051,14 @@ async fn checkpoint_now(
         .filter(|entry| entry.owner == *owner)
         .map(|entry| &mut entry.roots)
         .collect();
-    if !evict_to_budget(&mut lists, MAX_CHECKPOINT_BYTES_PER_KEY) {
+    let budget = checkpoint_budget_per_key();
+    if !evict_to_budget(&mut lists, budget) {
         drop(lists);
         if let Some(entry) = table.get_mut(&id) {
             entry.roots = before;
         }
         return Err(SandboxError::resource_exhausted(format!(
-            "checkpoints would exceed the {MAX_CHECKPOINT_BYTES_PER_KEY}-byte limit for this key"
+            "checkpoints would exceed the {budget}-byte limit for this key"
         ))
         .into());
     }
@@ -2270,6 +2386,7 @@ async fn fork_locked(
             ..Default::default()
         };
         let before = committed_root(child.as_ref()).await;
+        let random_state = Some(child.random_state().await);
         let result = child.exec(exec.clone()).await;
         state.usage.add(owner, |c| {
             c.execs += 1;
@@ -2279,7 +2396,7 @@ async fn fork_locked(
         });
         let files = files_since(child.as_ref(), before).await;
         let changed_files = files.as_ref().map_or(0, Vec::len);
-        record_exec(state, child_id, &exec, &result, files).await;
+        record_exec(state, child_id, &exec, &result, files, random_state).await;
         checkpoint_after_exec(state, owner, child_id, &child).await?;
         save_session(state, child_id, &child).await?;
         children.push(ForkedChild {
@@ -2400,6 +2517,23 @@ fn usage_error(message: &str) -> ExecResult {
 mod checkpoint_budget_tests {
     use super::*;
     use sandbox_types::hash::ContentHash;
+
+    #[test]
+    fn the_budget_setting_falls_back_to_the_default_when_unusable() {
+        assert_eq!(
+            parse_checkpoint_budget(None),
+            DEFAULT_CHECKPOINT_BYTES_PER_KEY
+        );
+        assert_eq!(
+            parse_checkpoint_budget(Some("abc")),
+            DEFAULT_CHECKPOINT_BYTES_PER_KEY
+        );
+        assert_eq!(
+            parse_checkpoint_budget(Some("0")),
+            DEFAULT_CHECKPOINT_BYTES_PER_KEY
+        );
+        assert_eq!(parse_checkpoint_budget(Some(" 4096 ")), 4096);
+    }
 
     fn root(byte: u8, bytes: u64) -> CheckpointRoot {
         CheckpointRoot {

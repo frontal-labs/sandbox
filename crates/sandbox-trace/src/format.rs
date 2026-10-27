@@ -70,6 +70,9 @@ pub struct RunRecord {
     /// Files the run changed. Empty when none changed, or when the run was
     /// recorded without tracking files (see `trace_complete` in the server).
     pub files: Vec<FileChange>,
+    /// The `$RANDOM` generator state when the run started. Replay restores it, so
+    /// the run draws the same values. Absent in traces written before it existed.
+    pub random_state: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -111,6 +114,8 @@ struct Line {
     files: Vec<LineFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fs: Option<LineFs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    random: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -178,6 +183,7 @@ impl Trace {
                     error: None,
                     files,
                     fs,
+                    random: run.random_state,
                 },
                 Outcome::Failed { code, message } => Line {
                     seq: run.seq,
@@ -191,6 +197,7 @@ impl Trace {
                     }),
                     files,
                     fs,
+                    random: run.random_state,
                 },
             };
             out.push_str(&serde_json::to_string(&line).expect("run line serializes"));
@@ -268,6 +275,7 @@ impl Trace {
                 fs,
                 outcome,
                 files,
+                random_state: parsed.random,
             });
         }
         Ok(Self { runs })
@@ -313,6 +321,7 @@ mod tests {
         Trace {
             runs: vec![
                 RunRecord {
+                    random_state: None,
                     seq: 1,
                     script: "echo hi".to_string(),
                     outcome: Outcome::Completed {
@@ -324,6 +333,7 @@ mod tests {
                     fs: None,
                 },
                 RunRecord {
+                    random_state: None,
                     seq: 2,
                     script: "echo 'open".to_string(),
                     outcome: Outcome::Failed {
@@ -347,6 +357,7 @@ mod tests {
     fn output_bytes_survive_exactly_including_non_utf8() {
         let trace = Trace {
             runs: vec![RunRecord {
+                random_state: None,
                 seq: 1,
                 script: "x".to_string(),
                 outcome: Outcome::Completed {
@@ -378,6 +389,7 @@ mod tests {
     fn file_changes_round_trip_with_their_hashes() {
         let trace = Trace {
             runs: vec![RunRecord {
+                random_state: None,
                 seq: 1,
                 script: "echo hi > /a.txt".to_string(),
                 outcome: Outcome::Completed {
@@ -422,6 +434,7 @@ mod tests {
         let trace = Trace {
             runs: vec![
                 RunRecord {
+                    random_state: None,
                     seq: 1,
                     script: String::new(),
                     fs: Some(FsOp::Write {
@@ -436,6 +449,7 @@ mod tests {
                     files: Vec::new(),
                 },
                 RunRecord {
+                    random_state: None,
                     seq: 2,
                     script: String::new(),
                     fs: Some(FsOp::Delete {
@@ -494,5 +508,51 @@ mod tests {
             Trace::parse(&text),
             Err(TraceError::BadLine { line: 2, .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod random_state_tests {
+    use super::*;
+
+    #[test]
+    fn the_random_state_round_trips_and_is_absent_when_unset() {
+        let trace = Trace {
+            runs: vec![
+                RunRecord {
+                    seq: 1,
+                    script: "echo $RANDOM".to_string(),
+                    fs: None,
+                    outcome: Outcome::Completed {
+                        exit_code: 0,
+                        stdout: b"7\n".to_vec(),
+                        stderr: Vec::new(),
+                    },
+                    files: Vec::new(),
+                    random_state: Some(u64::MAX - 3),
+                },
+                RunRecord {
+                    seq: 2,
+                    script: "true".to_string(),
+                    fs: None,
+                    outcome: Outcome::Completed {
+                        exit_code: 0,
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    },
+                    files: Vec::new(),
+                    random_state: None,
+                },
+            ],
+        };
+        let text = trace.to_jsonl();
+        assert!(text.contains("\"random\":18446744073709551612"), "{text}");
+        let parsed = Trace::parse(&text).unwrap();
+        assert_eq!(parsed, trace);
+        assert_eq!(
+            text.matches("\"random\"").count(),
+            1,
+            "unset state is not written"
+        );
     }
 }

@@ -200,6 +200,14 @@ impl Session for IsolateBackend {
         self.fs.as_ref()
     }
 
+    async fn random_state(&self) -> u64 {
+        self.shell.lock().await.random_state()
+    }
+
+    async fn set_random_state(&self, state: u64) {
+        self.shell.lock().await.set_random_state(state);
+    }
+
     async fn write_system_file(&self, path: &str, data: &[u8]) -> Result<(), SandboxError> {
         self.fs
             .write_system_file(path, data)

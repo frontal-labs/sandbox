@@ -367,3 +367,90 @@ async fn the_shell_prints_env_json_and_runs_undo_as_a_host_command() {
     let result = exec(&app, &key, &id, &["sandbox", "undo"]).await;
     assert_eq!(result["exit_code"], 1);
 }
+
+#[tokio::test]
+async fn output_past_the_trace_budget_is_kept_as_a_blob_and_still_readable() {
+    // Each run prints 1.8 MB. Four runs fit the trace's 8 MiB budget, so the fifth
+    // does not, and its full output is kept as a blob instead.
+    let (app, key) = setup();
+    let id = create(&app, &key, None).await;
+    let big: Vec<u8> = (0..200_000)
+        .flat_map(|i| format!("{i:08}\n").into_bytes())
+        .collect();
+    let (status, body) = call(
+        &app,
+        "PUT",
+        &format!("/v1/sessions/{id}/fs/big.txt"),
+        &key,
+        Some(("application/octet-stream", big.clone())),
+    )
+    .await;
+    assert!(status.is_success(), "{}", String::from_utf8_lossy(&body));
+
+    let mut last = None;
+    for _ in 0..5 {
+        last = Some(exec(&app, &key, &id, &["cat", "/big.txt"]).await);
+    }
+    // The fifth cat is not in the trace, which the trace reports as incomplete.
+    let (status, headers_body) =
+        call(&app, "GET", &format!("/v1/sessions/{id}/trace"), &key, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let runs = String::from_utf8(headers_body).unwrap();
+    // The PUT is run 1, and the first four cats are runs 2 to 5. The fifth cat spills.
+    let recorded = runs
+        .lines()
+        .filter(|line| line.starts_with("{\"seq\""))
+        .count();
+    assert_eq!(recorded, 5, "recorded runs");
+    let stdout: Vec<u8> = last.as_ref().unwrap()["stdout"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b.as_u64().unwrap() as u8)
+        .collect();
+    let text = String::from_utf8(stdout).unwrap();
+    let marker = text
+        .lines()
+        .find(|line| line.starts_with("…["))
+        .expect("the response is capped");
+    assert!(marker.contains("full: /trace/exec/"), "{marker}");
+    let path = marker
+        .split("full: ")
+        .nth(1)
+        .unwrap()
+        .trim_end_matches(']')
+        .to_string();
+
+    let (status, full) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/fs/{}", path.trim_start_matches('/')),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&full));
+    assert_eq!(full.len(), big.len());
+    assert!(
+        full == big,
+        "the spilled stream matches the command's output"
+    );
+}
+
+#[tokio::test]
+async fn an_exec_records_the_random_state_it_started_from() {
+    let (app, key) = setup();
+    let id = create(&app, &key, None).await;
+    exec(&app, &key, &id, &["echo", "plain"]).await;
+    let (status, body) = call(&app, "GET", &format!("/v1/sessions/{id}/trace"), &key, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let trace = String::from_utf8(body).unwrap();
+    let run = trace
+        .lines()
+        .find(|line| line.starts_with("{\"seq\""))
+        .expect("a recorded run");
+    assert!(
+        run.contains("\"random\":"),
+        "the run records its $RANDOM state: {run}"
+    );
+}

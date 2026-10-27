@@ -135,3 +135,27 @@ fn control_characters_from_a_trace_are_escaped_in_the_report() {
     assert!(!report.contains(&0x07), "raw bell byte in the report");
     assert!(String::from_utf8_lossy(&report).contains(r"\u{1b}"));
 }
+
+#[test]
+fn random_values_in_a_recorded_run_replay_identically() {
+    // Each run starts from a fresh session, which seeds $RANDOM from the clock. The trace
+    // records the generator state, so a replay draws the same values.
+    let dir = scratch("random");
+    let trace = dir.join("run.jsonl");
+
+    let run = sandbox()
+        .args(["run", "--trace"])
+        .arg(&trace)
+        .arg("echo $RANDOM $RANDOM $RANDOM")
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", text(&run));
+
+    let replay = sandbox().arg("replay").arg(&trace).output().unwrap();
+    assert_eq!(replay.status.code(), Some(0), "{}", text(&replay));
+    assert!(
+        text(&replay).contains("replayed 1 runs: 0 diverged"),
+        "{}",
+        text(&replay)
+    );
+}

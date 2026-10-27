@@ -72,10 +72,23 @@ pub struct SavedSession {
     /// The pinned checkpoint roots, oldest first (IMAGE.md §4.5).
     #[serde(default)]
     pub roots: Vec<CheckpointRoot>,
+    /// Outputs of runs that did not fit in the trace.
+    #[serde(default)]
+    pub spilled: Vec<SpilledRun>,
 }
 
 fn default_checkpoint_retain() -> u32 {
     sandbox_types::session::DEFAULT_CHECKPOINT_RETAIN
+}
+
+/// The outputs of a run that did not fit in the trace. They are kept as blobs, so the
+/// full stream stays readable at `trace/exec/<seq>.out` and `.err` (IMAGE.md §4.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpilledRun {
+    pub seq: u64,
+    pub stdout: ContentHash,
+    pub stderr: ContentHash,
+    pub bytes: u64,
 }
 
 /// A pinned checkpoint: a committed root and its logical size in bytes.
@@ -661,6 +674,7 @@ mod tests {
             checkpoint_policy: Default::default(),
             checkpoint_retain: 50,
             roots: Vec::new(),
+            spilled: Vec::new(),
         };
         let saved = Saved {
             version: VERSION,
@@ -711,6 +725,7 @@ mod tests {
             checkpoint_policy: Default::default(),
             checkpoint_retain: 50,
             roots: Vec::new(),
+            spilled: Vec::new(),
         }
     }
 

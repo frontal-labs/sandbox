@@ -278,9 +278,9 @@ fn run_script_once(script: &str, trace: Option<&Path>) -> Result<i32, SandboxErr
     let rt = runtime()?;
     rt.block_on(async {
         let session = IsolateBackend::new(SessionConfig::default()).await?;
-        let (result, files) = run_traced(&session, script).await;
+        let (random_state, result, files) = run_traced(&session, script).await;
         if let Some(path) = trace {
-            let runs = vec![record(1, script, &result, files)];
+            let runs = vec![record(1, script, &result, files, random_state)];
             write_trace(path, runs)?;
         }
         let out = result?;
@@ -302,9 +302,15 @@ fn interactive_shell(trace: Option<&Path>) -> Result<i32, SandboxError> {
             break;
         }
         // A bad line reports its error and the session continues.
-        let (result, files) = rt.block_on(run_traced(&session, &line));
+        let (random_state, result, files) = rt.block_on(run_traced(&session, &line));
         if trace.is_some() {
-            runs.push(record(runs.len() as u64 + 1, &line, &result, files));
+            runs.push(record(
+                runs.len() as u64 + 1,
+                &line,
+                &result,
+                files,
+                random_state,
+            ));
         }
         match result {
             Ok(out) => print_output(&out.stdout, &out.stderr)
@@ -372,10 +378,13 @@ async fn run_traced(
     session: &IsolateBackend,
     script: &str,
 ) -> (
+    Option<u64>,
     Result<ExecResult, SandboxError>,
     Result<Vec<FileChange>, SandboxError>,
 ) {
     let before = committed_root(session).await;
+    // The generator state before the run, so a replay draws the same $RANDOM values.
+    let random_state = Some(session.random_state().await);
     let result = session.run_script(script).await;
     let files = match before {
         Ok(before) => changed_since(session, before)
@@ -383,7 +392,7 @@ async fn run_traced(
             .map(|changes| changes.into_iter().map(FileChange::from).collect()),
         Err(e) => Err(e),
     };
-    (result, files)
+    (random_state, result, files)
 }
 
 /// One run as the trace records it. Files that could not be read leave the run
@@ -393,6 +402,7 @@ fn record(
     script: &str,
     result: &Result<ExecResult, SandboxError>,
     files: Result<Vec<FileChange>, SandboxError>,
+    random_state: Option<u64>,
 ) -> RunRecord {
     let files = files.unwrap_or_else(|e| {
         eprintln!(
@@ -413,6 +423,7 @@ fn record(
         fs: None,
         outcome,
         files,
+        random_state,
     }
 }
 
