@@ -40,7 +40,7 @@ pub enum SandboxCommand {
     /// Fork the session's current state into N children and run a command in each.
     /// Prints one line per child. Exits 1 when a child's command failed.
     ///
-    /// Example: frontal-sandbox sandbox fork <session> -n 3 -- touch /r
+    /// Example: frontal-sandbox sandbox fork <session> -c 3 -- touch /r
     Fork {
         /// Session ID
         session_id: String,
@@ -598,11 +598,8 @@ fn sandbox_session(command: &SandboxCommand) -> Result<i32, SandboxError> {
             count,
             command,
         } => {
-            let children = rt.block_on(client()?.fork_command(
-                parse_session(session_id)?,
-                *count,
-                command,
-            ))?;
+            let children =
+                rt.block_on(client()?.fork_command(parse_session(session_id)?, *count, command))?;
             let mut code = 0;
             for child in &children {
                 let outcome = match (child.exit_code, &child.error) {
@@ -616,7 +613,10 @@ fn sandbox_session(command: &SandboxCommand) -> Result<i32, SandboxError> {
                         format!("error: {}", error.as_deref().unwrap_or("unknown"))
                     }
                 };
-                println!("{} {} changed={}", child.session_id, outcome, child.changed_files);
+                println!(
+                    "{} {} changed={}",
+                    child.session_id, outcome, child.changed_files
+                );
             }
             Ok(code)
         }
