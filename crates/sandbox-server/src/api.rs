@@ -189,7 +189,7 @@ pub(crate) struct Entry {
     pub(crate) next_seq: u64,
     /// Outputs of runs that did not fit in the trace, kept as blobs.
     pub(crate) spilled: Vec<SpilledRun>,
-    /// Bytes of the spilled outputs, counted against `MAX_SPILLED_BYTES_PER_SESSION`.
+    /// Bytes of the spilled outputs, counted against `spilled_budget_per_session()`.
     pub(crate) spilled_bytes: u64,
 }
 
@@ -1265,7 +1265,28 @@ struct Ran {
 
 /// The most output, in bytes, a session may keep as spilled blobs. Runs past the trace's
 /// budget keep their outputs here, so the full stream stays readable.
-pub const MAX_SPILLED_BYTES_PER_SESSION: u64 = 64 * 1024 * 1024;
+pub const DEFAULT_SPILLED_BYTES_PER_SESSION: u64 = 64 * 1024 * 1024;
+
+/// The per-session spill budget. `FRONTAL_SANDBOX_SPILLED_BYTES_PER_SESSION` sets it, in
+/// bytes, and is read once. An unset or invalid value gives the default.
+fn spilled_budget_per_session() -> u64 {
+    static BUDGET: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *BUDGET.get_or_init(|| {
+        parse_spill_budget(
+            std::env::var("FRONTAL_SANDBOX_SPILLED_BYTES_PER_SESSION")
+                .ok()
+                .as_deref(),
+        )
+    })
+}
+
+/// Parses a spill budget. A zero or unparseable value falls back to the default.
+fn parse_spill_budget(raw: Option<&str>) -> u64 {
+    match raw.and_then(|value| value.trim().parse::<u64>().ok()) {
+        Some(bytes) if bytes > 0 => bytes,
+        _ => DEFAULT_SPILLED_BYTES_PER_SESSION,
+    }
+}
 
 /// The most spilled runs a session may keep. Each run also costs `SPILL_ENTRY_OVERHEAD`
 /// bytes against the budget, so runs with empty output cannot grow the record for free.
@@ -1330,7 +1351,7 @@ async fn append_run(state: &AppState, id: SessionId, ran: Ran) -> Option<u64> {
         let table = state.sessions.0.read().await;
         let entry = table.get(&id)?;
         if entry.spilled.len() >= MAX_SPILLED_RUNS
-            || entry.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION
+            || entry.spilled_bytes + bytes > spilled_budget_per_session()
         {
             return None;
         }
@@ -1341,7 +1362,7 @@ async fn append_run(state: &AppState, id: SessionId, ran: Ran) -> Option<u64> {
     let mut table = state.sessions.0.write().await;
     let entry = table.get_mut(&id)?;
     if entry.spilled.len() >= MAX_SPILLED_RUNS
-        || entry.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION
+        || entry.spilled_bytes + bytes > spilled_budget_per_session()
     {
         return None;
     }
@@ -2527,6 +2548,20 @@ fn usage_error(message: &str) -> ExecResult {
 mod checkpoint_budget_tests {
     use super::*;
     use sandbox_types::hash::ContentHash;
+
+    #[test]
+    fn the_spill_budget_setting_falls_back_to_the_default_when_unusable() {
+        assert_eq!(parse_spill_budget(None), DEFAULT_SPILLED_BYTES_PER_SESSION);
+        assert_eq!(
+            parse_spill_budget(Some("x")),
+            DEFAULT_SPILLED_BYTES_PER_SESSION
+        );
+        assert_eq!(
+            parse_spill_budget(Some("0")),
+            DEFAULT_SPILLED_BYTES_PER_SESSION
+        );
+        assert_eq!(parse_spill_budget(Some(" 1024 ")), 1024);
+    }
 
     #[test]
     fn the_budget_setting_falls_back_to_the_default_when_unusable() {
