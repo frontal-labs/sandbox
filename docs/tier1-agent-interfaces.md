@@ -107,6 +107,19 @@ Each recorded run stores the generator state it started from. A replay restores 
 state first, so the replayed run draws the same `$RANDOM` values. The state is optional
 in the trace format, so traces written before it existed still replay.
 
+### Limits, and why they are set where they are
+
+- **Spilled output is capped at 64 MiB per session.** Blobs hold the output of runs
+  that did not fit in the trace. The cap bounds storage a single session can hold.
+  Past it, a run's output is not kept, and its marker says so.
+- **The checkpoint budget counts logical bytes.** Each root's size is the sum of its
+  file contents, so a block shared by two roots counts twice. Counting physical
+  storage would need a per-root measurement of new blocks, which the store does not
+  yet report.
+- **Traces written before `$RANDOM` state was recorded cannot replay exactly.** Those
+  runs carry no generator state, so their `$RANDOM` values cannot be reproduced. The
+  state cannot be recovered after the fact.
+
 ## Fork with a command
 
 `POST /v1/sessions/{id}/fork` with `{"count": N, "argv": [...]}` pins the current
