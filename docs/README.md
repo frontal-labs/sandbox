@@ -22,7 +22,7 @@ implemented, the "Current State" sections say so.
 
 ## Architecture Decision Records
 
-[docs/adr/README.md](adr/README.md) — 27 accepted ADRs and 2 proposed.
+[docs/adr/README.md](adr/README.md) — 24 accepted ADRs, 1 superseded, and 2 proposed.
 Each records a significant design decision with context, consequences, and
 alternatives.
 
