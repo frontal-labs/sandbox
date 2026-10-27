@@ -6,6 +6,7 @@ A client library for interacting with the sandbox execution system.
 
 from .client import Client, ClientConfig
 from .embedded import EmbeddedSandbox, EmbeddedSandboxConfig
+from .tier1 import Tier1Client
 from .errors import (
     ErrorCode,
     Result,
@@ -102,4 +103,6 @@ __all__ = [
     # Embedded
     "EmbeddedSandbox",
     "EmbeddedSandboxConfig",
+    # Tier 1 session tools
+    "Tier1Client",
 ]
