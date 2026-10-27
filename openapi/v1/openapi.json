@@ -285,6 +285,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "The key's checkpoint byte budget is full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [

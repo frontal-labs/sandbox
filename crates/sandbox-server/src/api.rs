@@ -408,6 +408,7 @@ struct Lookup {
 
 /// A live session the caller owns.
 struct Owned {
+    owner: KeyId,
     session: Arc<dyn Session>,
     state: SessionState,
     gate: Arc<tokio::sync::Mutex<()>>,
@@ -445,6 +446,7 @@ async fn owned(state: &AppState, owner: &KeyId, raw: &str) -> Result<Owned, ApiE
     }
     match found.session {
         Some(session) => Ok(Owned {
+            owner: owner.clone(),
             session,
             state: found.state,
             gate: found.gate,
@@ -885,7 +887,7 @@ pub async fn create_session(
     write_env_json(&session, &env_json(id, session.tier(), &limits, &network)).await?;
     admit_session(&state, &owner, entry).await?;
     state.usage.add(&owner, |c| c.sessions_created += 1);
-    checkpoint_now(&state, id, &session).await?;
+    checkpoint_now(&state, &owner, id, &session).await?;
     // A new session is saved now, so a restart before its first change keeps it (ADR 0010).
     persist(&state).await?;
     Ok((
@@ -1095,6 +1097,9 @@ pub async fn exec_command(
     }
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
+    if let Some(result) = host_sandbox_command(&state, &own, &request.argv).await {
+        return Ok(Json(result).into_response());
+    }
     let limit = request.output_limit.map_or(DEFAULT_OUTPUT_LIMIT, |limit| {
         usize::try_from(limit).unwrap_or(usize::MAX)
     });
@@ -1150,7 +1155,7 @@ async fn run_exec(
     });
     let files = files_since(session.as_ref(), before).await;
     let seq = record_exec(state, own.state.id, &request, &result, files).await;
-    checkpoint_after_exec(state, own.state.id, &session).await?;
+    checkpoint_after_exec(state, owner, own.state.id, &session).await?;
     save_session(state, own.state.id, &session).await?;
     Ok((result?, seq))
 }
@@ -1865,7 +1870,7 @@ pub async fn fork_snapshot(
         write_forked_env_json(&session, sid, &record.limits).await?;
         admit_session(&state, &owner, entry).await?;
         state.usage.add(&owner, |c| c.sessions_created += 1);
-        checkpoint_now(&state, sid, &session).await?;
+        checkpoint_now(&state, &owner, sid, &session).await?;
         session_ids.push(sid);
     }
     persist(&state).await?;
@@ -1876,10 +1881,44 @@ pub async fn fork_snapshot(
 /// blobs alive through GC, so this bounds the storage one session can hold.
 pub const MAX_CHECKPOINT_RETAIN: u32 = 256;
 
+/// The logical bytes of checkpoints one key may keep pinned, across all its sessions.
+pub const MAX_CHECKPOINT_BYTES_PER_KEY: u64 = 1024 * 1024 * 1024;
+
+/// Drops the oldest pinned roots across `lists` until their total is within `budget`.
+/// Each list keeps its newest root. When the newest roots alone are over budget,
+/// nothing changes and this returns false.
+fn evict_to_budget(lists: &mut [&mut Vec<CheckpointRoot>], budget: u64) -> bool {
+    let newest_total: u64 = lists
+        .iter()
+        .filter_map(|roots| roots.last())
+        .map(|root| root.bytes)
+        .sum();
+    if newest_total > budget {
+        return false;
+    }
+    let mut total: u64 = lists
+        .iter()
+        .flat_map(|roots| roots.iter())
+        .map(|root| root.bytes)
+        .sum();
+    while total > budget {
+        // Feasible, so some list still has an older root to drop.
+        let Some(list) = lists.iter_mut().find(|roots| roots.len() > 1) else {
+            break;
+        };
+        total -= list.remove(0).bytes;
+    }
+    true
+}
+
 /// Pins a checkpoint for the session's current state, and returns it. A state equal
-/// to the newest checkpoint is not pinned again.
+/// to the newest checkpoint is not pinned again. The key's total pinned bytes stay
+/// within `MAX_CHECKPOINT_BYTES_PER_KEY`, by dropping its oldest checkpoints. When
+/// even the newest checkpoints do not fit, nothing is pinned and this fails with
+/// `ResourceExhausted`.
 async fn checkpoint_now(
     state: &AppState,
+    owner: &KeyId,
     id: SessionId,
     session: &Arc<dyn Session>,
 ) -> Result<CheckpointRoot, ApiError> {
@@ -1887,8 +1926,25 @@ async fn checkpoint_now(
     let bytes = session.fs().total_bytes().await.map_err(vfs_error)?;
     let pinned = CheckpointRoot { root, bytes };
     let mut table = state.sessions.0.write().await;
-    if let Some(entry) = table.get_mut(&id) {
-        pin_root(entry, pinned);
+    let Some(entry) = table.get_mut(&id) else {
+        return Ok(pinned);
+    };
+    let before = entry.roots.clone();
+    pin_root(entry, pinned);
+    let mut lists: Vec<&mut Vec<CheckpointRoot>> = table
+        .values_mut()
+        .filter(|entry| entry.owner == *owner)
+        .map(|entry| &mut entry.roots)
+        .collect();
+    if !evict_to_budget(&mut lists, MAX_CHECKPOINT_BYTES_PER_KEY) {
+        drop(lists);
+        if let Some(entry) = table.get_mut(&id) {
+            entry.roots = before;
+        }
+        return Err(SandboxError::resource_exhausted(format!(
+            "checkpoints would exceed the {MAX_CHECKPOINT_BYTES_PER_KEY}-byte limit for this key"
+        ))
+        .into());
     }
     Ok(pinned)
 }
@@ -1910,9 +1966,12 @@ fn pin_root(entry: &mut Entry, root: CheckpointRoot) {
     entry.roots.drain(..excess);
 }
 
-/// Pins a checkpoint after a command, when the session checkpoints per exec.
+/// Pins a checkpoint after a command, when the session checkpoints per exec. A
+/// checkpoint refused by the key's byte budget is skipped: the command already ran,
+/// and older history is what gives way.
 async fn checkpoint_after_exec(
     state: &AppState,
+    owner: &KeyId,
     id: SessionId,
     session: &Arc<dyn Session>,
 ) -> Result<(), ApiError> {
@@ -1922,10 +1981,13 @@ async fn checkpoint_after_exec(
             .get(&id)
             .is_some_and(|entry| entry.checkpoint_policy == CheckpointPolicy::PerExec)
     };
-    if per_exec {
-        checkpoint_now(state, id, session).await?;
+    if !per_exec {
+        return Ok(());
     }
-    Ok(())
+    match checkpoint_now(state, owner, id, session).await {
+        Err(ApiError(error)) if error.code == ErrorCode::ResourceExhausted => Ok(()),
+        other => other.map(drop),
+    }
 }
 
 async fn checkpoint_usage_of(state: &AppState, id: SessionId) -> CheckpointUsage {
@@ -1965,6 +2027,7 @@ pub struct CheckpointResponse {
         (status = 200, description = "Checkpoint pinned", body = CheckpointResponse),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 404, description = "No such session for this key", body = ErrorBody),
+        (status = 429, description = "The key's checkpoint byte budget is full", body = ErrorBody),
     ),
     security(("bearer" = []))
 )]
@@ -1975,12 +2038,17 @@ pub async fn checkpoint_session(
 ) -> Result<Json<CheckpointResponse>, ApiError> {
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
-    let pinned = checkpoint_now(&state, own.state.id, &own.session).await?;
-    save_session(&state, own.state.id, &own.session).await?;
-    Ok(Json(CheckpointResponse {
+    Ok(Json(checkpoint_locked(&state, &own).await?))
+}
+
+/// Pins the current state. The caller holds the session's gate.
+async fn checkpoint_locked(state: &AppState, own: &Owned) -> Result<CheckpointResponse, ApiError> {
+    let pinned = checkpoint_now(state, &own.owner, own.state.id, &own.session).await?;
+    save_session(state, own.state.id, &own.session).await?;
+    Ok(CheckpointResponse {
         root: pinned.root,
-        checkpoints: checkpoint_usage_of(&state, own.state.id).await,
-    }))
+        checkpoints: checkpoint_usage_of(state, own.state.id).await,
+    })
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -2017,18 +2085,27 @@ pub async fn undo_session(
     Path(id): Path<String>,
     Json(request): Json<UndoRequest>,
 ) -> Result<Json<CheckpointResponse>, ApiError> {
-    if request.steps == 0 {
-        return Err(SandboxError::invalid_argument("steps must be at least 1").into());
-    }
     let own = owned(&state, &owner, &id).await?;
     let _gate = own.gate.lock().await;
-    checkpoint_now(&state, own.state.id, &own.session).await?;
-    let steps = request.steps as usize;
+    Ok(Json(undo_locked(&state, &own, request.steps).await?))
+}
+
+/// Restores `steps` checkpoints back. The caller holds the session's gate.
+async fn undo_locked(
+    state: &AppState,
+    own: &Owned,
+    steps: u32,
+) -> Result<CheckpointResponse, ApiError> {
+    if steps == 0 {
+        return Err(SandboxError::invalid_argument("steps must be at least 1").into());
+    }
+    checkpoint_now(state, &own.owner, own.state.id, &own.session).await?;
+    let steps = steps as usize;
     let target = {
         let table = state.sessions.0.read().await;
         let entry = table
             .get(&own.state.id)
-            .ok_or_else(|| SandboxError::not_found(format!("session {id} not found")))?;
+            .ok_or_else(|| SandboxError::not_found("session not found"))?;
         let len = entry.roots.len();
         if steps >= len {
             return Err(SandboxError::invalid_argument(format!(
@@ -2060,11 +2137,11 @@ pub async fn undo_session(
             entry.state.updated_at = SystemTime::now();
         }
     }
-    save_session(&state, own.state.id, &restored).await?;
-    Ok(Json(CheckpointResponse {
+    save_session(state, own.state.id, &restored).await?;
+    Ok(CheckpointResponse {
         root: target.root,
-        checkpoints: checkpoint_usage_of(&state, own.state.id).await,
-    }))
+        checkpoints: checkpoint_usage_of(state, own.state.id).await,
+    })
 }
 
 /// The session's `/etc/agent/env.json`, as `sandbox info --json` prints it.
@@ -2142,21 +2219,35 @@ pub async fn fork_command(
     Path(id): Path<String>,
     Json(request): Json<ForkCommandRequest>,
 ) -> Result<Json<ForkCommandResponse>, ApiError> {
-    if request.count == 0 || request.count > MAX_FORK_COUNT {
+    let own = owned(&state, &owner, &id).await?;
+    let _gate = own.gate.lock().await;
+    Ok(Json(
+        fork_locked(&state, &own, request.count, &request.argv).await?,
+    ))
+}
+
+/// Forks the current state into `count` children and runs `argv` in each. The caller
+/// holds the session's gate.
+async fn fork_locked(
+    state: &AppState,
+    own: &Owned,
+    count: u32,
+    argv: &[String],
+) -> Result<ForkCommandResponse, ApiError> {
+    if count == 0 || count > MAX_FORK_COUNT {
         return Err(SandboxError::invalid_argument(format!(
             "count must be between 1 and {MAX_FORK_COUNT}"
         ))
         .into());
     }
-    if request.argv.is_empty() {
+    if argv.is_empty() {
         return Err(SandboxError::invalid_argument("argv must not be empty").into());
     }
-    let own = owned(&state, &owner, &id).await?;
-    let _gate = own.gate.lock().await;
+    let owner = &own.owner;
     // The children start from the current state, which is pinned first.
-    let newest = checkpoint_now(&state, own.state.id, &own.session).await?;
-    let mut children = Vec::with_capacity(request.count as usize);
-    for _ in 0..request.count {
+    let newest = checkpoint_now(state, owner, own.state.id, &own.session).await?;
+    let mut children = Vec::with_capacity(count as usize);
+    for _ in 0..count {
         let child: Arc<dyn Session> = sandbox_session::restore_limited(newest.root, &own.limits)
             .await?
             .into();
@@ -2168,19 +2259,19 @@ pub async fn fork_command(
             HashMap::new(),
             own.limits.clone(),
         );
-        stamp(&state, &mut entry, &child).await?;
+        stamp(state, &mut entry, &child).await?;
         write_forked_env_json(&child, child_id, &own.limits).await?;
-        admit_session(&state, &owner, entry).await?;
-        state.usage.add(&owner, |c| c.sessions_created += 1);
-        checkpoint_now(&state, child_id, &child).await?;
+        admit_session(state, owner, entry).await?;
+        state.usage.add(owner, |c| c.sessions_created += 1);
+        checkpoint_now(state, owner, child_id, &child).await?;
 
         let exec = ExecRequest {
-            argv: request.argv.clone(),
+            argv: argv.to_vec(),
             ..Default::default()
         };
         let before = committed_root(child.as_ref()).await;
         let result = child.exec(exec.clone()).await;
-        state.usage.add(&owner, |c| {
+        state.usage.add(owner, |c| {
             c.execs += 1;
             if let Ok(out) = &result {
                 c.exec_wall_ms += out.wall_ms;
@@ -2188,9 +2279,9 @@ pub async fn fork_command(
         });
         let files = files_since(child.as_ref(), before).await;
         let changed_files = files.as_ref().map_or(0, Vec::len);
-        record_exec(&state, child_id, &exec, &result, files).await;
-        checkpoint_after_exec(&state, child_id, &child).await?;
-        save_session(&state, child_id, &child).await?;
+        record_exec(state, child_id, &exec, &result, files).await;
+        checkpoint_after_exec(state, owner, child_id, &child).await?;
+        save_session(state, child_id, &child).await?;
         children.push(ForkedChild {
             session_id: child_id.to_string(),
             exit_code: result.as_ref().ok().map(|out| out.exit_code),
@@ -2198,8 +2289,146 @@ pub async fn fork_command(
             changed_files,
         });
     }
-    persist(&state).await?;
-    Ok(Json(ForkCommandResponse { children }))
+    persist(state).await?;
+    Ok(ForkCommandResponse { children })
+}
+
+/// Runs `sandbox checkpoint`, `sandbox undo [N]`, or `sandbox fork N -- <cmd>` typed
+/// as an exec from inside the session. Returns `None` for any other argv, which then
+/// runs in the shell as usual. The caller holds the session's gate.
+async fn host_sandbox_command(
+    state: &AppState,
+    own: &Owned,
+    argv: &[String],
+) -> Option<ExecResult> {
+    let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let outcome = match args.as_slice() {
+        ["sandbox", "checkpoint"] => checkpoint_locked(state, own)
+            .await
+            .map(|r| r.root.to_string())
+            .map_err(|ApiError(e)| e),
+        ["sandbox", "undo"] => undo_locked(state, own, 1)
+            .await
+            .map(|r| r.root.to_string())
+            .map_err(|ApiError(e)| e),
+        ["sandbox", "undo", steps] => {
+            let Ok(steps) = steps.parse::<u32>() else {
+                return Some(usage_error("sandbox undo: steps must be a number"));
+            };
+            undo_locked(state, own, steps)
+                .await
+                .map(|r| r.root.to_string())
+                .map_err(|ApiError(e)| e)
+        }
+        ["sandbox", "fork", count, "--", command @ ..] if !command.is_empty() => {
+            let Ok(count) = count.parse::<u32>() else {
+                return Some(usage_error("sandbox fork: count must be a number"));
+            };
+            let argv: Vec<String> = command.iter().map(|s| s.to_string()).collect();
+            return Some(match fork_locked(state, own, count, &argv).await {
+                Ok(response) => {
+                    let failed = response.children.iter().any(|c| c.exit_code != Some(0));
+                    let lines: String = response
+                        .children
+                        .iter()
+                        .map(|child| {
+                            let outcome = match (child.exit_code, &child.error) {
+                                (Some(0), _) => "ok".to_string(),
+                                (Some(code), _) => format!("exit {code}"),
+                                (None, error) => {
+                                    format!("error: {}", error.as_deref().unwrap_or("unknown"))
+                                }
+                            };
+                            format!(
+                                "{} {outcome} changed={}\n",
+                                child.session_id, child.changed_files
+                            )
+                        })
+                        .collect();
+                    ExecResult {
+                        exit_code: i32::from(failed),
+                        stdout: lines.into_bytes(),
+                        stderr: Vec::new(),
+                        cpu_ms: 0,
+                        wall_ms: 0,
+                    }
+                }
+                Err(ApiError(error)) => failed_command(error),
+            });
+        }
+        ["sandbox", "checkpoint" | "undo" | "fork", ..] => {
+            return Some(usage_error(
+                "usage: sandbox checkpoint | sandbox undo [N] | sandbox fork N -- <cmd>",
+            ))
+        }
+        _ => return None,
+    };
+    Some(match outcome {
+        Ok(line) => ExecResult {
+            exit_code: 0,
+            stdout: format!("{line}\n").into_bytes(),
+            stderr: Vec::new(),
+            cpu_ms: 0,
+            wall_ms: 0,
+        },
+        Err(error) => failed_command(error),
+    })
+}
+
+/// A command that failed as a host operation: exit 1, with the reason on stderr.
+fn failed_command(error: SandboxError) -> ExecResult {
+    ExecResult {
+        exit_code: 1,
+        stdout: Vec::new(),
+        stderr: format!("{}\n", error.message).into_bytes(),
+        cpu_ms: 0,
+        wall_ms: 0,
+    }
+}
+
+fn usage_error(message: &str) -> ExecResult {
+    ExecResult {
+        exit_code: 2,
+        stdout: Vec::new(),
+        stderr: format!("{message}\n").into_bytes(),
+        cpu_ms: 0,
+        wall_ms: 0,
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_budget_tests {
+    use super::*;
+    use sandbox_types::hash::ContentHash;
+
+    fn root(byte: u8, bytes: u64) -> CheckpointRoot {
+        CheckpointRoot {
+            root: ContentHash::new(&[byte]),
+            bytes,
+        }
+    }
+
+    #[test]
+    fn eviction_drops_the_oldest_roots_until_the_total_fits() {
+        let mut a = vec![root(1, 40), root(2, 40), root(3, 40)];
+        let mut b = vec![root(4, 30), root(5, 30)];
+        assert!(evict_to_budget(&mut [&mut a, &mut b], 100));
+        assert!(
+            a.iter().map(|r| r.bytes).sum::<u64>() + b.iter().map(|r| r.bytes).sum::<u64>() <= 100
+        );
+        // Every list keeps its newest root.
+        assert_eq!(a.last().unwrap().root, ContentHash::new(&[3]));
+        assert_eq!(b.last().unwrap().root, ContentHash::new(&[5]));
+    }
+
+    #[test]
+    fn eviction_changes_nothing_when_the_newest_roots_do_not_fit() {
+        let mut a = vec![root(1, 10), root(2, 60)];
+        let mut b = vec![root(3, 60)];
+        assert!(!evict_to_budget(&mut [&mut a, &mut b], 100));
+        assert_eq!(a.len(), 2);
+        assert_eq!(b.len(), 1);
+    }
 }
 
 fn parse_snapshot_id(raw: &str) -> Result<SnapshotId, ApiError> {

@@ -331,3 +331,60 @@ async fn fork_refuses_an_empty_command_and_a_zero_count() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+fn stdout_text(result: &Value) -> String {
+    let bytes: Vec<u8> = result["stdout"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b.as_u64().unwrap() as u8)
+        .collect();
+    String::from_utf8(bytes).unwrap()
+}
+
+#[tokio::test]
+async fn sandbox_commands_typed_inside_the_session_run_the_host_operations() {
+    let (app, key) = setup();
+    let id = create(&app, &key, json!({})).await;
+    put(&app, &key, &id, "a.txt", "one").await;
+    exec_ok(&app, &key, &id, &["true"]).await;
+    put(&app, &key, &id, "a.txt", "two").await;
+
+    let pinned = exec_ok(&app, &key, &id, &["sandbox", "checkpoint"]).await;
+    assert_eq!(pinned["exit_code"], 0, "{pinned}");
+    assert_eq!(
+        stdout_text(&pinned).trim().len(),
+        64,
+        "prints the root hash"
+    );
+
+    let undone = exec_ok(&app, &key, &id, &["sandbox", "undo", "1"]).await;
+    assert_eq!(undone["exit_code"], 0, "{undone}");
+    assert_eq!(get(&app, &key, &id, "a.txt").await.as_deref(), Some("one"));
+
+    let forked = exec_ok(
+        &app,
+        &key,
+        &id,
+        &["sandbox", "fork", "2", "--", "touch", "/r"],
+    )
+    .await;
+    assert_eq!(forked["exit_code"], 0, "{forked}");
+    let lines: Vec<String> = stdout_text(&forked).lines().map(String::from).collect();
+    assert_eq!(lines.len(), 2);
+    assert!(
+        lines.iter().all(|line| line.contains(" ok changed=")),
+        "{lines:?}"
+    );
+    let child = lines[0].split(' ').next().unwrap();
+    assert_eq!(
+        get(&app, &key, child, "a.txt").await.as_deref(),
+        Some("one")
+    );
+
+    let bad = exec_ok(&app, &key, &id, &["sandbox", "fork", "2"]).await;
+    assert_eq!(
+        bad["exit_code"], 2,
+        "a fork without a command is a usage error"
+    );
+}

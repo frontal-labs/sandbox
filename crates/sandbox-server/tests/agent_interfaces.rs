@@ -348,7 +348,7 @@ async fn the_agent_cannot_change_or_remove_env_json() {
 }
 
 #[tokio::test]
-async fn the_shell_prints_env_json_and_refuses_server_only_commands() {
+async fn the_shell_prints_env_json_and_runs_undo_as_a_host_command() {
     let (app, key) = setup();
     let id = create(&app, &key, None).await;
     let result = exec(&app, &key, &id, &["sandbox", "info"]).await;
@@ -362,6 +362,7 @@ async fn the_shell_prints_env_json_and_refuses_server_only_commands() {
     let env = json_of(&stdout);
     assert_eq!(env["session"], id);
 
+    // A fresh session has no checkpoint to undo to, so the host command fails with 1.
     let result = exec(&app, &key, &id, &["sandbox", "undo"]).await;
-    assert_eq!(result["exit_code"], 2);
+    assert_eq!(result["exit_code"], 1);
 }
