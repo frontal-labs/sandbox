@@ -62,8 +62,16 @@ of every pinned root.
 
 `GET /v1/sessions/{id}` reports `checkpoints: {policy, count, retain, bytes}`.
 `bytes` is the logical size of the pinned roots. A block shared by two roots counts
-twice. Unpinned blocks are not freed until checkpoint and blob GC lands, so the
-figure is not the storage the server holds.
+twice, so the figure is not the storage the server holds.
+
+Each key's pinned checkpoints are bounded at 1 GiB of logical bytes across all its
+sessions. Over that, the key's oldest checkpoints are dropped first. A per-exec pin
+that still does not fit is skipped, and an explicit checkpoint, undo, or fork fails
+with `RESOURCE_EXHAUSTED`.
+
+Unpinning is real storage reclaim. A collection (`POST /v1/gc`, or the scheduled
+sweep under `frontal-sandbox serve`) removes the blobs of unpinned roots that no
+other root uses.
 
 ## Undo
 
@@ -74,6 +82,12 @@ with `INVALID_ARGUMENT`.
 
 Undo restores the filesystem only. A Tier 1 session keeps no processes between
 commands, so none are lost. The undo itself is not recorded in the trace.
+
+Inside the session, `sandbox checkpoint`, `sandbox undo [N]`, and
+`sandbox fork N -- <cmd>` run as ordinary execs. The server recognizes them by argv,
+so they work through the exec route. The reply is the same text the host commands print. They
+exit 1 when the operation fails, and 2 when the usage is wrong. A multi-command script
+run through the shell does not reach them: `sandbox` in a script runs only `info`.
 
 ## Fork with a command
 
@@ -93,14 +107,18 @@ count. Each child's command is recorded in that child's trace.
 
 The top-level `frontal-sandbox fork <snapshot>` still forks a snapshot.
 
-Inside the shell, `sandbox info` prints the same file. It is the only `sandbox`
-subcommand the shell runs.
+Inside the shell, `sandbox info` prints the same file. The shell's own `sandbox`
+builtin runs only `info`. The other subcommands are handled by the exec route, as
+described under Undo.
+
+## SDKs
+
+The Rust SDK's `Client` has the four methods. The TypeScript and Python SDKs have a
+`Tier1Client` in their own modules (`sdks/typescript/src/client/tier1.ts` and
+`sdks/python/sandbox_sdk/tier1.py`). Neither is re-exported from the package index
+yet, because those index files had uncommitted changes when this was written.
 
 ## Not yet implemented
 
-- In-shell `sandbox checkpoint`, `undo`, and `fork`. The shell has no path to the
-  server, so it refuses them with exit 2 and names the host command. `sandbox info`
-  works inside the shell and prints env.json.
-- TypeScript and Python SDK methods for the checkpoint and fork routes.
-- Storage reclaim for unpinned checkpoints. This waits for checkpoint and blob GC.
-- A per-key quota on checkpoint bytes. Retention is capped per session only.
+- A running server does not expose its GC schedule through the API. Operators set
+  the interval with `frontal-sandbox serve`.
