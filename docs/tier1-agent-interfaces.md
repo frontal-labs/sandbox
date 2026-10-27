@@ -93,9 +93,14 @@ count. Each child's command is recorded in that child's trace.
 
 The top-level `frontal-sandbox fork <snapshot>` still forks a snapshot.
 
+Inside the shell, `sandbox info` prints the same file. It is the only `sandbox`
+subcommand the shell runs.
+
 ## Not yet implemented
 
-- An in-shell `sandbox` builtin. The commands above run from outside the session.
+- In-shell `sandbox checkpoint`, `undo`, and `fork`. The shell has no path to the
+  server, so it refuses them with exit 2 and names the host command. `sandbox info`
+  works inside the shell and prints env.json.
 - TypeScript and Python SDK methods for the checkpoint and fork routes.
 - Storage reclaim for unpinned checkpoints. This waits for checkpoint and blob GC.
 - A per-key quota on checkpoint bytes. Retention is capped per session only.
