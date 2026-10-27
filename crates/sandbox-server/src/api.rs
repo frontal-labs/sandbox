@@ -845,8 +845,11 @@ pub async fn create_session(
     Json(config): Json<SessionConfig>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
     refuse_unenforced(&config)?;
-    if config.checkpoint_retain == 0 {
-        return Err(SandboxError::invalid_argument("checkpoint_retain must be at least 1").into());
+    if config.checkpoint_retain == 0 || config.checkpoint_retain > MAX_CHECKPOINT_RETAIN {
+        return Err(SandboxError::invalid_argument(format!(
+            "checkpoint_retain must be between 1 and {MAX_CHECKPOINT_RETAIN}"
+        ))
+        .into());
     }
     let tenant_id = config.tenant_id;
     let labels = config.labels.clone();
@@ -928,6 +931,10 @@ async fn write_forked_env_json(
     limits: &ResourceLimits,
 ) -> Result<(), SandboxError> {
     let inherited = read_session_file(session.as_ref(), sandbox_session::ENV_JSON_PATH).await?;
+    // A copy over the host-file cap, or one that does not parse, is not trusted. The
+    // child gets a fresh file instead.
+    let inherited =
+        inherited.filter(|bytes| bytes.len() as u64 <= sandbox_vfs::SYSTEM_FILE_MAX_BYTES);
     let env = match inherited
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
     {
@@ -1857,6 +1864,10 @@ pub async fn fork_snapshot(
     persist(&state).await?;
     Ok(Json(ForkResponse { session_ids }))
 }
+
+/// The most checkpoint roots a session may keep pinned. Every pinned root keeps its
+/// blobs alive through GC, so this bounds the storage one session can hold.
+pub const MAX_CHECKPOINT_RETAIN: u32 = 256;
 
 /// Pins a checkpoint for the session's current state, and returns it. A state equal
 /// to the newest checkpoint is not pinned again.

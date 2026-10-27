@@ -97,6 +97,8 @@ pub async fn collect_garbage(state: &AppState) -> Result<GcReport, SandboxError>
             if let Some(checkpoint) = &entry.checkpoint {
                 roots.push(checkpoint.root);
             }
+            // Pinned checkpoints keep their blobs alive, so undo still has them.
+            roots.extend(entry.roots.iter().map(|pinned| pinned.root));
         }
         {
             let records = state.snapshots.records.read().await;
