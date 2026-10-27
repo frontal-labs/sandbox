@@ -1267,6 +1267,11 @@ struct Ran {
 /// budget keep their outputs here, so the full stream stays readable.
 pub const MAX_SPILLED_BYTES_PER_SESSION: u64 = 64 * 1024 * 1024;
 
+/// The most spilled runs a session may keep. Each run also costs `SPILL_ENTRY_OVERHEAD`
+/// bytes against the budget, so runs with empty output cannot grow the record for free.
+pub const MAX_SPILLED_RUNS: usize = 4096;
+const SPILL_ENTRY_OVERHEAD: u64 = 256;
+
 /// The sequence number after the last run the session has recorded or spilled.
 fn next_seq_after(runs: &[RunRecord], spilled: &[SpilledRun]) -> u64 {
     runs.iter()
@@ -1320,10 +1325,13 @@ async fn append_run(state: &AppState, id: SessionId, ran: Ran) -> Option<u64> {
     let sandbox_trace::Outcome::Completed { stdout, stderr, .. } = outcome else {
         return None;
     };
-    let bytes = (stdout.len() + stderr.len()) as u64;
+    let bytes = (stdout.len() + stderr.len()) as u64 + SPILL_ENTRY_OVERHEAD;
     {
         let table = state.sessions.0.read().await;
-        if table.get(&id)?.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION {
+        let entry = table.get(&id)?;
+        if entry.spilled.len() >= MAX_SPILLED_RUNS
+            || entry.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION
+        {
             return None;
         }
     }
@@ -1332,7 +1340,9 @@ async fn append_run(state: &AppState, id: SessionId, ran: Ran) -> Option<u64> {
     let stderr_hash = store.put(&stderr, Default::default()).await.ok()?;
     let mut table = state.sessions.0.write().await;
     let entry = table.get_mut(&id)?;
-    if entry.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION {
+    if entry.spilled.len() >= MAX_SPILLED_RUNS
+        || entry.spilled_bytes + bytes > MAX_SPILLED_BYTES_PER_SESSION
+    {
         return None;
     }
     entry.spilled_bytes += bytes;
