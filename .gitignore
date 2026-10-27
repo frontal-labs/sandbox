@@ -34,3 +34,6 @@ fuzz/
 
 # Local Kilo tooling, not part of the project
 .kilo/
+
+# Lock state written by the security-review plugin, not project code
+claude-security-guidance-501/
