@@ -25,6 +25,10 @@ use std::sync::Arc;
 /// Events a slow watcher can fall behind before it gets `Overflow`.
 const EVENT_CAPACITY: usize = 1024;
 
+/// The largest a host-owned file may be. Only this many bytes of one are exempt from
+/// quotas. Any excess counts like agent data, so a large file cannot escape the limits.
+pub const SYSTEM_FILE_MAX_BYTES: u64 = 64 * 1024;
+
 #[cfg(test)]
 mod tests;
 
@@ -159,6 +163,12 @@ impl Vfs {
         if !self.is_exempt(path) {
             return Err(VfsError::InvalidPath(format!(
                 "{path} is not a host-owned file"
+            )));
+        }
+        if data.len() as u64 > SYSTEM_FILE_MAX_BYTES {
+            return Err(VfsError::QuotaExceeded(format!(
+                "host-owned file {path} would be {} bytes; the limit is {SYSTEM_FILE_MAX_BYTES}",
+                data.len()
             )));
         }
         self.require_parent_dir(path).await?;
@@ -436,7 +446,7 @@ impl Vfs {
         let (mut exempt_bytes, mut exempt_inodes) = (0u64, 0u64);
         for path in &self.exempt {
             if let Some(Kind::File(len)) = self.kind(path).await? {
-                exempt_bytes += len;
+                exempt_bytes += len.min(SYSTEM_FILE_MAX_BYTES);
                 exempt_inodes += 1;
             }
         }

@@ -11,4 +11,4 @@ pub use diff::{diff_trees, reachable_blobs, TreeChange};
 pub use error::{VfsError, VfsResult};
 pub use ops::*;
 pub use quota::Quotas;
-pub use vfs::Vfs;
+pub use vfs::{Vfs, SYSTEM_FILE_MAX_BYTES};
