@@ -7,8 +7,8 @@ use sandbox_scheduler::Scheduler;
 use sandbox_server::auth::AuthManager;
 use sandbox_server::create_router;
 use sandbox_types::{
-    ErrorCode, ExecEvent, ExecRequest, OutputStream, SessionConfig, SessionId, SnapshotId,
-    TenantId, Tier, TierPreference,
+    CheckpointPolicy, ErrorCode, ExecEvent, ExecRequest, OutputStream, SessionConfig, SessionId,
+    SnapshotId, TenantId, Tier, TierPreference,
 };
 use std::sync::Arc;
 
@@ -202,5 +202,46 @@ async fn sleep_and_wake_restore_files_over_http() {
     assert_eq!(
         client.read_file(forks[0], "/kept.txt").await.unwrap(),
         b"before sleep"
+    );
+}
+
+#[tokio::test]
+async fn checkpoints_undo_info_and_fork_command_over_http() {
+    let client = client().await;
+    let session = client.create_session(config()).await.unwrap();
+    client
+        .write_file(session, "a.txt", b"one".to_vec())
+        .await
+        .unwrap();
+    client.exec(session, "true").await.unwrap();
+    client
+        .write_file(session, "a.txt", b"two".to_vec())
+        .await
+        .unwrap();
+    client.exec(session, "true").await.unwrap();
+
+    let info = client.info(session).await.unwrap();
+    assert_eq!(info["schema"], 1);
+
+    let pinned = client.checkpoint(session).await.unwrap();
+    assert_eq!(pinned.checkpoints.policy, CheckpointPolicy::PerExec);
+    assert!(pinned.checkpoints.count >= 3);
+
+    let undone = client.undo(session, 1).await.unwrap();
+    assert!(undone.checkpoints.count >= 2);
+    assert_eq!(client.read_file(session, "a.txt").await.unwrap(), b"one");
+
+    let children = client
+        .fork_command(session, 2, &["touch".to_string(), "/r".to_string()])
+        .await
+        .unwrap();
+    assert_eq!(children.len(), 2);
+    assert!(children.iter().all(|child| child.exit_code == Some(0)));
+    assert_eq!(
+        client
+            .read_file(children[0].session_id, "a.txt")
+            .await
+            .unwrap(),
+        b"one"
     );
 }
