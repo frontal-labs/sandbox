@@ -3,7 +3,7 @@
 filegroup(
     name = "frontal_sandbox",
     srcs = glob(
-        ["bin/**", "lib/**", "package.json", "README.md"],
+        ["bin/**", "package.json", "README.md"],
     ),
     visibility = ["//visibility:public"],
 )
