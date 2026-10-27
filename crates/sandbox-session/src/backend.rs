@@ -12,6 +12,10 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
+/// The file the host writes into every Tier 1 session (IMAGE.md §4.5). It is exempt
+/// from quotas, so a session's limits apply only to what the agent writes.
+pub const ENV_JSON_PATH: &str = "/etc/agent/env.json";
+
 /// The blob store shared by every backend in the process. It is set once, by
 /// `install_blob_store`, or lazily to an in-memory store on first use.
 static STORE: OnceLock<Arc<dyn BlobStore>> = OnceLock::new();
@@ -66,8 +70,11 @@ impl IsolateBackend {
     /// A session that starts from a checkpoint: its filesystem root, working
     /// directory, and environment.
     fn with_checkpoint(checkpoint: Checkpoint, limits: &ResourceLimits) -> Self {
-        let fs =
-            Arc::new(Vfs::new(checkpoint.root, shared_store()).with_quotas(quotas_for(limits)));
+        let fs = Arc::new(
+            Vfs::new(checkpoint.root, shared_store())
+                .with_quotas(quotas_for(limits))
+                .with_exempt_files(&[ENV_JSON_PATH]),
+        );
         let shell = Shell::new(
             fs.clone(),
             ShellConfig {
@@ -191,6 +198,13 @@ impl Session for IsolateBackend {
 
     fn fs(&self) -> &dyn SessionFs {
         self.fs.as_ref()
+    }
+
+    async fn write_system_file(&self, path: &str, data: &[u8]) -> Result<(), SandboxError> {
+        self.fs
+            .write_system_file(path, data)
+            .await
+            .map_err(crate::filesystem::vfs_error)
     }
 
     async fn snapshot(&self) -> Result<ContentHash, SandboxError> {
