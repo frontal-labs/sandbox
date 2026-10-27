@@ -208,6 +208,7 @@ pub fn create_exec_request(cmd: &str) -> ExecRequest {
         // The isolate backend does not enforce exec timeouts yet, so none is set.
         timeout_ms: None,
         stream: false,
+        output_limit: None,
     }
 }
 
