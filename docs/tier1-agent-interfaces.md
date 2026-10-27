@@ -46,7 +46,9 @@ is in the session's trace, so it is served at `GET /v1/sessions/{id}/fs/trace/ex
 for stdout and `.err` for stderr. If the run was not recorded, the marker says
 `full output not recorded` and names no path.
 
-The trace has its own cap (8 MiB per session). Streamed `exec` output is not capped.
+A single run may produce up to 8 MiB of output. The trace also holds 8 MiB per
+session, so the full stream of a run is recorded only while that budget lasts.
+Streamed `exec` output is not capped.
 
 ## Checkpoints
 
@@ -89,12 +91,22 @@ so they work through the exec route. The reply is the same text the host command
 exit 1 when the operation fails, and 2 when the usage is wrong. A multi-command script
 run through the shell does not reach them: `sandbox` in a script runs only `info`.
 
+## Shell additions
+
+`sh -c <script>` runs a script in a subshell, as `( ... )` does: its variables do not
+leak out, and `exit` ends only the `sh`. `$RANDOM` is a value from 0 to 32767, seeded per
+shell, and an explicit assignment overrides it. Scripts that use `$RANDOM` will not
+replay to the same output, because the trace replays against the values recorded.
+
 ## Fork with a command
 
 `POST /v1/sessions/{id}/fork` with `{"count": N, "argv": [...]}` pins the current
 state, creates N independent children from it, and runs `argv` in each. The
 response reports each child's session ID, exit code or error, and changed-file
 count. Each child's command is recorded in that child's trace.
+
+The IMAGE.md example `sandbox fork 3 -- sh -c 'echo $RANDOM > /r'` runs as written.
+Each child writes its own `/r`.
 
 ## Surfaces
 
