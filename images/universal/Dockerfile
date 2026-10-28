@@ -89,9 +89,12 @@ RUN ln -s bun /usr/local/bin/bunx
 
 # Coding agents.
 
-# opencode-ai fetches its native binary in a lifecycle script, so it needs scripts.
-# Versions are pinned. codex and pi do not need scripts.
-RUN npm install -g opencode-ai@1.19.5 && \
+# opencode-ai's own postinstall only copies its platform binary into place. Do that
+# copy here instead, so no lifecycle script runs. This image is linux-x64 only.
+# Versions are pinned.
+RUN npm install -g --ignore-scripts opencode-ai@1.19.5 opencode-linux-x64@1.19.5 && \
+  cp "$(npm root -g)/opencode-linux-x64/bin/opencode" "$(npm root -g)/opencode-ai/bin/opencode.exe" && \
+  chmod +x "$(npm root -g)/opencode-ai/bin/opencode.exe" && \
   npm install -g --ignore-scripts @openai/codex@0.165.0 @earendil-works/pi-coding-agent@1.4.0 && \
   npm cache clean --force
 
