@@ -4,6 +4,7 @@
 
 import { createSandboxError } from "../errors/index.js"
 import type { ErrorCode } from "../errors/index.js"
+import { toCamelCase } from "../types/convert.js"
 
 export interface Tier1Config {
   baseUrl: string
@@ -24,12 +25,12 @@ export interface CheckpointResponse {
 }
 
 export interface ForkedChild {
-  session_id: string
+  sessionId: string
   /** The exit code, or null when the command could not run. */
-  exit_code: number | null
+  exitCode: number | null
   /** Why the command could not run, when it did not. */
   error: string | null
-  changed_files: number
+  changedFiles: number
 }
 
 export class Tier1Client {
@@ -63,7 +64,7 @@ export class Tier1Client {
       `/v1/sessions/${session}/fork`,
       { count, argv },
     )
-    return body.children
+    return toCamelCase(body.children) as ForkedChild[]
   }
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {

@@ -54,6 +54,6 @@ describe("Tier1Client", () => {
 
     const children = await client.forkCommand("01SESSION", 1, ["touch", "/r"])
 
-    expect(children).toEqual([{ session_id: "01CHILD", exit_code: 0, error: null, changed_files: 1 }])
+    expect(children).toEqual([{ sessionId: "01CHILD", exitCode: 0, error: null, changedFiles: 1 }])
   })
 })

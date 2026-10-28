@@ -81,7 +81,7 @@ private async request<T>(
             `Response validation failed: ${parseResult.error.message}`,
           )
         }
-        return parseResult.data
+        return parseResult.data as T
       }
 
       return data as T

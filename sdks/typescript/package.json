@@ -66,7 +66,7 @@
   },
   "dependencies": {
     "@ulid/ulid": "^0.1.0",
-    "zod": "^3.23.0"
+    "zod": "^4.6.7"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
