@@ -1,10 +1,14 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("@npm_sdk//:defs.bzl", "npm_link_all_packages")
 
 # Root BUILD.bazel - workspace-level configuration
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])  # Apache 2.0
+
+# The pnpm lock lives here, so the npm packages it resolves are linked into this package.
+npm_link_all_packages(name = "node_modules")
 
 # The x86_64-apple-darwin platform is defined in bazel/platforms/BUILD.bazel.
 
