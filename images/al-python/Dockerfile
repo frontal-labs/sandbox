@@ -3,7 +3,7 @@ FROM builder-base AS builder-python
 ARG PYTHON_VERSION=3.13.1
 
 RUN mkdir -p /sandbox/runtimes/python && \
-  wget --https-only --secure-protocol=TLSv1_2 "https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz" && \
+  wget --https-only --secure-protocol=TLSv1_2 --max-redirect=0 "https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz" && \
   tar -xvf "Python-$PYTHON_VERSION.tgz" && \
   cd "Python-$PYTHON_VERSION" && \
   ./configure --enable-optimizations --prefix=/sandbox/runtimes/python && \
