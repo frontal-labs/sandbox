@@ -12,10 +12,10 @@ from urllib.parse import quote
 import httpx
 
 from .errors import (
-    invalid_argument,
     Result,
     SandboxError,
     internal,
+    invalid_argument,
     is_sandbox_error,
     network_error,
     unsupported,

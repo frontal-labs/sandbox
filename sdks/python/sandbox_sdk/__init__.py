@@ -6,7 +6,6 @@ A client library for interacting with the sandbox execution system.
 
 from .client import Client, ClientConfig
 from .embedded import EmbeddedSandbox, EmbeddedSandboxConfig
-from .tier1 import Tier1Client
 from .errors import (
     ErrorCode,
     Result,
@@ -34,6 +33,7 @@ from .errors import (
     vm_boot_failed,
     wasm_error,
 )
+from .tier1 import Tier1Client
 from .types import (
     ExecRequest,
     ExecResult,
