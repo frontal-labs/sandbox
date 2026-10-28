@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-al-python",
+  "version": "1.0.0",
+  "description": "Python image on Amazon Linux for Frontal Sandbox",
+  "license": "MIT",
+  "private": true
+}

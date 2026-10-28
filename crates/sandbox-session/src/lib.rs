@@ -1,8 +1,16 @@
 //! Session trait and isolate backend for the sandbox system
 
 pub mod backend;
+pub mod filesystem;
+pub mod output;
 pub mod session;
 
-pub use backend::{install_blob_store, restore, restore_checkpoint, IsolateBackend};
+pub use backend::{
+    blob_store, changed_since, committed_root, install_blob_store, quotas_for, restore,
+    restore_checkpoint, restore_checkpoint_limited, restore_limited, IsolateBackend, ENV_JSON_PATH,
+};
+pub use filesystem::{delete_file, replay_run, vfs_error, write_file};
+pub use output::{cap_output, DEFAULT_OUTPUT_LIMIT};
+pub use sandbox_shell::{OutputChunk, OutputObserver};
 pub use session::Checkpoint;
 pub use session::Session;

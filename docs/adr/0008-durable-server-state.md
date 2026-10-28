@@ -27,6 +27,6 @@ The server kept every key, snapshot record, and sleeping session in memory, so a
 - Durability reuses the existing disk store, and the in-memory path is unchanged.
 
 ### Negative
-- The state file is rewritten in full on each change. That is simple and correct, but it does not scale to many thousands of snapshots. A log-structured store would replace it.
+- The state file is rewritten in full on each change. That is simple and correct, but it does not scale to many thousands of snapshots. *Superseded in part by ADR 0016: changes append to a log, and the base file is rewritten only at compaction.* A log-structured store would replace it.
 - A process-wide blob store is installed once, so a process cannot switch data directories after it has created a session.
 - Live sessions were not durable. Superseded by ADR 0010.

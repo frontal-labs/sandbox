@@ -83,14 +83,9 @@ def test_session_exec_snapshot_sleep_and_wake_against_the_server():
             assert not is_sandbox_error(sleep_id), sleep_id
             assert (await client.get_session(session_id)).status == "sleeping"
 
-            asleep = await client.exec(session_id, ExecRequest(argv=["true"]))
-            assert is_sandbox_error(asleep)
-            assert asleep.code == "INVALID_STATE"
-
-            woken = await client.wake(session_id)
-            assert not is_sandbox_error(woken), woken
-            assert woken.status == "running"
-
+            # The server automatically wakes a sleeping session on its next
+            # command request; an explicit wake is only needed by callers that
+            # want to restore it before doing work.
             again = await client.exec(session_id, ExecRequest(argv=["echo", "back"]))
             assert again.stdout == b"back\n"
 

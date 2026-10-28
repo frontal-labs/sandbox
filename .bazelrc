@@ -9,13 +9,43 @@ build --jobs=auto
 # Test configuration
 test --test_output=errors
 test --test_timeout=300
-test --test_arg=--nocapture
 test --runs_per_test=1
 test --flaky_test_attempts=3
 test --keep_going
 
-# Platform configuration - use x86_64 for Intel Mac
-build --platforms=//bazel/platforms:x86_64_apple_darwin
+# Platform configuration. The default target follows the host OS, so `bazel build //...`
+# works on a Mac and on a Linux runner without flags. --config=linux_aarch64 and
+# --config=linux_x86_64 still override it explicitly.
+common --enable_platform_specific_config
+build:macos --platforms=//bazel/platforms:x86_64_apple_darwin
+build:linux --platforms=//bazel/platforms:x86_64_unknown_linux_gnu
+
+# Reproducible outputs. A sandboxed action runs in a directory named for its PID
+# (for example sandbox/darwin-sandbox/1405/execroot/_main), and C and Rust debug
+# info record that directory. Two clean builds then differ. Running actions
+# locally keeps the execroot path fixed. This gives up sandbox isolation, so an
+# action that reads undeclared inputs is not caught. See docs/build-system.md.
+build:macos --spawn_strategy=local
+build:linux --spawn_strategy=local
+
+# Execution platform. MODULE.bazel registers the Darwin platform first, so without this
+# a Linux host picks Darwin toolchains (coreutils, tar) that cannot run there. The host
+# platform is detected by Bazel, so it is correct on x86_64 and aarch64 alike, and it is
+# tried before the registered ones.
+common:macos --extra_execution_platforms=@bazel_tools//tools:host_platform
+common:linux --extra_execution_platforms=@bazel_tools//tools:host_platform
+
+build:linux_aarch64 --platforms=//bazel/platforms:aarch64_unknown_linux_gnu
+build:linux_aarch64 --host_platform=//bazel/platforms:aarch64_unknown_linux_gnu
+build:linux_aarch64 --extra_execution_platforms=//bazel/platforms:aarch64_unknown_linux_gnu
+build:linux_x86_64 --platforms=//bazel/platforms:x86_64_unknown_linux_gnu
+build:linux_x86_64 --host_platform=//bazel/platforms:x86_64_unknown_linux_gnu
+build:linux_x86_64 --extra_execution_platforms=//bazel/platforms:x86_64_unknown_linux_gnu
+
+# Worker isolation needs a delegated cgroup (ADR 0022). Tests forward the path that
+# the Linux environment provides (docker/run-linux.sh sets it).
+test:linux_aarch64 --test_env=SANDBOX_CGROUP_ROOT
+test:linux_x86_64 --test_env=SANDBOX_CGROUP_ROOT
 
 # Release configuration
 build:release --compilation_mode=opt
@@ -41,6 +71,7 @@ query --order_output=no
 # Test configuration
 test --test_summary=detailed
 test --noverbose_failures
+test --test_tag_filters=-manual
 
 # Shared settings live in bazel/config. try-import skips a missing file, so
 # a fresh checkout still builds. Per-machine settings go in user.bazelrc, which

@@ -13,22 +13,10 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
-)
-
-rust_library(
-    name = "sandbox_snapshot_test",
-    edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_snapshot",
-        "@crates//:tokio",
-    ],
-    testonly = True,
 )

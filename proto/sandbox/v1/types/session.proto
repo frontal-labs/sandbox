@@ -19,6 +19,12 @@ enum TierPreference {
   TIER_PREFERENCE_VM = 3;
 }
 
+enum CheckpointPolicy {
+  CHECKPOINT_POLICY_UNSPECIFIED = 0;
+  CHECKPOINT_POLICY_PER_EXEC = 1;
+  CHECKPOINT_POLICY_MANUAL = 2;
+}
+
 enum SessionStatus {
   SESSION_STATUS_UNSPECIFIED = 0;
   SESSION_STATUS_CREATING = 1;
@@ -40,6 +46,8 @@ message SessionConfig {
   optional SnapshotId initial_snapshot = 7;
   optional SecretsConfig secrets = 8;
   map<string, string> labels = 9;
+  CheckpointPolicy checkpoint = 10;
+  optional uint32 checkpoint_retain = 11;
 }
 
 // Mirrors sandbox_types::SessionState.

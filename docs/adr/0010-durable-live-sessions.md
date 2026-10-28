@@ -22,6 +22,6 @@ ADR 0008 kept keys, snapshots, and sleeping sessions across a restart, but a run
 - Sleep and wake keep the shell state, which ADR 0006 did not.
 
 ### Negative
-- Every change commits the filesystem and rewrites the whole state file. That is correct but does not scale to many sessions. A log-structured store would replace the file.
+- Every change commits the filesystem and rewrites the whole state file. That is correct but does not scale to many sessions. *Superseded in part by ADR 0016: a save now appends only what changed. The save still serializes every entity to compare it.*
 - Every change that writes content adds blobs to the disk store, and every old checkpoint keeps its blobs. Nothing collects them yet, so a key that keeps rewriting large files grows the store without bound. Per-session quotas limit the live state, not this history. Garbage collection from live roots is the fix, planned under M5. Until then, the operator must watch the disk.
 - A memory-only server skips all of this, so its sessions are still lost on restart.

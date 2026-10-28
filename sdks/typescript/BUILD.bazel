@@ -1,9 +1,20 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project", "ts_config")
+load("@npm_sdk//:defs.bzl", "npm_link_all_packages")
+
+# Links the SDK's npm packages (from pnpm-lock.yaml at the root) into this package.
+npm_link_all_packages(name = "node_modules")
+
 
 # TypeScript configuration
+filegroup(
+    name = "tsconfig_base",
+    srcs = ["tsconfig.base.json"],
+)
+
 ts_config(
     name = "tsconfig",
     src = "tsconfig.json",
+    deps = [":tsconfig_base"],
 )
 
 # Main library
@@ -11,25 +22,19 @@ ts_project(
     name = "sandbox_sdk",
     srcs = glob(["src/**/*.ts"]),
     tsconfig = ":tsconfig",
-    deps = [],
-    visibility = ["//visibility:public"],
-)
-
-# Tests - use a separate ts_project for tests
-ts_project(
-    name = "sandbox_sdk_test",
-    srcs = glob(["tests/**/*.test.ts"]),
-    tsconfig = ":tsconfig",
+    transpiler = "tsc",
+    declaration = True,
+    out_dir = "dist",
+    root_dir = "src",
+    composite = True,
+    declaration_map = True,
+    source_map = True,
+    ts_build_info_file = "dist/tsbuildinfo.json",
     deps = [
-        ":sandbox_sdk",
+        ":node_modules/@types/node",
+        ":node_modules/@ulid/ulid",
+        ":node_modules/zod",
     ],
-    visibility = ["//visibility:public"],
-)
-
-# Alias for all tests
-alias(
-    name = "test",
-    actual = ":sandbox_sdk_test",
     visibility = ["//visibility:public"],
 )
 
@@ -39,3 +44,7 @@ alias(
     actual = ":sandbox_sdk",
     visibility = ["//visibility:public"],
 )
+
+# The TypeScript tests run with vitest (`npm test` in this package). They are not
+# built by Bazel yet: their imports reach outside the library's rootDir, which needs a
+# separate tsconfig. See PLAN.md open items.

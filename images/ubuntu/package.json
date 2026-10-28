@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-ubuntu",
+  "version": "1.0.0",
+  "description": "Ubuntu base image for Frontal Sandbox",
+  "license": "MIT",
+  "private": true
+}

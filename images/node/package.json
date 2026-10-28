@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-node",
+  "version": "1.0.0",
+  "description": "Node.js images for Frontal Sandbox",
+  "license": "MIT",
+  "private": true
+}

@@ -4,10 +4,30 @@ use crate::v1::types as pb;
 use sandbox_types::hash::ContentHash;
 use sandbox_types::policy::{NetworkPolicy, ResourceLimits, SecretsConfig};
 use sandbox_types::session::{
-    SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
+    CheckpointPolicy, SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
 };
 use sandbox_types::{SandboxError, SnapshotId, TenantId};
 use std::collections::HashMap;
+
+impl From<CheckpointPolicy> for pb::CheckpointPolicy {
+    fn from(policy: CheckpointPolicy) -> Self {
+        match policy {
+            CheckpointPolicy::PerExec => Self::PerExec,
+            CheckpointPolicy::Manual => Self::Manual,
+        }
+    }
+}
+
+impl TryFrom<pb::CheckpointPolicy> for CheckpointPolicy {
+    type Error = SandboxError;
+    fn try_from(policy: pb::CheckpointPolicy) -> Result<Self, Self::Error> {
+        match policy {
+            pb::CheckpointPolicy::PerExec => Ok(Self::PerExec),
+            pb::CheckpointPolicy::Manual => Ok(Self::Manual),
+            pb::CheckpointPolicy::Unspecified => Ok(Self::default()),
+        }
+    }
+}
 
 impl From<Tier> for pb::Tier {
     fn from(tier: Tier) -> Self {
@@ -95,6 +115,8 @@ impl From<SessionConfig> for pb::SessionConfig {
             initial_snapshot: config.initial_snapshot.map(Into::into),
             secrets: config.secrets.map(Into::into),
             labels: config.labels.into_iter().collect(),
+            checkpoint: pb::CheckpointPolicy::from(config.checkpoint) as i32,
+            checkpoint_retain: Some(config.checkpoint_retain),
         }
     }
 }
@@ -128,6 +150,11 @@ impl TryFrom<pb::SessionConfig> for SessionConfig {
             initial_snapshot,
             secrets: config.secrets.map(SecretsConfig::from),
             labels: config.labels.into_iter().collect(),
+            checkpoint: enum_i32::<pb::CheckpointPolicy>(config.checkpoint, "checkpoint policy")?
+                .try_into()?,
+            checkpoint_retain: config
+                .checkpoint_retain
+                .unwrap_or(sandbox_types::session::DEFAULT_CHECKPOINT_RETAIN),
         })
     }
 }

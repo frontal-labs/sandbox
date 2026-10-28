@@ -8,7 +8,7 @@ use sandbox_types::event::{Event, FileOp};
 use sandbox_types::hash::ContentHash;
 use sandbox_types::policy::{NetworkPolicy, NetworkPolicyRule, PolicyAction, ResourceLimits};
 use sandbox_types::session::{
-    SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
+    CheckpointPolicy, SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
 };
 use sandbox_types::{
     ErrorCode, ExecRequest, ExecResult, SandboxError, SessionId, SnapshotId, TenantId,
@@ -96,9 +96,26 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
         "/[a-z/]{0,12}",
         prop::option::of(arb_ulid()),
         arb_map(),
+        prop_oneof![
+            Just(CheckpointPolicy::PerExec),
+            Just(CheckpointPolicy::Manual)
+        ],
+        0u32..=200,
     )
         .prop_map(
-            |(tenant, tier, limits, default_deny, rules, env, cwd, snap, labels)| SessionConfig {
+            |(
+                tenant,
+                tier,
+                limits,
+                default_deny,
+                rules,
+                env,
+                cwd,
+                snap,
+                labels,
+                checkpoint,
+                checkpoint_retain,
+            )| SessionConfig {
                 tenant_id: TenantId::from_ulid(tenant),
                 tier_preference: tier,
                 limits,
@@ -111,6 +128,8 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
                 initial_snapshot: snap.map(SnapshotId::from_ulid),
                 secrets: None,
                 labels,
+                checkpoint,
+                checkpoint_retain,
             },
         )
 }
@@ -123,15 +142,19 @@ fn arb_exec_request() -> impl Strategy<Value = ExecRequest> {
         prop::option::of(prop::collection::vec(any::<u8>(), 0..16)),
         prop::option::of(any::<u64>()),
         any::<bool>(),
+        prop::option::of(any::<u64>()),
     )
-        .prop_map(|(argv, env, cwd, stdin, timeout_ms, stream)| ExecRequest {
-            argv,
-            env,
-            cwd,
-            stdin,
-            timeout_ms,
-            stream,
-        })
+        .prop_map(
+            |(argv, env, cwd, stdin, timeout_ms, stream, output_limit)| ExecRequest {
+                argv,
+                env,
+                cwd,
+                stdin,
+                timeout_ms,
+                stream,
+                output_limit,
+            },
+        )
 }
 
 fn arb_exec_result() -> impl Strategy<Value = ExecResult> {

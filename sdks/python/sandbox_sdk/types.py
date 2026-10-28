@@ -193,6 +193,8 @@ class SessionState:
     created_at: str
     updated_at: str
     labels: dict[str, str]
+    # Pinned checkpoints, as GET reports them. Absent from responses that omit it.
+    checkpoints: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)

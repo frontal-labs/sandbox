@@ -3,5 +3,5 @@
 pub mod client;
 pub mod embedded;
 
-pub use client::{Client, ExecResult};
+pub use client::{CheckpointResponse, CheckpointUsage, Client, ExecResult, ForkedChild};
 pub use embedded::EmbeddedSandbox;

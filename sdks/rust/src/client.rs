@@ -2,12 +2,16 @@
 //! API, and every error the server returns maps back to a `SandboxError` with
 //! the same code.
 
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use reqwest::{Method, StatusCode};
+use sandbox_types::hash::ContentHash;
 use sandbox_types::{
-    ErrorCode, ExecRequest, SandboxError, SessionConfig, SessionId, SessionState, Snapshot,
-    SnapshotId,
+    CheckpointPolicy, ErrorCode, ExecEvent, ExecRequest, SandboxError, SessionConfig, SessionId,
+    SessionState, Snapshot, SnapshotId,
 };
 use serde::{Deserialize, Serialize};
+use std::pin::Pin;
 
 const DEFAULT_BASE_URL: &str = "http://localhost:8080";
 
@@ -35,6 +39,52 @@ struct SessionIdBody {
 #[derive(Deserialize)]
 struct SnapshotIdBody {
     snapshot_id: SnapshotId,
+}
+
+/// The checkpoints a session holds, as GET reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CheckpointUsage {
+    pub policy: CheckpointPolicy,
+    /// Checkpoints pinned now.
+    pub count: u32,
+    /// The most that are pinned. Older checkpoints are unpinned.
+    pub retain: u32,
+    /// Logical bytes of the pinned roots.
+    pub bytes: u64,
+}
+
+/// The root now current after a checkpoint or an undo.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CheckpointResponse {
+    pub root: ContentHash,
+    pub checkpoints: CheckpointUsage,
+}
+
+/// What one child of `fork_command` did.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ForkedChild {
+    pub session_id: SessionId,
+    /// The exit code, or nothing when the command could not run.
+    pub exit_code: Option<i32>,
+    /// Why the command could not run, when it did not.
+    pub error: Option<String>,
+    pub changed_files: usize,
+}
+
+#[derive(Deserialize)]
+struct ForkedChildren {
+    children: Vec<ForkedChild>,
+}
+
+#[derive(Serialize)]
+struct UndoBody {
+    steps: u32,
+}
+
+#[derive(Serialize)]
+struct ForkCommandBody<'a> {
+    count: u32,
+    argv: &'a [String],
 }
 
 #[derive(Deserialize)]
@@ -110,6 +160,29 @@ impl Client {
             Some(request),
         )
         .await
+    }
+
+    /// Runs a fully specified request and yields its events as they arrive
+    /// (PLAN §4.16). Output comes first, and one `Exit` or `Error` event ends the
+    /// stream. A stream that ends before one is an `Unavailable` error.
+    pub async fn exec_stream(
+        &self,
+        session: SessionId,
+        request: &ExecRequest,
+    ) -> Result<impl Stream<Item = Result<ExecEvent, SandboxError>>, SandboxError> {
+        let mut streamed = request.clone();
+        streamed.stream = true;
+        let body = serde_json::to_vec(&streamed)
+            .map_err(|e| SandboxError::invalid_argument(format!("encoding request: {e}")))?;
+        let response = self
+            .send(
+                Method::POST,
+                &format!("/v1/sessions/{session}/exec"),
+                Some(body),
+                Some("application/json"),
+            )
+            .await?;
+        Ok(ndjson_events(response))
     }
 
     /// Reads a file from the session's filesystem.
@@ -212,6 +285,55 @@ impl Client {
         Ok(body.session_ids)
     }
 
+    /// Pins the session's current state as a checkpoint.
+    pub async fn checkpoint(&self, session: SessionId) -> Result<CheckpointResponse, SandboxError> {
+        self.send_json::<(), _>(
+            Method::POST,
+            &format!("/v1/sessions/{session}/checkpoint"),
+            None,
+        )
+        .await
+    }
+
+    /// Restores the filesystem from `steps` checkpoints ago. The current state is
+    /// pinned first, so the undo can be undone by undoing back to it.
+    pub async fn undo(
+        &self,
+        session: SessionId,
+        steps: u32,
+    ) -> Result<CheckpointResponse, SandboxError> {
+        self.send_json(
+            Method::POST,
+            &format!("/v1/sessions/{session}/undo"),
+            Some(&UndoBody { steps }),
+        )
+        .await
+    }
+
+    /// The session's environment: the contents of `/etc/agent/env.json`.
+    pub async fn info(&self, session: SessionId) -> Result<serde_json::Value, SandboxError> {
+        self.send_json::<(), _>(Method::GET, &format!("/v1/sessions/{session}/info"), None)
+            .await
+    }
+
+    /// Forks the session's current state into `count` children, and runs `argv` in
+    /// each. Returns what every child did.
+    pub async fn fork_command(
+        &self,
+        session: SessionId,
+        count: u32,
+        argv: &[String],
+    ) -> Result<Vec<ForkedChild>, SandboxError> {
+        let body: ForkedChildren = self
+            .send_json(
+                Method::POST,
+                &format!("/v1/sessions/{session}/fork"),
+                Some(&ForkCommandBody { count, argv }),
+            )
+            .await?;
+        Ok(body.children)
+    }
+
     /// Destroys a session.
     /// The current state of a session, sleeping or not.
     pub async fn get_session(&self, session: SessionId) -> Result<SessionState, SandboxError> {
@@ -283,6 +405,68 @@ impl Client {
         }
         Err(error_from_response(response).await)
     }
+}
+
+/// The events of a streamed response. The server sends one JSON object per line.
+fn ndjson_events(
+    response: reqwest::Response,
+) -> impl Stream<Item = Result<ExecEvent, SandboxError>> {
+    let lines = EventLines {
+        bytes: Box::pin(response.bytes_stream()),
+        buffer: Vec::new(),
+        finished: false,
+    };
+    futures::stream::unfold(lines, |mut lines| async move {
+        if lines.finished {
+            return None;
+        }
+        loop {
+            if let Some(end) = lines.buffer.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = lines.buffer.drain(..=end).collect();
+                if line.len() == 1 {
+                    continue;
+                }
+                let item = decode_event(&line[..line.len() - 1]);
+                lines.finished = match &item {
+                    Ok(ExecEvent::Exit { .. } | ExecEvent::Error { .. }) | Err(_) => true,
+                    Ok(_) => false,
+                };
+                return Some((item, lines));
+            }
+            match lines.bytes.next().await {
+                Some(Ok(chunk)) => lines.buffer.extend_from_slice(&chunk),
+                Some(Err(e)) => {
+                    lines.finished = true;
+                    let error = SandboxError::new(
+                        ErrorCode::Unavailable,
+                        format!("reading the stream failed: {e}"),
+                    );
+                    return Some((Err(error), lines));
+                }
+                None => {
+                    lines.finished = true;
+                    let error = SandboxError::new(
+                        ErrorCode::Unavailable,
+                        "the stream ended before the command finished",
+                    );
+                    return Some((Err(error), lines));
+                }
+            }
+        }
+    })
+}
+
+/// The state of [`ndjson_events`]: the body still to read, the bytes of a line
+/// not yet complete, and whether the stream is over.
+struct EventLines {
+    bytes: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
+    buffer: Vec<u8>,
+    finished: bool,
+}
+
+fn decode_event(line: &[u8]) -> Result<ExecEvent, SandboxError> {
+    serde_json::from_slice(line)
+        .map_err(|e| SandboxError::new(ErrorCode::Internal, format!("bad stream line: {e}")))
 }
 
 /// Turns a non-2xx response into the `SandboxError` the server meant. A body

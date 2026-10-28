@@ -13,6 +13,46 @@
     "version": "v1"
   },
   "paths": {
+    "/v1/gc": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Start a garbage collection of the blob store. It runs in the background, so\nthe request does not wait for it (PLAN §4.2). The report is written to the\nlog when it finishes.",
+        "description": "Any key may call it. A collection holds every session's gate for a moment,\nso the server allows one per minute, and a call inside that window gets\n`RESOURCE_EXHAUSTED`.",
+        "operationId": "run_gc",
+        "responses": {
+          "202": {
+            "description": "Collection started in the background"
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A collection started less than a minute ago",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions": {
       "post": {
         "tags": [
@@ -196,12 +236,80 @@
         ]
       }
     },
+    "/v1/sessions/{id}/checkpoint": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Pins the session's current state as a checkpoint now. Manual checkpoints are\ntaken this way. A per-exec session also pins after each command.",
+        "operationId": "checkpoint_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session ID (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkpoint pinned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckpointResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session for this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The key's checkpoint byte budget is full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions/{id}/exec": {
       "post": {
         "tags": [
           "exec"
         ],
-        "summary": "Run one command in a session.",
+        "summary": "Run one command in a session. With `stream`, the output comes as NDJSON\n`ExecEvent` lines while the command runs (PLAN §4.15).",
         "operationId": "exec_command",
         "parameters": [
           {
@@ -227,11 +335,21 @@
         },
         "responses": {
           "200": {
-            "description": "Command finished",
+            "description": "Command finished. Buffered, the whole result. Streamed (`?stream=true`), `application/x-ndjson` lines, each an `ExecEvent`",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExecResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, such as an empty argv",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -255,9 +373,77 @@
                 }
               }
             }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/fork": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Forks the session's current state into `count` children, and runs `argv` in each\n(IMAGE.md §4.5, `sandbox fork N -- <cmd>`). Each child is an independent session,\nand its command is recorded in the child's own trace.",
+        "operationId": "fork_command",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session ID (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkCommandRequest"
+              }
+            }
           },
-          "501": {
-            "description": "Streaming exec is not implemented yet",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Children created and their commands run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForkCommandResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid count or empty argv",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session for this key",
             "content": {
               "application/json": {
                 "schema": {
@@ -492,6 +678,62 @@
           },
           "404": {
             "description": "No such session, or no such path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/info": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "The session's `/etc/agent/env.json`, as `sandbox info --json` prints it.",
+        "operationId": "session_info",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session ID (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The environment, as env.json (schema 1)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session for this key",
             "content": {
               "application/json": {
                 "schema": {
@@ -821,6 +1063,84 @@
         ]
       }
     },
+    "/v1/sessions/{id}/undo": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Restores the filesystem from `steps` checkpoints ago (IMAGE.md §4.5). The current\nstate is pinned first, so undo can return to it. Processes are not kept: a Tier 1\nsession has none between commands.",
+        "operationId": "undo_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session ID (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Filesystem restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckpointResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not enough checkpoints to undo that far",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session for this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions/{id}/wake": {
       "post": {
         "tags": [
@@ -966,10 +1286,150 @@
           }
         ]
       }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "The caller's usage counters since this server started.",
+        "operationId": "get_usage",
+        "responses": {
+          "200": {
+            "description": "The caller's counters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Counters"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "CheckpointPolicy": {
+        "type": "string",
+        "description": "When the VFS root is checkpointed (IMAGE.md §4.5). Each checkpoint is a root hash\nthat `undo` can return to.",
+        "enum": [
+          "per_exec",
+          "manual"
+        ]
+      },
+      "CheckpointResponse": {
+        "type": "object",
+        "description": "The root now current, and the checkpoints the session holds.",
+        "required": [
+          "root",
+          "checkpoints"
+        ],
+        "properties": {
+          "checkpoints": {
+            "$ref": "#/components/schemas/CheckpointUsage"
+          },
+          "root": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "CheckpointUsage": {
+        "type": "object",
+        "description": "The checkpoints a session has pinned (IMAGE.md §4.5).",
+        "required": [
+          "policy",
+          "count",
+          "retain",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Logical bytes of the pinned roots. A block shared by two roots counts twice.\nUnpinned blocks are not freed until GC lands.",
+            "minimum": 0
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Checkpoints pinned now.",
+            "minimum": 0
+          },
+          "policy": {
+            "$ref": "#/components/schemas/CheckpointPolicy"
+          },
+          "retain": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most that are pinned. Older checkpoints are unpinned.",
+            "minimum": 0
+          }
+        }
+      },
+      "Counters": {
+        "type": "object",
+        "description": "What one key has used. Counts since the server started, and held in memory,\nso a restart resets them. They are not billing records (PLAN §4.14).",
+        "required": [
+          "sessions_created",
+          "sessions_slept",
+          "sessions_woken",
+          "execs",
+          "exec_wall_ms",
+          "bytes_written"
+        ],
+        "properties": {
+          "bytes_written": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes written through the filesystem API.",
+            "minimum": 0
+          },
+          "exec_wall_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Wall time of the commands the key ran, in milliseconds.",
+            "minimum": 0
+          },
+          "execs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions_created": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions_slept": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions_woken": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "CreateSessionResponse": {
         "type": "object",
         "required": [
@@ -1024,6 +1484,94 @@
           "WASM_ERROR"
         ]
       },
+      "ExecEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Output of the command, in order. Bytes are integer arrays, as in `ExecResult`.",
+            "required": [
+              "stream",
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              },
+              "stream": {
+                "$ref": "#/components/schemas/OutputStream"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "output"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The command finished. Its output was sent in `Output` lines before this.",
+            "required": [
+              "exit_code",
+              "cpu_ms",
+              "wall_ms",
+              "type"
+            ],
+            "properties": {
+              "cpu_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "exit_code": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "exit"
+                ]
+              },
+              "wall_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The command failed or was cut short, such as by its timeout.",
+            "required": [
+              "code",
+              "message",
+              "type"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "One line of a streamed exec response (NDJSON, PLAN §4.15). Output lines arrive\nwhile the command runs. Exactly one `Exit` or `Error` line ends the response."
+      },
       "ExecRequest": {
         "type": "object",
         "required": [
@@ -1053,6 +1601,15 @@
               "type": "string"
             }
           },
+          "output_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maximum bytes kept per stream in the buffered result. `None` uses the\nserver default (8 KiB head + 8 KiB tail). The full stream stays in the trace.",
+            "minimum": 0
+          },
           "stdin": {
             "type": [
               "array",
@@ -1066,7 +1623,8 @@
             "description": "Bytes as an integer array, 0-255 each (serde default)."
           },
           "stream": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Stream the output while the command runs, as NDJSON. Set by the server\nfrom `?stream=true` or from this field. Buffered callers leave it `false`."
           },
           "timeout_ms": {
             "type": [
@@ -1122,6 +1680,42 @@
           }
         }
       },
+      "ForkCommandRequest": {
+        "type": "object",
+        "required": [
+          "count",
+          "argv"
+        ],
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command each child runs, as argv."
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Children to create, from 1 to 64.",
+            "minimum": 0
+          }
+        }
+      },
+      "ForkCommandResponse": {
+        "type": "object",
+        "required": [
+          "children"
+        ],
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForkedChild"
+            }
+          }
+        }
+      },
       "ForkRequest": {
         "type": "object",
         "required": [
@@ -1148,6 +1742,38 @@
               "type": "string",
               "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             }
+          }
+        }
+      },
+      "ForkedChild": {
+        "type": "object",
+        "description": "What one child did: the command's outcome, and how many files it changed.",
+        "required": [
+          "session_id",
+          "changed_files"
+        ],
+        "properties": {
+          "changed_files": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the command could not run, when it did not."
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The exit code, or nothing when the command could not run."
+          },
+          "session_id": {
+            "type": "string"
           }
         }
       },
@@ -1194,6 +1820,14 @@
             }
           }
         }
+      },
+      "OutputStream": {
+        "type": "string",
+        "description": "Which output stream a streamed chunk came from.",
+        "enum": [
+          "stdout",
+          "stderr"
+        ]
       },
       "PolicyAction": {
         "type": "string",
@@ -1326,6 +1960,16 @@
           "labels"
         ],
         "properties": {
+          "checkpoint": {
+            "$ref": "#/components/schemas/CheckpointPolicy",
+            "description": "Checkpoint policy. Defaults to `per_exec`."
+          },
+          "checkpoint_retain": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of checkpoint roots kept before older ones are unpinned.",
+            "minimum": 0
+          },
           "cwd": {
             "type": "string"
           },
@@ -1447,6 +2091,25 @@
           "error"
         ]
       },
+      "SessionView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SessionState"
+          },
+          {
+            "type": "object",
+            "required": [
+              "checkpoints"
+            ],
+            "properties": {
+              "checkpoints": {
+                "$ref": "#/components/schemas/CheckpointUsage"
+              }
+            }
+          }
+        ],
+        "description": "A session as GET returns it: its state, and what its checkpoints hold."
+      },
       "Snapshot": {
         "type": "object",
         "required": [
@@ -1537,6 +2200,17 @@
           "isolate",
           "vm"
         ]
+      },
+      "UndoRequest": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many checkpoints back to restore. Each step drops the newest one.",
+            "minimum": 0
+          }
+        }
       }
     },
     "securitySchemes": {

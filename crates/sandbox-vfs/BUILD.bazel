@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_vfs",
@@ -12,7 +12,6 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:serde_json",
         "@crates//:notify",
@@ -23,13 +22,11 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_vfs_test",
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_vfs_unit_test",
+    crate = ":sandbox_vfs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_vfs",
-        "@crates//:tokio",
-    ],
-    testonly = True,
+    deps = ["@crates//:proptest"],
+    visibility = ["//visibility:public"],
 )

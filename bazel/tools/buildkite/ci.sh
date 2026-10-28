@@ -21,18 +21,18 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 
 phase="${1:-}"
 case "${phase}" in
-  build)
-    bazel_command=build
-    targets=(//:build_all //:build_rust //:build_sdks)
-    ;;
-  test)
-    bazel_command=test
-    targets=(//:test_rust //:test_ts)
-    ;;
-  *)
-    echo "usage: $0 build|test" >&2
-    exit 2
-    ;;
+build)
+  bazel_command=build
+  targets=(//:build_all //:build_rust //:build_sdks)
+  ;;
+test)
+  bazel_command="test"
+  targets=(//:test_rust //:test_ts)
+  ;;
+*)
+  echo "usage: $0 build|test" >&2
+  exit 2
+  ;;
 esac
 
 cache_flags=()

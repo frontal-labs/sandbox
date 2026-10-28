@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_wasm",
@@ -12,13 +12,10 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:wasmtime",
         "@crates//:futures",
-        "@crates//:getrandom",
         "@crates//:toml",
-        "@crates//:wizer",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
@@ -26,16 +23,45 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_wasm_test",
+rust_test(
+    name = "sandbox_wasm_wasi_fs_test",
+    srcs = ["tests/wasi_fs.rs"],
+    crate_root = "tests/wasi_fs.rs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    compile_data = glob(["fixtures/**"]),
     deps = [
+        "@crates//:bytes",
+        "@crates//:futures",
+        "@crates//:parking_lot",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:toml",
+        "@crates//:tracing",
+        "@crates//:wasmtime",
         ":sandbox_wasm",
         "//crates/sandbox-cas:sandbox_cas",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-vfs:sandbox_vfs",
         "@crates//:tokio",
     ],
-    testonly = True,
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_wasm_unit_test",
+    crate = ":sandbox_wasm",
+    edition = "2021",
+    deps = ["//crates/sandbox-cas:sandbox_cas"],
+    visibility = ["//visibility:public"],
+)
+
+# The wasm tool that sandbox-shell's tests embed with include_bytes!.
+filegroup(
+    name = "fixtures",
+    srcs = glob(["fixtures/**"]),
+    visibility = ["//visibility:public"],
 )

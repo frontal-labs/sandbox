@@ -1,0 +1,4 @@
+Defaults always_set_home
+Defaults !env_reset
+Defaults !fqdn
+sandbox ALL=(ALL) NOPASSWD:ALL

@@ -1,0 +1,3 @@
+# Copy to .envrc (git-ignored) and run `direnv allow` to load the Nix dev shell
+# automatically on `cd`. Without direnv, run `nix develop` by hand.
+use flake

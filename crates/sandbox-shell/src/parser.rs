@@ -1,8 +1,9 @@
 //! Tokenizer and recursive-descent parser for the syntax in `ast.rs`.
 
 use crate::ast::{
-    Ch, Command, Connector, ForClause, FunctionDef, IfClause, Item, Mode, Piece, Pipeline,
-    Redirect, RedirectKind, Script, SimpleCommand, WhileClause, Word,
+    CaseArm, CaseClause, Ch, Command, Connector, ForClause, FunctionDef, IfClause, Item, Mode,
+    Param, ParamOp, Piece, Pipeline, Redirect, RedirectKind, Script, SimpleCommand, WhileClause,
+    Word,
 };
 use crate::expand::is_name;
 use sandbox_types::{ErrorCode, SandboxError};
@@ -12,21 +13,35 @@ use std::str::Chars;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
     Word(Word),
+    /// `>`, `>>`, `<`, or `>&`, with the descriptor written before it, if any.
+    Redirect {
+        fd: Option<u8>,
+        kind: RedirectKind,
+    },
     Pipe,
     And,
     Or,
+    /// `;`
     Semi,
+    /// A newline. It ends a command like `;`, but a list may not start with `;`.
+    Newline,
+    /// `;;`, which ends a `case` arm.
+    DoubleSemi,
     LParen,
     RParen,
-    Input,
-    Output,
-    Append,
 }
 
 /// Deepest allowed `$(...)` / backtick nesting. Each level recurses into
 /// `parse`, so an unbounded depth overflows the stack, which aborts the process
 /// and cannot be caught. 32 levels is far beyond real scripts.
 const MAX_NESTING: usize = 32;
+
+/// Deepest allowed nesting of compound commands (`if`, `while`, `for`, `{ }`,
+/// `( )`) in one script, and of calls, subshells, and substitutions at run time.
+/// Each level recurses on the stack. A debug build overflows a 1 MiB stack at 64
+/// levels and runs 32 levels in it, so 32 leaves a 2x margin on the 2 MiB stack
+/// a tokio worker has (ADR 0018).
+pub(crate) const MAX_COMMAND_DEPTH: usize = 32;
 
 thread_local! {
     static NESTING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -55,7 +70,11 @@ pub fn parse(input: &str) -> Result<Script, SandboxError> {
         ));
     }
     let tokens = tokenize(input)?;
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        depth: 0,
+    };
     let script = parser.list(&[])?;
     if parser.pos != parser.tokens.len() {
         return Err(syntax("syntax error near unexpected token"));
@@ -85,14 +104,15 @@ impl WordBuf {
         self.pieces.push(Piece::Ch(Ch { c, mode }));
     }
 
-    fn push_subst(&mut self, script: Script) {
+    fn push_piece(&mut self, piece: Piece) {
         self.started = true;
-        self.pieces.push(Piece::Subst(script));
+        self.pieces.push(piece);
     }
 
     fn start(&mut self) {
         self.started = true;
         self.quoted = true;
+        self.pieces.push(Piece::Empty);
     }
 
     fn flush(&mut self, tokens: &mut Vec<Token>) {
@@ -112,7 +132,10 @@ impl WordBuf {
     }
 }
 
-fn tokenize(input: &str) -> Result<Vec<Token>, SandboxError> {
+/// Splits `input` into tokens. In word mode, whitespace and operators are
+/// ordinary characters, so the result is one word. This is how the operands
+/// inside `${...}` are read.
+fn tokenize_with(input: &str, word_mode: bool) -> Result<Vec<Token>, SandboxError> {
     let mut tokens = Vec::new();
     let mut word = WordBuf::default();
     let mut chars = input.chars().peekable();
@@ -135,35 +158,50 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SandboxError> {
                     match chars.next() {
                         Some('"') => break,
                         Some('\\') => match chars.peek().copied() {
+                            Some('\n') => {
+                                chars.next();
+                            }
                             Some(next @ ('"' | '\\' | '$' | '`')) => {
                                 chars.next();
                                 word.push(next, Mode::Double);
                             }
                             _ => word.push('\\', Mode::Double),
                         },
-                        Some('$') if chars.peek() == Some(&'(') => {
-                            chars.next();
-                            word.push_subst(read_substitution(&mut chars)?);
-                        }
-                        Some('`') => word.push_subst(read_backticks(&mut chars)?),
+                        Some('$') => match read_dollar(&mut chars, true)? {
+                            Some(piece) => word.push_piece(piece),
+                            None => word.push('$', Mode::Double),
+                        },
+                        Some('`') => word.push_piece(Piece::Subst {
+                            script: read_backticks(&mut chars)?,
+                            quoted: true,
+                        }),
                         Some(ch) => word.push(ch, Mode::Double),
                         None => return Err(syntax("unterminated double quote")),
                     }
                 }
             }
             '\\' => match chars.next() {
+                // A backslash before a newline joins the two lines.
+                Some('\n') => {}
                 Some(ch) => {
                     word.start();
                     word.push(ch, Mode::Literal);
                 }
-                None => return Err(syntax("trailing backslash")),
+                // A backslash at the very end is a literal backslash, as in bash.
+                None => {
+                    word.start();
+                    word.push('\\', Mode::Literal);
+                }
             },
-            '$' if chars.peek() == Some(&'(') => {
-                chars.next();
-                word.push_subst(read_substitution(&mut chars)?);
-            }
-            '`' => word.push_subst(read_backticks(&mut chars)?),
-            '#' if !word.started => {
+            '$' => match read_dollar(&mut chars, false)? {
+                Some(piece) => word.push_piece(piece),
+                None => word.push('$', Mode::Bare),
+            },
+            '`' => word.push_piece(Piece::Subst {
+                script: read_backticks(&mut chars)?,
+                quoted: false,
+            }),
+            '#' if !word.started && !word_mode => {
                 while let Some(&ch) = chars.peek() {
                     if ch == '\n' {
                         break;
@@ -171,14 +209,20 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SandboxError> {
                     chars.next();
                 }
             }
+            c if word_mode => word.push(c, Mode::Bare),
             '\n' => {
                 word.flush(&mut tokens);
-                tokens.push(Token::Semi);
+                tokens.push(Token::Newline);
             }
             c if c.is_whitespace() => word.flush(&mut tokens),
             ';' => {
                 word.flush(&mut tokens);
-                tokens.push(Token::Semi);
+                if chars.peek() == Some(&';') {
+                    chars.next();
+                    tokens.push(Token::DoubleSemi);
+                } else {
+                    tokens.push(Token::Semi);
+                }
             }
             '(' => {
                 word.flush(&mut tokens);
@@ -207,24 +251,260 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SandboxError> {
                 }
             }
             '>' | '<' => {
-                if word.is_bare_fd() {
-                    return Err(syntax("file descriptor redirections are not supported"));
-                }
-                word.flush(&mut tokens);
-                if c == '<' {
-                    tokens.push(Token::Input);
+                let fd = if word.is_bare_fd() {
+                    let digits: String = word.pieces.iter().filter_map(piece_char).collect();
+                    word = WordBuf::default();
+                    let n: u8 = digits
+                        .parse()
+                        .map_err(|_| syntax(format!("file descriptor {digits} is too large")))?;
+                    Some(n)
+                } else {
+                    word.flush(&mut tokens);
+                    None
+                };
+                let kind = if c == '<' {
+                    RedirectKind::Input
                 } else if chars.peek() == Some(&'>') {
                     chars.next();
-                    tokens.push(Token::Append);
+                    RedirectKind::Append
+                } else if chars.peek() == Some(&'&') {
+                    chars.next();
+                    RedirectKind::Dup
                 } else {
-                    tokens.push(Token::Output);
-                }
+                    RedirectKind::Output
+                };
+                tokens.push(Token::Redirect { fd, kind });
             }
             other => word.push(other, Mode::Bare),
         }
     }
     word.flush(&mut tokens);
     Ok(tokens)
+}
+
+fn tokenize(input: &str) -> Result<Vec<Token>, SandboxError> {
+    tokenize_with(input, false)
+}
+
+/// The character of a bare piece, used to read a file descriptor number.
+fn piece_char(piece: &Piece) -> Option<char> {
+    match piece {
+        Piece::Ch(ch) => Some(ch.c),
+        _ => None,
+    }
+}
+
+/// Reads what follows a `$`: a parameter reference, a substitution, or arithmetic.
+/// Returns `None` when the `$` stands alone, so the caller keeps it as a literal.
+fn read_dollar(
+    chars: &mut Peekable<Chars<'_>>,
+    quoted: bool,
+) -> Result<Option<Piece>, SandboxError> {
+    match chars.peek().copied() {
+        // `$name`, `$N` (one digit, as in POSIX), and the special parameters.
+        Some(c) if c == '_' || c.is_ascii_alphabetic() => {
+            let mut name = String::new();
+            while let Some(&c) = chars.peek() {
+                if c == '_' || c.is_ascii_alphanumeric() {
+                    name.push(c);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            Ok(Some(plain_param(name, quoted)))
+        }
+        Some(c) if c.is_ascii_digit() || matches!(c, '?' | '#' | '@' | '*') => {
+            chars.next();
+            Ok(Some(plain_param(c.to_string(), quoted)))
+        }
+        Some('(') => {
+            chars.next();
+            if chars.peek() == Some(&'(') {
+                chars.next();
+                let text = read_arithmetic(chars)?;
+                return Ok(Some(Piece::Arith(word_from_text(&text)?)));
+            }
+            Ok(Some(Piece::Subst {
+                script: read_substitution(chars)?,
+                quoted,
+            }))
+        }
+        Some('{') => {
+            chars.next();
+            let raw = read_braced(chars)?;
+            Ok(Some(Piece::Param(parse_param(&raw, quoted)?)))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn plain_param(name: String, quoted: bool) -> Piece {
+    Piece::Param(Param {
+        name,
+        op: ParamOp::Value,
+        quoted,
+    })
+}
+
+/// Reads the text of `$(( ... ))` up to its closing `))`. The text is then
+/// parsed as a word, so its `$` expansions and substitutions run first.
+fn read_arithmetic(chars: &mut Peekable<Chars<'_>>) -> Result<String, SandboxError> {
+    let mut text = String::new();
+    let mut depth = 0usize;
+    loop {
+        match chars.next() {
+            Some('(') => {
+                depth += 1;
+                text.push('(');
+            }
+            Some(')') if depth == 0 => {
+                if chars.peek() == Some(&')') {
+                    chars.next();
+                    return Ok(text);
+                }
+                return Err(syntax("arithmetic expression needs '))'"));
+            }
+            Some(')') => {
+                depth -= 1;
+                text.push(')');
+            }
+            Some(c) => text.push(c),
+            None => return Err(syntax("unterminated $(( ))")),
+        }
+    }
+}
+
+/// Reads the text of `${ ... }` up to its closing brace. Quotes and nested
+/// braces are respected, so `${x:-"}"}` is one expansion.
+fn read_braced(chars: &mut Peekable<Chars<'_>>) -> Result<String, SandboxError> {
+    let mut text = String::new();
+    let mut depth = 0usize;
+    let mut quote: Option<char> = None;
+    loop {
+        let Some(c) = chars.next() else {
+            return Err(syntax("unterminated ${"));
+        };
+        match (quote, c) {
+            (None, '}') if depth == 0 => return Ok(text),
+            (None, '}') => depth -= 1,
+            (None, '{') => depth += 1,
+            (None, '\'' | '"') => quote = Some(c),
+            (Some(q), c) if c == q => quote = None,
+            _ => {}
+        }
+        text.push(c);
+    }
+}
+
+/// Parses the inside of `${ ... }`: a name and an optional operator.
+fn parse_param(raw: &str, quoted: bool) -> Result<Param, SandboxError> {
+    let bad = || syntax(format!("bad substitution: ${{{raw}}}"));
+    // `${!name}` and `${!name:-word}` take the value of the variable `name` names.
+    if let Some(rest) = raw.strip_prefix('!') {
+        let (name, rest) = parse_name(rest).ok_or_else(bad)?;
+        let default = if rest.is_empty() {
+            None
+        } else if let Some(word) = rest.strip_prefix(":-") {
+            Some((true, word_from_text(word)?))
+        } else if let Some(word) = rest.strip_prefix('-') {
+            Some((false, word_from_text(word)?))
+        } else {
+            return Err(bad());
+        };
+        return Ok(Param {
+            name: name.to_string(),
+            op: ParamOp::Indirect { default },
+            quoted,
+        });
+    }
+    // `${#name}` is the length. `${#}` alone is the count of positional parameters.
+    if let Some(rest) = raw.strip_prefix('#') {
+        if !rest.is_empty() && !rest.starts_with(['%', '#', ':', '-']) {
+            return Ok(Param {
+                name: parse_name(rest).ok_or_else(bad)?.0.to_string(),
+                op: ParamOp::Length,
+                quoted,
+            });
+        }
+    }
+    let (name, rest) = parse_name(raw).ok_or_else(bad)?;
+    let op = if rest.is_empty() {
+        ParamOp::Value
+    } else if let Some(word) = rest.strip_prefix(":-") {
+        ParamOp::Default {
+            colon: true,
+            word: word_from_text(word)?,
+        }
+    } else if let Some(word) = rest.strip_prefix('-') {
+        ParamOp::Default {
+            colon: false,
+            word: word_from_text(word)?,
+        }
+    } else if let Some(pattern) = rest.strip_prefix("%%") {
+        ParamOp::Suffix {
+            longest: true,
+            pattern: word_from_text(pattern)?,
+        }
+    } else if let Some(pattern) = rest.strip_prefix('%') {
+        ParamOp::Suffix {
+            longest: false,
+            pattern: word_from_text(pattern)?,
+        }
+    } else if let Some(pattern) = rest.strip_prefix("##") {
+        ParamOp::Prefix {
+            longest: true,
+            pattern: word_from_text(pattern)?,
+        }
+    } else if let Some(pattern) = rest.strip_prefix('#') {
+        ParamOp::Prefix {
+            longest: false,
+            pattern: word_from_text(pattern)?,
+        }
+    } else {
+        return Err(bad());
+    };
+    Ok(Param {
+        name: name.to_string(),
+        op,
+        quoted,
+    })
+}
+
+/// Splits a parameter name off the front of `text`. A name is a variable name,
+/// a single special character, or a run of digits.
+fn parse_name(text: &str) -> Option<(&str, &str)> {
+    let mut chars = text.char_indices();
+    let (_, first) = chars.next()?;
+    if first == '_' || first.is_ascii_alphabetic() {
+        let end = text
+            .char_indices()
+            .find(|(_, c)| !(*c == '_' || c.is_ascii_alphanumeric()))
+            .map_or(text.len(), |(i, _)| i);
+        return Some((&text[..end], &text[end..]));
+    }
+    if first.is_ascii_digit() {
+        let end = text
+            .char_indices()
+            .find(|(_, c)| !c.is_ascii_digit())
+            .map_or(text.len(), |(i, _)| i);
+        return Some((&text[..end], &text[end..]));
+    }
+    if matches!(first, '?' | '#' | '@' | '*' | '$') {
+        return Some((&text[..first.len_utf8()], &text[first.len_utf8()..]));
+    }
+    None
+}
+
+/// Reads an operand of a parameter expansion as a word. Spaces and operators
+/// are literal there, and quotes and `$` work as they do elsewhere.
+fn word_from_text(text: &str) -> Result<Word, SandboxError> {
+    let mut tokens = tokenize_with(text, true)?;
+    match tokens.pop() {
+        None => Ok(Word::default()),
+        Some(Token::Word(word)) if tokens.is_empty() => Ok(word),
+        _ => Err(syntax(format!("bad substitution operand: {text}"))),
+    }
 }
 
 /// Reads the body of `$( ... )` up to its matching `)` and parses it.
@@ -298,6 +578,8 @@ fn read_backticks(chars: &mut Peekable<Chars<'_>>) -> Result<Script, SandboxErro
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Compound commands open around the current position.
+    depth: usize,
 }
 
 impl Parser {
@@ -337,20 +619,28 @@ impl Parser {
         }
     }
 
+    /// Skips newlines and `;` between commands.
     fn skip_separators(&mut self) {
-        while matches!(self.peek(), Some(Token::Semi)) {
+        while matches!(self.peek(), Some(Token::Semi | Token::Newline)) {
             self.pos += 1;
         }
     }
 
     /// A list of pipelines. Stops before a reserved word in `stops`, before
-    /// `)`, or at the end of input.
+    /// `)` or `;;`, or at the end of input.
     fn list(&mut self, stops: &[&str]) -> Result<Script, SandboxError> {
         let mut items = Vec::new();
         loop {
+            // A list may begin with newlines, but not with `;`.
+            while matches!(self.peek(), Some(Token::Newline)) {
+                self.pos += 1;
+            }
+            if items.is_empty() && matches!(self.peek(), Some(Token::Semi)) {
+                return Err(syntax("syntax error near unexpected token ';'"));
+            }
             self.skip_separators();
             match self.peek() {
-                None | Some(Token::RParen) => break,
+                None | Some(Token::RParen | Token::DoubleSemi) => break,
                 _ => {}
             }
             if let Some(keyword) = self.keyword() {
@@ -373,7 +663,9 @@ impl Parser {
             };
             // `&&` and `||` need a command after them. Newlines may come first.
             if connector != Connector::Seq {
-                self.skip_separators();
+                while matches!(self.peek(), Some(Token::Newline)) {
+                    self.pos += 1;
+                }
                 if matches!(self.peek(), None | Some(Token::RParen)) {
                     return Err(syntax("syntax error: command expected after operator"));
                 }
@@ -381,7 +673,7 @@ impl Parser {
             // After a complete pipeline only a separator, an operator, or the
             // end of a list may follow.
             match self.peek() {
-                None | Some(Token::Semi) | Some(Token::RParen) => {}
+                None | Some(Token::Semi | Token::Newline | Token::RParen | Token::DoubleSemi) => {}
                 Some(_) if connector != Connector::Seq => {}
                 Some(_) if self.keyword().is_some_and(|k| stops.contains(&k.as_str())) => {}
                 Some(_) => return Err(syntax("syntax error near unexpected token")),
@@ -395,44 +687,126 @@ impl Parser {
     }
 
     fn pipeline(&mut self) -> Result<Pipeline, SandboxError> {
+        let negated = self.keyword().as_deref() == Some("!");
+        if negated {
+            self.pos += 1;
+        }
         let mut stages = vec![self.command()?];
         while matches!(self.peek(), Some(Token::Pipe)) {
             self.pos += 1;
             stages.push(self.command()?);
         }
-        Ok(Pipeline { stages })
+        Ok(Pipeline { stages, negated })
     }
 
     fn command(&mut self) -> Result<Command, SandboxError> {
+        if self.depth >= MAX_COMMAND_DEPTH {
+            return Err(SandboxError::new(
+                ErrorCode::ResourceExhausted,
+                format!("commands nested deeper than {MAX_COMMAND_DEPTH} levels"),
+            ));
+        }
+        self.depth += 1;
+        let parsed = self.command_at_depth();
+        self.depth -= 1;
+        parsed
+    }
+
+    fn command_at_depth(&mut self) -> Result<Command, SandboxError> {
         match self.peek() {
-            None | Some(Token::Semi | Token::And | Token::Or | Token::Pipe | Token::RParen) => {
-                Err(syntax("syntax error: command expected"))
-            }
+            None
+            | Some(
+                Token::Semi
+                | Token::Newline
+                | Token::And
+                | Token::Or
+                | Token::Pipe
+                | Token::RParen
+                | Token::DoubleSemi,
+            ) => Err(syntax("syntax error: command expected")),
             Some(Token::LParen) => {
                 self.pos += 1;
                 let body = self.list(&[])?;
                 self.expect(&Token::RParen, "')'")?;
-                Ok(Command::Subshell(body))
+                self.with_redirects(Command::Subshell(body))
             }
             Some(Token::Word(_)) => match self.keyword().as_deref() {
-                Some("if") => self.if_clause(),
-                Some("while") => self.while_clause("while"),
-                Some("until") => self.while_clause("until"),
-                Some("for") => self.for_clause(),
+                Some("if") => {
+                    let command = self.if_clause()?;
+                    self.with_redirects(command)
+                }
+                Some("while") => {
+                    let command = self.while_clause("while")?;
+                    self.with_redirects(command)
+                }
+                Some("until") => {
+                    let command = self.while_clause("until")?;
+                    self.with_redirects(command)
+                }
+                Some("for") => {
+                    let command = self.for_clause()?;
+                    self.with_redirects(command)
+                }
+                Some("case") => {
+                    let command = self.case_clause()?;
+                    self.with_redirects(command)
+                }
                 Some("{") => {
                     self.pos += 1;
                     let body = self.list(&["}"])?;
                     self.expect_keyword("}")?;
-                    Ok(Command::Group(body))
+                    self.with_redirects(Command::Group(body))
                 }
-                Some(keyword @ ("then" | "elif" | "else" | "fi" | "do" | "done" | "}")) => Err(
-                    syntax(format!("syntax error near unexpected token '{keyword}'")),
-                ),
+                Some(
+                    keyword @ ("then" | "elif" | "else" | "fi" | "do" | "done" | "}" | "esac"),
+                ) => Err(syntax(format!(
+                    "syntax error near unexpected token '{keyword}'"
+                ))),
                 _ if self.is_function_start() => self.function(),
                 _ => self.simple(),
             },
             Some(_) => self.simple(),
         }
+    }
+
+    /// Wraps a compound command with the redirections written after it.
+    fn with_redirects(&mut self, command: Command) -> Result<Command, SandboxError> {
+        let redirects = self.redirects()?;
+        if redirects.is_empty() {
+            Ok(command)
+        } else {
+            Ok(Command::Redirected {
+                command: Box::new(command),
+                redirects,
+            })
+        }
+    }
+
+    /// Reads the redirections at the cursor. Each one is an operator and a word.
+    fn redirects(&mut self) -> Result<Vec<Redirect>, SandboxError> {
+        let mut redirects = Vec::new();
+        while let Some(Token::Redirect { fd, kind }) = self.peek().cloned() {
+            self.pos += 1;
+            let target = match self.bump() {
+                Some(Token::Word(target)) => target,
+                _ => return Err(syntax("redirection needs a file name")),
+            };
+            let default_fd = if kind == RedirectKind::Input { 0 } else { 1 };
+            let fd = fd.unwrap_or(default_fd);
+            if fd > 2 {
+                return Err(syntax(format!(
+                    "file descriptor {fd} is not supported; only 0, 1, and 2 are"
+                )));
+            }
+            if kind == RedirectKind::Input && fd != 0 {
+                return Err(syntax("only descriptor 0 can be redirected from"));
+            }
+            if kind != RedirectKind::Input && fd == 0 {
+                return Err(syntax("descriptor 0 can only be read from"));
+            }
+            redirects.push(Redirect { fd, kind, target });
+        }
+        Ok(redirects)
     }
 
     /// `name ( )` starts a function definition.
@@ -536,6 +910,52 @@ impl Parser {
         }))
     }
 
+    /// `case WORD in pattern [| pattern]...) list ;; ... esac`. The last arm may
+    /// leave out its `;;`.
+    fn case_clause(&mut self) -> Result<Command, SandboxError> {
+        self.pos += 1; // case
+        let subject = match self.bump() {
+            Some(Token::Word(word)) => word,
+            _ => return Err(syntax("syntax error: case needs a word")),
+        };
+        self.skip_separators();
+        self.expect_keyword("in")?;
+        let mut arms = Vec::new();
+        loop {
+            self.skip_separators();
+            if self.keyword().as_deref() == Some("esac") {
+                self.pos += 1;
+                break;
+            }
+            if self.peek().is_none() {
+                return Err(syntax("syntax error: expected 'esac'"));
+            }
+            if matches!(self.peek(), Some(Token::LParen)) {
+                self.pos += 1;
+            }
+            let mut patterns = Vec::new();
+            loop {
+                match self.bump() {
+                    Some(Token::Word(pattern)) => patterns.push(pattern),
+                    _ => return Err(syntax("syntax error: case pattern expected")),
+                }
+                match self.bump() {
+                    Some(Token::Pipe) => continue,
+                    Some(Token::RParen) => break,
+                    _ => return Err(syntax("syntax error: expected ')' after case pattern")),
+                }
+            }
+            let body = self.list(&["esac"])?;
+            arms.push(CaseArm { patterns, body });
+            match self.peek() {
+                Some(Token::DoubleSemi) => self.pos += 1,
+                _ if self.keyword().as_deref() == Some("esac") => {}
+                _ => return Err(syntax("syntax error: expected ';;' or 'esac'")),
+            }
+        }
+        Ok(Command::Case(CaseClause { subject, arms }))
+    }
+
     fn simple(&mut self) -> Result<Command, SandboxError> {
         let mut command = SimpleCommand::default();
         loop {
@@ -544,18 +964,8 @@ impl Parser {
                     command.words.push(word.clone());
                     self.pos += 1;
                 }
-                Some(Token::Input | Token::Output | Token::Append) => {
-                    let kind = match self.bump() {
-                        Some(Token::Input) => RedirectKind::Input,
-                        Some(Token::Output) => RedirectKind::Output,
-                        _ => RedirectKind::Append,
-                    };
-                    match self.bump() {
-                        Some(Token::Word(target)) => {
-                            command.redirects.push(Redirect { kind, target })
-                        }
-                        _ => return Err(syntax("redirection needs a file name")),
-                    }
+                Some(Token::Redirect { .. }) => {
+                    command.redirects.extend(self.redirects()?);
                 }
                 _ => break,
             }

@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 rust_library(
     name = "cli_lib",
@@ -17,12 +17,14 @@ rust_library(
         "@crates//:tracing-subscriber",
         "@crates//:clap",
         "@crates//:thiserror",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:serde_json",
-    ],
+
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-runtime:sandbox_runtime",
+],
     proc_macro_deps = [
-        "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )
@@ -37,13 +39,185 @@ rust_binary(
     visibility = ["//visibility:public"],
 )
 
-rust_binary(
-    name = "sandbox_test",
+rust_test(
+    name = "cli_bench_process_test",
+    srcs = ["tests/bench_process.rs"],
+    crate_root = "tests/bench_process.rs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":frontal-sandbox"],
     deps = [
-        ":frontal-sandbox",
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
         "@crates//:tokio",
     ],
-    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "cli_serve_process_test",
+    srcs = ["tests/serve_process.rs"],
+    crate_root = "tests/serve_process.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":frontal-sandbox"],
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "cli_trace_process_test",
+    srcs = ["tests/trace_process.rs"],
+    crate_root = "tests/trace_process.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":frontal-sandbox"],
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "cli_worker_isolation_test",
+    srcs = ["tests/worker_isolation.rs"],
+    crate_root = "tests/worker_isolation.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":frontal-sandbox"],
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+    # These tests need Linux cgroup v2, namespaces, and seccomp, and are run
+    # via `docker/run-linux.sh`, not on the standard CI runner.
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "cli_worker_process_test",
+    srcs = ["tests/worker_process.rs"],
+    crate_root = "tests/worker_process.rs",
+    edition = "2021",
+    # The tests start the `sandbox` binary, which Bazel passes in as data.
+    data = [":frontal-sandbox"],
+    # The worker test reads CARGO_BIN_EXE_* at run time, which only Cargo sets. The
+    # path is relative to the runfiles root, the test's working directory.
+    env = {"CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)"},
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-server:sandbox_server",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-trace:sandbox_trace",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:axum",
+        "@crates//:clap",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        ":cli_lib",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Contained `node` scripts: the real child process, with the host surviving scripts
+# that exhaust memory. The tests start the `sandbox` binary, which Bazel passes in as data.
+rust_test(
+    name = "cli_contained_scripts_test",
+    srcs = ["tests/contained_scripts.rs"],
+    crate_root = "tests/contained_scripts.rs",
+    edition = "2021",
+    data = [":frontal-sandbox"],
+    env = {"CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)"},
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-worker:sandbox_worker",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the cli lib, without main.rs).
+rust_test(
+    name = "cli_unit_test",
+    crate = ":cli_lib",
+    edition = "2021",
+    visibility = ["//visibility:public"],
 )

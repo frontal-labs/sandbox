@@ -2,8 +2,16 @@
 
 pub mod api;
 pub mod auth;
+pub mod gc;
+pub mod idle;
 pub mod middleware;
 pub mod openapi;
 pub mod persist;
+#[cfg(feature = "clustered")]
+pub mod pg_store;
 
-pub use api::{create_router, open_durable, AppState};
+#[cfg(feature = "clustered")]
+pub use api::open_clustered_with_state;
+pub use api::{
+    create_router, create_router_with_state, open_durable, open_durable_with_state, AppState,
+};

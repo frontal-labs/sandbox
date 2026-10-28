@@ -1,9 +1,0 @@
-# The npm CLI wrapper has no compiled outputs. Expose its files so other
-# targets can depend on the package contents.
-filegroup(
-    name = "frontal_sandbox",
-    srcs = glob(
-        ["bin/**", "package.json", "README.md"],
-    ),
-    visibility = ["//visibility:public"],
-)

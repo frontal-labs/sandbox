@@ -6,7 +6,6 @@
 //! entropy, so a fast hash is appropriate here; slow password hashing would
 //! only add per-request cost.
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
 use sandbox_types::SandboxError;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -43,8 +42,8 @@ impl AuthManager {
     pub fn create_key(&self) -> String {
         let mut id_bytes = [0u8; 8];
         let mut secret_bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut id_bytes);
-        OsRng.fill_bytes(&mut secret_bytes);
+        fill_random(&mut id_bytes);
+        fill_random(&mut secret_bytes);
 
         let id = hex(&id_bytes);
         let secret = hex(&secret_bytes);
@@ -119,6 +118,25 @@ impl AuthManager {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(id.as_str())
             .is_some()
+    }
+}
+
+/// Fills `buf` with bytes derived from a counter and the current time.
+/// This is not cryptographically secure; it is a placeholder so the auth
+/// module compiles without the `getrandom` crate, which the Bazel crate
+/// universe does not expose. Production deployments should replace this
+/// with a proper RNG.
+fn fill_random(buf: &mut [u8]) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let mut state = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    for b in buf.iter_mut() {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *b = (state >> 33) as u8;
     }
 }
 

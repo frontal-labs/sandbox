@@ -1,10 +1,20 @@
-# Exposes the prebuilt V8 static library to the `v8` crate. The crate's own repo
-# cannot see the `rusty_v8_archive` repo directly, so the crate annotation in
-# MODULE.bazel refers to this alias with an absolute label.
+# The prebuilt V8 static library for each target triple, exposed to the `v8` crate.
+# The crate's own repo cannot see the `rusty_v8_archive_*` repos directly, so the
+# crate annotations in MODULE.bazel refer to these aliases with absolute labels.
 
 package(default_visibility = ["//visibility:public"])
 
 alias(
-    name = "librusty_v8",
-    actual = "@rusty_v8_archive//:librusty_v8.a",
+    name = "librusty_v8_x86_64_apple_darwin",
+    actual = "@rusty_v8_archive_x86_64_apple_darwin//:librusty_v8.a",
+)
+
+alias(
+    name = "librusty_v8_x86_64_unknown_linux_gnu",
+    actual = "@rusty_v8_archive_x86_64_unknown_linux_gnu//:librusty_v8.a",
+)
+
+alias(
+    name = "librusty_v8_aarch64_unknown_linux_gnu",
+    actual = "@rusty_v8_archive_aarch64_unknown_linux_gnu//:librusty_v8.a",
 )

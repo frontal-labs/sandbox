@@ -157,6 +157,22 @@ impl BlobStore for TieredStore {
         }
     }
 
+    async fn list_parts(&self) -> BlobStoreResult<Vec<String>> {
+        self.local.list_parts().await
+    }
+
+    async fn parts(&self, hash: &ContentHash) -> BlobStoreResult<Vec<ContentHash>> {
+        self.local.parts(hash).await
+    }
+
+    async fn delete_parts(
+        &self,
+        candidates: &[String],
+        keep: &std::collections::HashSet<ContentHash>,
+    ) -> BlobStoreResult<usize> {
+        self.local.delete_parts(candidates, keep).await
+    }
+
     async fn list(&self, prefix: Option<&str>) -> BlobStoreResult<Vec<ContentHash>> {
         let mut results = Vec::new();
         let prefix_path = prefix.map(ObjectPath::from);

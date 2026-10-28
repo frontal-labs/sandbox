@@ -2,16 +2,21 @@
 //! over HTTP to the same code the server runs.
 
 use frontal_sandbox_sdk::Client;
+use futures::StreamExt;
 use sandbox_scheduler::Scheduler;
 use sandbox_server::auth::AuthManager;
 use sandbox_server::create_router;
 use sandbox_types::{
-    ErrorCode, SessionConfig, SessionId, SnapshotId, TenantId, Tier, TierPreference,
+    CheckpointPolicy, ErrorCode, ExecEvent, ExecRequest, OutputStream, SessionConfig, SessionId,
+    SnapshotId, TenantId, Tier, TierPreference,
 };
 use std::sync::Arc;
 
 /// Starts the server on a free port. Returns its base URL and a fresh key.
 async fn start() -> (String, String) {
+    // This server runs in the test process, which has no contained script runner. Scripts
+    // run in-process here, as in the sandbox-server tests.
+    let _ = sandbox_runtime::install_in_process_script_runner();
     let auth = Arc::new(AuthManager::new());
     let key = auth.create_key();
     let app = create_router(Arc::new(Scheduler::new()), auth);
@@ -61,6 +66,58 @@ async fn session_exec_and_files_round_trip_over_http() {
     client.destroy_session(session).await.unwrap();
     let err = client.exec(session, "echo gone").await.unwrap_err();
     assert_eq!(err.code, ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn exec_stream_yields_output_then_exit_over_http() {
+    let client = client().await;
+    let session = client.create_session(config()).await.unwrap();
+    let request = ExecRequest {
+        argv: vec!["echo".to_string(), "streamed".to_string()],
+        ..ExecRequest::default()
+    };
+    let events: Vec<ExecEvent> = client
+        .exec_stream(session, &request)
+        .await
+        .unwrap()
+        .map(|event| event.unwrap())
+        .collect()
+        .await;
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(
+        events[0],
+        ExecEvent::Output {
+            stream: OutputStream::Stdout,
+            data: b"streamed\n".to_vec(),
+        }
+    );
+    assert!(matches!(events[1], ExecEvent::Exit { exit_code: 0, .. }));
+}
+
+#[tokio::test]
+async fn exec_stream_ends_with_the_error_when_the_command_times_out() {
+    let client = client().await;
+    let session = client.create_session(config()).await.unwrap();
+    let request = ExecRequest {
+        argv: vec![
+            "node".to_string(),
+            "-e".to_string(),
+            "let i=0; while(i<1000000000){i++}".to_string(),
+        ],
+        timeout_ms: Some(50),
+        ..ExecRequest::default()
+    };
+    let events: Vec<ExecEvent> = client
+        .exec_stream(session, &request)
+        .await
+        .unwrap()
+        .map(|event| event.unwrap())
+        .collect()
+        .await;
+    match events.last() {
+        Some(ExecEvent::Error { code, .. }) => assert_eq!(*code, ErrorCode::Timeout),
+        other => panic!("expected a timeout error line, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -130,12 +187,11 @@ async fn sleep_and_wake_restore_files_over_http() {
     let state = client.get_session(session).await.unwrap();
     assert_eq!(state.status, sandbox_types::SessionStatus::Sleeping);
 
-    // Asleep, the session refuses commands with a conflict.
-    let err = client.exec(session, "echo hi").await.unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidState);
-
-    let woken = client.wake(session).await.unwrap();
-    assert_eq!(woken.status, sandbox_types::SessionStatus::Running);
+    // A command on a sleeping session wakes it first (ADR 0015).
+    let out = client.exec(session, "echo hi").await.unwrap();
+    assert_eq!(out.exit_code, 0);
+    let state = client.get_session(session).await.unwrap();
+    assert_eq!(state.status, sandbox_types::SessionStatus::Running);
     assert_eq!(
         client.read_file(session, "/kept.txt").await.unwrap(),
         b"before sleep"
@@ -146,5 +202,46 @@ async fn sleep_and_wake_restore_files_over_http() {
     assert_eq!(
         client.read_file(forks[0], "/kept.txt").await.unwrap(),
         b"before sleep"
+    );
+}
+
+#[tokio::test]
+async fn checkpoints_undo_info_and_fork_command_over_http() {
+    let client = client().await;
+    let session = client.create_session(config()).await.unwrap();
+    client
+        .write_file(session, "a.txt", b"one".to_vec())
+        .await
+        .unwrap();
+    client.exec(session, "true").await.unwrap();
+    client
+        .write_file(session, "a.txt", b"two".to_vec())
+        .await
+        .unwrap();
+    client.exec(session, "true").await.unwrap();
+
+    let info = client.info(session).await.unwrap();
+    assert_eq!(info["schema"], 1);
+
+    let pinned = client.checkpoint(session).await.unwrap();
+    assert_eq!(pinned.checkpoints.policy, CheckpointPolicy::PerExec);
+    assert!(pinned.checkpoints.count >= 3);
+
+    let undone = client.undo(session, 1).await.unwrap();
+    assert!(undone.checkpoints.count >= 2);
+    assert_eq!(client.read_file(session, "a.txt").await.unwrap(), b"one");
+
+    let children = client
+        .fork_command(session, 2, &["touch".to_string(), "/r".to_string()])
+        .await
+        .unwrap();
+    assert_eq!(children.len(), 2);
+    assert!(children.iter().all(|child| child.exit_code == Some(0)));
+    assert_eq!(
+        client
+            .read_file(children[0].session_id, "a.txt")
+            .await
+            .unwrap(),
+        b"one"
     );
 }

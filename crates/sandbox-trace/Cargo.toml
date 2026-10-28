@@ -10,11 +10,11 @@ description = "Trace and event logging for the sandbox system"
 
 [dependencies]
 sandbox-types = { path = "../sandbox-types" }
+sandbox-vfs = { path = "../sandbox-vfs" }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 object_store = { workspace = true }

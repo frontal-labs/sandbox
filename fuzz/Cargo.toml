@@ -1,0 +1,61 @@
+# Fuzz targets for the shell parser and interpreter, VFS paths, the WASI fs shim,
+# and the guest wire protocol (PLAN.md §5, §7). Run with `cargo +nightly fuzz run <target>`.
+# This is its own workspace: libfuzzer needs nightly, and the main workspace
+# builds on stable.
+[package]
+name = "sandbox-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+prost = "0.13"
+sandbox-cas = { path = "../crates/sandbox-cas" }
+sandbox-proto = { path = "../crates/sandbox-proto" }
+sandbox-shell = { path = "../crates/sandbox-shell" }
+sandbox-types = { path = "../crates/sandbox-types" }
+sandbox-vfs = { path = "../crates/sandbox-vfs" }
+sandbox-wasm = { path = "../crates/sandbox-wasm" }
+tokio = { version = "1", features = ["rt"] }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "shell_parse"
+path = "fuzz_targets/shell_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "shell_run"
+path = "fuzz_targets/shell_run.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vfs_paths"
+path = "fuzz_targets/vfs_paths.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasi_fs"
+path = "fuzz_targets/wasi_fs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "guest_protocol"
+path = "fuzz_targets/guest_protocol.rs"
+test = false
+doc = false
+bench = false

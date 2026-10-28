@@ -1,0 +1,69 @@
+# cargo-deny policy: licenses, advisories, bans, and sources. PLAN.md §5, §8.
+# Run with `cargo deny check`. CI runs it in the `supply-chain` job.
+
+[graph]
+# The platforms the CLI is built and released for. Dependencies that only
+# compile for other platforms are not checked.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+all-features = false
+no-default-features = false
+
+[advisories]
+version = 2
+# Advisories with no fixed version. Each entry names the path and why it stays.
+# Remove an entry as soon as the path is upgraded.
+ignore = [
+    # `paste` is pulled by `deno_v8` through `v8`. Upgrading it means upgrading
+    # the V8 binding, which the runtime pins deliberately (PLAN §4.5).
+    { id = "RUSTSEC-2024-0436", reason = "transitive via deno_v8/v8; upgrade is tied to the pinned V8 binding" },
+    # `proc-macro-error` and `unsafe-libyaml` come from utoipa 4 (the OpenAPI
+    # generator) and its serde_yaml 0.9. Upgrading utoipa is tracked in PLAN §14.
+    { id = "RUSTSEC-2024-0370", reason = "build-time only, via utoipa-gen 4" },
+    { id = "RUSTSEC-2024-0449", reason = "via serde_yaml 0.9 for OpenAPI output; tracked with the utoipa upgrade" },
+    # `rustls-pemfile` is pulled by tonic 0.12 for the worker gRPC transport.
+    { id = "RUSTSEC-2025-0134", reason = "via tonic 0.12; tracked with the tonic upgrade" },
+    # `number_prefix` is used only by indicatif, in the benchmark crates.
+    { id = "RUSTSEC-2025-0119", reason = "benchmark-only, via indicatif" },
+]
+
+[licenses]
+version = 2
+# Permissive licenses only, plus MPL-2.0 (file-level copyleft, which does not
+# reach code outside the file). GPL and AGPL are not allowed: the CLI is
+# distributed under Apache-2.0. No exceptions are granted; a dependency that
+# needs one is replaced or its feature is turned off.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+# No workspace crate is published to crates.io yet, so the only wildcard-looking
+# entries are path dependencies between workspace crates. A wildcard rule would reject them and
+# catch nothing else. Revisit this before any crate is published.
+wildcards = "allow"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -14,7 +14,6 @@ tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
@@ -25,3 +24,4 @@ axum = { workspace = true }
 sandbox-server = { path = "../../crates/sandbox-server" }
 sandbox-scheduler = { path = "../../crates/sandbox-scheduler" }
 sandbox-session = { path = "../../crates/sandbox-session" }
+sandbox-runtime = { path = "../../crates/sandbox-runtime" }

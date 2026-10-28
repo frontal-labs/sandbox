@@ -1,0 +1,38 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+
+# The load generator. `[profile.release]` in its Cargo.toml applies only when it is
+# built as a workspace member, so Bazel builds it with the default optimization.
+rust_binary(
+    name = "sandbox_load",
+    edition = "2021",
+    srcs = glob(["src/**/*.rs"]),
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-session:sandbox_session",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//sdks/rust:sandbox_sdk",
+        "@crates//:tokio",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+        "@crates//:clap",
+        "@crates//:anyhow",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:sysinfo",
+        "@crates//:indicatif",
+        "@crates//:csv",
+        "@crates//:futures",
+        "@crates//:bytes",
+        "@crates//:rand",
+        "@crates//:chrono",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the binary compiled with cfg(test)).
+rust_test(
+    name = "sandbox_load_unit_test",
+    crate = ":sandbox_load",
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)

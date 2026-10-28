@@ -19,6 +19,10 @@ the CLI subcommand that starts the HTTP API in `crates/sandbox-server`.
 | `.env.example` | Optional overrides for `compose.yaml`. Copy to `docker/.env`. |
 | `smoke-test.sh` | End-to-end check on an isolated stack (own project, volume, and port). |
 
+## `node` needs a delegated cgroup
+
+On Linux the server runs each `node` script in a child process with a cgroup memory limit. The container needs a delegated cgroup v2 directory in `SANDBOX_CGROUP_ROOT`, with the `cpu`, `memory`, and `pids` controllers enabled, and the same privileges that worker isolation needs. Without that, `node` is refused, and nothing runs in the server process. See `docker/run-linux.sh` for the setup used in development.
+
 ## Quick start
 
 Requirements: Docker with Compose v2 (`docker compose version`).

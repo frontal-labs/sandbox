@@ -15,6 +15,8 @@ pub const CASES: &[&str] = &[
     "shell_pipeline",
     "vfs_write_read_4k",
     "snapshot_restore",
+    "session_create",
+    "node_script",
 ];
 
 const WARMUP: usize = 10;
@@ -97,6 +99,17 @@ async fn measure(case: &str) -> Result<CaseResult, SandboxError> {
             "snapshot_restore" => {
                 let root = session.snapshot().await?;
                 restore(root).await?;
+            }
+            "session_create" => {
+                // The cold start of a Tier 1 session: a new backend, with nothing warm.
+                let fresh = IsolateBackend::new(SessionConfig::default()).await?;
+                drop(fresh);
+            }
+            "node_script" => {
+                // A `node` run: a new V8 isolate per script, which is the cost a warm
+                // isolate pool would remove.
+                sandbox_runtime::execute_script("1 + 1", sandbox_runtime::ScriptLimits::default())
+                    .await?;
             }
             other => {
                 return Err(SandboxError::internal(format!(

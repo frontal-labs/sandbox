@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_runtime",
@@ -12,9 +12,42 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:deno_core",
+
+        "@crates//:deno_console",
+        "@crates//:deno_web",
+        "@crates//:deno_url",
+        "@crates//:deno_webidl",
+        "@crates//:swc_core",
+],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_runtime_warm_isolates_test",
+    srcs = ["tests/warm_isolates.rs"],
+    crate_root = "tests/warm_isolates.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "@crates//:bytes",
+        "@crates//:deno_console",
+        "@crates//:deno_core",
+        "@crates//:deno_url",
+        "@crates//:deno_web",
+        "@crates//:deno_webidl",
+        "@crates//:parking_lot",
+        "@crates//:serde",
+        "@crates//:swc_core",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        ":sandbox_runtime",
+        "@crates//:tokio",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
@@ -22,13 +55,24 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_runtime_test",
+# Without an installed runner, node is refused (fail closed).
+rust_test(
+    name = "sandbox_runtime_contain_default_test",
+    srcs = ["tests/contain_default.rs"],
+    crate_root = "tests/contain_default.rs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
+        "//crates/sandbox-types:sandbox_types",
         ":sandbox_runtime",
         "@crates//:tokio",
     ],
-    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_runtime_unit_test",
+    crate = ":sandbox_runtime",
+    edition = "2021",
+    visibility = ["//visibility:public"],
 )

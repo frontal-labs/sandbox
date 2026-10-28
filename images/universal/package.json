@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-universal",
+  "version": "1.0.0",
+  "description": "Universal image for Frontal Sandbox with all runtimes and tools",
+  "license": "MIT",
+  "private": true
+}

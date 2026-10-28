@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-arch",
+  "version": "1.0.0",
+  "description": "Arch Linux image for Frontal Sandbox",
+  "license": "MIT",
+  "private": true
+}

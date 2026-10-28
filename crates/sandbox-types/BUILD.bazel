@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_types",
@@ -10,7 +10,6 @@ rust_library(
         "@crates//:serde",
         "@crates//:serde_json",
         "@crates//:thiserror",
-        "@crates//:schemars",
         "@crates//:ulid",
         "@crates//:blake3",
         "@crates//:bytes",
@@ -22,14 +21,10 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_types_test",
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_types_unit_test",
+    crate = ":sandbox_types",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_types",
-        "@crates//:serde",
-        "@crates//:serde_json",
-    ],
-    testonly = True,
+    visibility = ["//visibility:public"],
 )

@@ -1,0 +1,21 @@
+# cargo-audit policy. `deny.toml` holds the same advisory decisions for
+# cargo-deny; keep the two lists in step. cargo-audit reads the whole
+# Cargo.lock, so it also sees entries the build does not compile.
+[advisories]
+ignore = [
+    # Lockfile only. `rsa` came from sqlx's default `mysql` feature, which the
+    # workspace no longer enables, so no build compiles it (`cargo tree` shows
+    # no path). Cargo keeps the entry in Cargo.lock; cargo-deny checks the
+    # compiled graph and passes. Remove this ignore once the entry is pruned.
+    "RUSTSEC-2023-0071",
+    # The unmaintained-crate advisories below have no fix on their current
+    # paths. Each is explained in deny.toml.
+    "RUSTSEC-2024-0370", # proc-macro-error via utoipa 4
+    "RUSTSEC-2024-0436", # paste via deno_v8
+    "RUSTSEC-2024-0449", # unsafe-libyaml via serde_yaml 0.9 via utoipa 4
+    "RUSTSEC-2025-0119", # number_prefix via indicatif (benchmarks)
+    "RUSTSEC-2025-0134", # rustls-pemfile via tonic 0.12
+    # Transitive via sqlx-core -> sha2 0.10 -> digest 0.10 -> ctutils 0.4.3
+    # sqlx 0.9.0 pins sha2 0.10; no fix available yet.
+    "RUSTSEC-2026-0385",
+]

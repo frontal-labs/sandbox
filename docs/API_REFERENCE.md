@@ -3,8 +3,8 @@
 > **Status: early.** Session, exec, filesystem, snapshot, fork, sleep, and wake
 > routes work against in-memory sessions, and every `/v1` route requires a valid
 > API key.
-> Settings the backend does not enforce (VM tier, custom limits, network policy,
-> secrets, environment, working directory) are refused with `501`, not ignored. The full target API is specified in
+> Settings the backend does not enforce (VM tier, memory, CPU, process, and open-file limits, network policy,
+> secrets, environment, working directory) are refused with `501`, not ignored. The file size, total size, inode, and path depth limits are enforced (ADR 0014). The full target API is specified in
 > [plans/PLAN.md section 4.15](../plans/PLAN.md#415-sandbox-server).
 
 ## Base URL
@@ -42,6 +42,8 @@ integers. The SDKs convert those arrays to bytes on their side.
 | POST | `/v1/snapshots/{id}/fork` | `fork_snapshot` | Start 1 to 64 sessions from a snapshot |
 | GET | `/v1/sessions/{id}/snapshots` | `list_snapshots` | Snapshots taken from a session |
 | GET | `/v1/sessions/{id}/snapshots/{snapshot_id}` | `get_snapshot` | One snapshot taken from a session |
+| GET | `/v1/usage` | `get_usage` | The caller's counters since the server started (ADR 0015) |
+| POST | `/v1/gc` | `run_gc` | Start a blob store collection in the background (`202`). One per minute, else `429` (ADR 0013). `sandbox serve --gc-interval-secs` also runs one on a schedule |
 
 Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 
@@ -57,7 +59,6 @@ These appear in plans/PLAN.md section 4.15 but have no route in `api.rs`:
 - `GET /v1/sessions/{id}/ws`: interactive WebSocket
 - `GET /v1/sessions/{id}/fs?list=...`: directory listing
 - `GET /v1/sessions/{id}/trace`: trace event stream
-- `GET /v1/usage`: metering
 - Served now: `GET /v1/openapi.json` returns the generated spec (no auth). The
   committed copies are in `openapi/v1/`, and `openapi/README.md` covers
   regeneration and the drift check.
@@ -173,16 +174,25 @@ POST /v1/sessions/{id}/exec
 }
 ```
 
-Planned streaming response (`?stream=true`, NDJSON):
+`timeout_ms` is enforced on the isolate tier. A command that runs past it returns
+`TIMEOUT` (HTTP 504), and the writes it made before stopping stay in the filesystem.
+See [LIMITS.md](LIMITS.md).
+
+Streaming response (`?stream=true`, or `"stream": true` in the body), as
+`application/x-ndjson`. One JSON object per line:
 
 ```json
-{"type": "stdout", "data": "base64_chunk"}
-{"type": "stderr", "data": "base64_chunk"}
-{"type": "exit", "code": 0, "cpu_ms": 500, "wall_ms": 1200}
+{"type": "output", "stream": "stdout", "data": [104, 105, 10]}
+{"type": "output", "stream": "stderr", "data": [110, 111, 112, 101, 10]}
+{"type": "exit", "exit_code": 0, "cpu_ms": 5, "wall_ms": 12}
 ```
 
-The SDKs already call `POST .../exec?stream=true`. The server ignores the
-query string today.
+Exactly one `exit` or `error` line ends the response. An `error` line has the
+`ErrorBody` fields, `code` and `message`, and it is how a command that times out
+or fails after its output started is reported, because the status is already 200.
+Output is sent when a command finishes, not byte by byte. See
+[ADR 0020](adr/0020-streaming-exec.md). A request that fails before streaming
+starts, such as an unknown session or an empty argv, is an ordinary HTTP error.
 
 ### File read, write, delete (planned)
 
@@ -224,9 +234,11 @@ Wake restores the session from the checkpoint that sleep recorded. Response:
 and the working directory come back. The environment does not, because its values
 often hold secrets (ADR 0010).
 
-While a session sleeps, `exec`, file operations, and `snapshot` return `409` with
-code `INVALID_STATE`. `get` and `destroy` still work. Sleeping or waking in the
-wrong state returns `409`. See [ADR 0006](adr/0006-sleep-and-wake.md).
+A request to a sleeping session wakes it first, so `exec`, file operations, and
+`snapshot` succeed. `get` and `destroy` never wake it. Sleeping a sleeping session,
+or waking a running one, returns `409` with code `INVALID_STATE`. Idle sessions
+sleep by themselves when `sandbox serve --idle-sleep-secs` is set (default 300). See
+[ADR 0006](adr/0006-sleep-and-wake.md) and [ADR 0015](adr/0015-idle-sleep-and-metering.md).
 
 ### Command trace
 
@@ -238,8 +250,14 @@ Response: `200`, `application/x-ndjson`, in the ADR 0007 format. Each command th
 session ran through `exec` is one run, with its argv written as a single-quoted
 script. `X-Trace-Complete` is `false` when a command could not be recorded (it had
 standard input, or an environment name is not a shell name) or when the trace is
-full (4096 runs). File writes are not recorded. Save the body and replay it with
-`frontal-sandbox replay`. See [ADR 0009](adr/0009-server-exec-traces.md).
+full (4096 runs). Each run lists the files the command changed, in its `files`
+field, with the operation (`create`, `write`, `delete`, `mkdir`, `symlink`) and the
+content hashes before and after. A rename appears as a delete and a create, and a
+chmod is not reported. Writes and deletes through the filesystem API are runs of their
+own, with the written bytes in an `fs` field. Save the body and replay it with
+`frontal-sandbox replay`, which makes the same writes again. See
+[ADR 0009](adr/0009-server-exec-traces.md), [ADR 0011](adr/0011-file-changes-in-traces.md),
+and [ADR 0012](adr/0012-filesystem-writes-in-traces.md).
 
 ### Fork snapshot
 

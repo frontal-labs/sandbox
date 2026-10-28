@@ -1,0 +1,7 @@
+{
+  "name": "@frontal/sandbox-al-node",
+  "version": "1.0.0",
+  "description": "Node.js images on Amazon Linux for Frontal Sandbox",
+  "license": "MIT",
+  "private": true
+}

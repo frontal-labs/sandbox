@@ -1,0 +1,7 @@
+# The committed API contract. The server's contract tests read these files, and
+# gen_openapi writes them.
+filegroup(
+    name = "v1_spec",
+    srcs = glob(["v1/**"]),
+    visibility = ["//visibility:public"],
+)

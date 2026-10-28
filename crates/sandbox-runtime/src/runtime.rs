@@ -6,7 +6,7 @@
 //! its limit, a callback terminates the script. Without that callback V8
 //! would abort the whole process on out-of-memory.
 
-use crate::ops::{op_sandbox_print, ScriptOutput};
+use crate::ops::{op_sandbox_print, ScriptOutput, StreamObserver};
 use deno_core::{extension, JsRuntime, RuntimeOptions};
 use sandbox_types::{ErrorCode, SandboxError};
 use std::sync::mpsc;
@@ -68,21 +68,53 @@ pub async fn execute_script(
     code: &str,
     limits: ScriptLimits,
 ) -> Result<ScriptOutcome, SandboxError> {
+    execute_script_streamed(code, limits, None).await
+}
+
+/// Like [`execute_script`], and tells `observer` each piece of stdout as the script
+/// writes it. The pieces are the ones kept in the outcome, in order.
+///
+/// # Containment limits
+///
+/// This runs the script in the host process, with no OS-level containment. The heap
+/// limit terminates the script at `max_heap_bytes`, but it does not bound all memory:
+/// string growth and off-heap buffers can exceed it, and a single allocation past the
+/// limit is a fatal V8 out-of-memory that aborts the host. The `node` builtin does not
+/// use this path. It goes through [`crate::execute_script_contained`], which runs each
+/// script in a child process with an OS memory limit.
+pub async fn execute_script_streamed(
+    code: &str,
+    limits: ScriptLimits,
+    observer: Option<StreamObserver>,
+) -> Result<ScriptOutcome, SandboxError> {
     let code = code.to_string();
-    tokio::task::spawn_blocking(move || run_isolate(&code, limits))
-        .await
-        .map_err(|e| SandboxError::new(ErrorCode::RuntimeError, format!("script task failed: {e}")))
+    tokio::task::spawn_blocking(move || {
+        // A warm isolate is built for the default heap limit only. Any other limit
+        // builds its own isolate, as it always did.
+        if limits.max_heap_bytes == ScriptLimits::default().max_heap_bytes {
+            if let Some(outcome) = run_warm(&code, limits, observer.clone()) {
+                return outcome;
+            }
+        }
+        run_isolate(&code, limits, observer)
+    })
+    .await
+    .map_err(|e| SandboxError::new(ErrorCode::RuntimeError, format!("script task failed: {e}")))
 }
 
 /// Extra heap V8 may use after the near-limit callback fires, so the script
 /// can unwind after termination.
 const HEAP_HEADROOM: usize = 16 * 1024 * 1024;
-
-/// State the near-heap-limit callback needs. Owned by `run_isolate`, which
-/// keeps it alive for the isolate's lifetime.
+/// How many times the callback grants `HEAP_HEADROOM` while a script is terminating.
+const MAX_HEADROOM_GRANTS: usize = 4;
 struct HeapGuard {
+    /// Terminates the script when the heap limit is reached. A thread-safe handle,
+    /// so it stays valid as long as the guard does.
     handle: deno_core::v8::IsolateHandle,
     hit: std::sync::atomic::AtomicBool,
+    /// Headroom grants so far. Capped at `MAX_HEADROOM_GRANTS`, so the heap cannot
+    /// grow without bound while termination is pending.
+    grants: std::sync::atomic::AtomicUsize,
 }
 
 /// Called by V8 when the heap is close to its limit.
@@ -101,10 +133,49 @@ unsafe extern "C" fn on_near_heap_limit(
     let guard = unsafe { &*(data as *const HeapGuard) };
     guard.hit.store(true, std::sync::atomic::Ordering::SeqCst);
     guard.handle.terminate_execution();
+    let granted = guard
+        .grants
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if granted >= MAX_HEADROOM_GRANTS {
+        // Termination is still pending and the grants are spent. V8 may now fail the
+        // allocation fatally. That is the one case in-process isolation cannot contain.
+        return current;
+    }
     current + HEAP_HEADROOM
 }
 
-fn run_isolate(code: &str, limits: ScriptLimits) -> ScriptOutcome {
+/// Runs `code` in a freshly built isolate. Used when no warm isolate is ready.
+fn run_isolate(
+    code: &str,
+    limits: ScriptLimits,
+    observer: Option<StreamObserver>,
+) -> ScriptOutcome {
+    match build(limits) {
+        Ok(built) => run_built(built, code, limits, observer),
+        Err(message) => failed(message),
+    }
+}
+
+/// An isolate with its bootstrap done and its heap guard installed, ready for one script.
+/// It lives on the thread that built it, because V8 isolates are not `Send`.
+struct Built {
+    /// Taken when the isolate is dropped, so the guard can outlive it.
+    runtime: Option<JsRuntime>,
+    guard: *mut HeapGuard,
+}
+
+impl Drop for Built {
+    fn drop(&mut self) {
+        // The isolate goes first. Once it is gone, no callback can use the guard.
+        drop(self.runtime.take());
+        // SAFETY: the isolate is gone, so nothing refers to the guard. It came from
+        // `Box::into_raw` in `build`, and this is its only reclaim.
+        drop(unsafe { Box::from_raw(self.guard) });
+    }
+}
+
+/// Builds an isolate with the heap limit of `limits`, the heap guard, and the bootstrap.
+fn build(limits: ScriptLimits) -> Result<Built, String> {
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![sandbox_script::init()],
         create_params: Some(
@@ -116,21 +187,42 @@ fn run_isolate(code: &str, limits: ScriptLimits) -> ScriptOutcome {
     let guard = Box::into_raw(Box::new(HeapGuard {
         handle: runtime.v8_isolate().thread_safe_handle(),
         hit: std::sync::atomic::AtomicBool::new(false),
+        grants: std::sync::atomic::AtomicUsize::new(0),
     }));
-    // SAFETY: `guard` is a valid pointer to a live HeapGuard. It is freed
-    // below, after `runtime` (and so the isolate) has been dropped.
+    // SAFETY: `guard` is a valid pointer to a live HeapGuard. `Built::drop` frees it
+    // only after the isolate is gone.
     runtime
         .v8_isolate()
         .add_near_heap_limit_callback(on_near_heap_limit, guard as *mut std::ffi::c_void);
+    let mut built = Built {
+        runtime: Some(runtime),
+        guard,
+    };
+    let runtime = built.runtime.as_mut().expect("set just above");
+    if let Err(e) = runtime.execute_script("[sandbox:bootstrap]", BOOTSTRAP) {
+        // Dropping `built` frees the isolate, then the guard.
+        return Err(format!("bootstrap failed: {e}"));
+    }
+    Ok(built)
+}
 
+/// Runs `code` in a built isolate, under the wall-clock limit of `limits`.
+fn run_built(
+    mut built: Built,
+    code: &str,
+    limits: ScriptLimits,
+    observer: Option<StreamObserver>,
+) -> ScriptOutcome {
+    let guard = built.guard;
+    let runtime = built
+        .runtime
+        .as_mut()
+        .expect("a built isolate holds its runtime until it is dropped");
     runtime.op_state().borrow_mut().put(ScriptOutput {
         limit: limits.max_output_bytes,
+        observer,
         ..ScriptOutput::default()
     });
-
-    if let Err(e) = runtime.execute_script("[sandbox:bootstrap]", BOOTSTRAP) {
-        return failed(format!("bootstrap failed: {e}"));
-    }
 
     // Watchdog: terminate the isolate if the deadline passes first. The
     // channel lets a finished script stop the watchdog.
@@ -152,12 +244,10 @@ fn run_isolate(code: &str, limits: ScriptLimits) -> ScriptOutcome {
 
     let output = runtime.op_state().borrow_mut().take::<ScriptOutput>();
     let heap_hit = {
-        // SAFETY: the guard is still alive; the isolate is not dropped yet.
+        // SAFETY: the guard is alive until `built` is dropped below.
         unsafe { (*guard).hit.load(std::sync::atomic::Ordering::SeqCst) }
     };
-    drop(runtime);
-    // SAFETY: the isolate is gone, so no callback can run. Reclaim the Box.
-    drop(unsafe { Box::from_raw(guard) });
+    drop(built);
     let (stdout, truncated) = (output.stdout, output.truncated);
 
     let mut outcome = match result {
@@ -189,6 +279,90 @@ fn run_isolate(code: &str, limits: ScriptLimits) -> ScriptOutcome {
         outcome.stderr.extend_from_slice(b"[output truncated]\n");
     }
     outcome
+}
+
+/// Isolates built ahead of need. A `node` run takes one, so it starts from a ready
+/// isolate rather than building one (PLAN §4.14, warm pools). The pool holds
+/// `WARM_TARGET` at most, and each taken isolate is replaced in the background.
+const WARM_TARGET: usize = 2;
+
+struct WarmJob {
+    code: String,
+    limits: ScriptLimits,
+    observer: Option<StreamObserver>,
+    reply: mpsc::Sender<ScriptOutcome>,
+}
+
+#[derive(Default)]
+struct WarmPool {
+    /// Threads whose isolate is built and waiting for a job.
+    ready: std::sync::Mutex<Vec<mpsc::Sender<WarmJob>>>,
+}
+
+static WARM: std::sync::OnceLock<std::sync::Arc<WarmPool>> = std::sync::OnceLock::new();
+
+fn warm_pool() -> &'static std::sync::Arc<WarmPool> {
+    WARM.get_or_init(|| {
+        let pool = std::sync::Arc::new(WarmPool::default());
+        for _ in 0..WARM_TARGET {
+            spawn_warm(pool.clone());
+        }
+        pool
+    })
+}
+
+/// Starts a thread that builds one isolate, offers it to the pool, and runs the one
+/// job it is given. The isolate is single-use, so the thread then ends.
+fn spawn_warm(pool: std::sync::Arc<WarmPool>) {
+    let spawned = std::thread::Builder::new()
+        .name("sandbox-warm-isolate".to_string())
+        .spawn(move || {
+            // V8 posts delayed tasks (heap-limit handling) to tokio's timer, so the
+            // isolate must be built inside a tokio runtime context. A plain thread has none.
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            let _entered = rt.enter();
+            let Ok(built) = build(ScriptLimits::default()) else {
+                return;
+            };
+            let (offer, jobs) = mpsc::channel::<WarmJob>();
+            if let Ok(mut ready) = pool.ready.lock() {
+                ready.push(offer);
+            }
+            if let Ok(job) = jobs.recv() {
+                let outcome = run_built(built, &job.code, job.limits, job.observer);
+                let _ = job.reply.send(outcome);
+            }
+        });
+    // A thread that cannot be started leaves the pool smaller. Runs then build their own.
+    let _ = spawned;
+}
+
+/// Runs `code` in a warm isolate, if one is ready. `None` means none was, and the
+/// caller builds its own isolate.
+fn run_warm(
+    code: &str,
+    limits: ScriptLimits,
+    observer: Option<StreamObserver>,
+) -> Option<ScriptOutcome> {
+    let pool = warm_pool();
+    let offer = pool.ready.lock().ok()?.pop()?;
+    // Refill in the background, so the pool is back to its target size.
+    spawn_warm(pool.clone());
+    let (reply, outcome) = mpsc::channel();
+    offer
+        .send(WarmJob {
+            code: code.to_string(),
+            limits,
+            observer,
+            reply,
+        })
+        .ok()?;
+    outcome.recv().ok()
 }
 
 fn failed(message: String) -> ScriptOutcome {

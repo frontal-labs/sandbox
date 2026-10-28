@@ -12,6 +12,7 @@ impl From<ExecRequest> for pb::ExecRequest {
             stdin: req.stdin,
             timeout_ms: req.timeout_ms,
             stream: req.stream,
+            output_limit: req.output_limit,
         }
     }
 }
@@ -29,6 +30,7 @@ impl TryFrom<pb::ExecRequest> for ExecRequest {
             stdin: req.stdin,
             timeout_ms: req.timeout_ms,
             stream: req.stream,
+            output_limit: req.output_limit,
         })
     }
 }

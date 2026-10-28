@@ -28,19 +28,21 @@ rust_library(
     edition = "2021",
     srcs = glob(["src/**/*.rs"]),
     deps = [
-        ":sandbox_vmm",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:tokio",
+        "@crates//:bytes",
+        "@crates//:tracing",
+        "@crates//:thiserror",
+        "@crates//:reqwest",
+        "@crates//:hyper",
+        "@crates//:hyperlocal",
+        "@crates//:rustix",
+        "@crates//:nix",
         "@crates//:seccompiler",
     ],
-    visibility = ["//visibility:public"],
-)
-
-rust_library(
-    name = "sandbox_vmm_test",
-    edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_vmm",
-        "@crates//:tokio",
+    proc_macro_deps = [
+        "@crates//:async-trait",
     ],
-    testonly = True,
+    visibility = ["//visibility:public"],
+    target_compatible_with = ["@platforms//os:linux"],
 )

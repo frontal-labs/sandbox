@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_shell",
@@ -14,8 +14,40 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
+
+        "@crates//:regex",
+],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_conformance_test",
+    srcs = ["tests/conformance.rs"],
+    crate_root = "tests/conformance.rs",
+    edition = "2021",
+    # The test reads conformance/cases.json through CARGO_MANIFEST_DIR. Bazel runs it
+    # from its runfiles, where the package sits at crates/sandbox-shell.
+    data = glob(["conformance/**"]),
+    rustc_env = {"CARGO_MANIFEST_DIR": "crates/sandbox-shell"},
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
@@ -23,13 +55,178 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_shell_test",
+rust_test(
+    name = "sandbox_shell_features_test",
+    srcs = ["tests/features.rs"],
+    crate_root = "tests/features.rs",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
     deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
         ":sandbox_shell",
         "@crates//:tokio",
     ],
-    testonly = True,
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_globbing_test",
+    srcs = ["tests/globbing.rs"],
+    crate_root = "tests/globbing.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_nesting_limit_test",
+    srcs = ["tests/nesting_limit.rs"],
+    crate_root = "tests/nesting_limit.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_recursion_test",
+    srcs = ["tests/recursion.rs"],
+    crate_root = "tests/recursion.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_streaming_test",
+    srcs = ["tests/streaming.rs"],
+    crate_root = "tests/streaming.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_typescript_test",
+    srcs = ["tests/typescript.rs"],
+    crate_root = "tests/typescript.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-wasm:sandbox_wasm",
+        "@crates//:bytes",
+        "@crates//:parking_lot",
+        "@crates//:regex",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+        "@crates//:serde_json",
+        "//crates/sandbox-cas:sandbox_cas",
+        ":sandbox_shell",
+        "@crates//:tokio",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Unit tests in src/. tests.rs embeds the wasm tool from sandbox-wasm with
+# include_bytes!, so that fixture must be a compile input.
+rust_test(
+    name = "sandbox_shell_unit_test",
+    crate = ":sandbox_shell",
+    edition = "2021",
+    compile_data = ["//crates/sandbox-wasm:fixtures"],
+    deps = [
+        "//crates/sandbox-cas:sandbox_cas",
+        "@crates//:serde_json",
+    ],
+    visibility = ["//visibility:public"],
 )

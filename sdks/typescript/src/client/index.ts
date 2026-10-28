@@ -3,19 +3,14 @@ import { createSandboxError, isSandboxError, SandboxErrorCodes } from "../errors
 import type { ErrorCode } from "../errors/index.js"
 import * as z from "zod"
 import {
-  CreateSessionResponseSchema,
-  ExecRequestSchema,
-  ExecResultSchema,
-  ForkResponseSchema,
   SessionConfigSchema,
-  SessionStateSchema,
-  SnapshotSchema,
-  TakeSnapshotResponseSchema,
   type ExecRequest,
   type ExecResult,
   type SessionConfig,
   type SessionState,
   type Snapshot,
+  wireSchemas,
+  wireResponseSchemas,
 } from "../types/index.js"
 
 export interface ClientConfig {
@@ -70,7 +65,7 @@ private async request<T>(
       })
 
       if (!response.ok) {
-        return errorFromResponse(response)
+        return this.errorFromResponse(response)
       }
 
       if (response.status === 204) {
@@ -112,39 +107,42 @@ private async request<T>(
 
     const created = await this.request(
       "/v1/sessions",
-      { method: "POST", body: JSON.stringify(parseResult.data) },
-      CreateSessionResponseSchema,
+      { method: "POST", body: JSON.stringify(wireSchemas.SessionConfig.parse(parseResult.data)) },
+      wireResponseSchemas.CreateSessionResponse,
     )
     if (isSandboxError(created)) {
       return created
     }
-    return created.session_id
+    return created.sessionId
   }
 
   async getSession(sessionId: string): Promise<Result<SessionState>> {
-    return this.request<SessionState>(`/v1/sessions/${sessionId}`, {}, SessionStateSchema)
+    return this.request<SessionState>(
+      `/v1/sessions/${encodeURIComponent(sessionId)}`,
+      {},
+      wireResponseSchemas.SessionState,
+    )
   }
 
   async destroySession(sessionId: string): Promise<Result<void>> {
-    return this.request<void>(`/v1/sessions/${sessionId}`, {
+    return this.request<void>(`/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
     })
   }
 
   async exec(sessionId: string, request: ExecRequest): Promise<Result<ExecResult>> {
-    const parseResult = ExecRequestSchema.safeParse(request)
+    const parseResult = wireSchemas.ExecRequest.safeParse(request)
     if (!parseResult.success) {
       return SandboxErrorCodes.invalidArgument(
         `Invalid exec request: ${parseResult.error.message}`,
       )
     }
 
-    const { stdin, ...rest } = parseResult.data
-    const wire = { ...rest, stdin: stdin === undefined ? undefined : Array.from(stdin) }
+    const wire = parseResult.data
     return this.request<ExecResult>(
-      `/v1/sessions/${sessionId}/exec`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/exec`,
       { method: "POST", body: JSON.stringify(wire) },
-      ExecResultSchema,
+      wireResponseSchemas.ExecResult,
     )
   }
 
@@ -159,51 +157,51 @@ private async request<T>(
 
   async snapshot(sessionId: string): Promise<Result<Snapshot>> {
     const taken = await this.request(
-      `/v1/sessions/${sessionId}/snapshot`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/snapshot`,
       { method: "POST" },
-      TakeSnapshotResponseSchema,
+      wireResponseSchemas.TakeSnapshotResponse,
     )
     if (isSandboxError(taken)) {
       return taken
     }
-    return this.getSnapshot(sessionId, taken.snapshot_id)
+    return this.getSnapshot(sessionId, taken.snapshotId)
   }
 
   /** Puts the session to sleep and returns the id of the snapshot it wakes from. */
   async sleep(sessionId: string): Promise<Result<string>> {
     const taken = await this.request(
-      `/v1/sessions/${sessionId}/sleep`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/sleep`,
       { method: "POST" },
-      TakeSnapshotResponseSchema,
+      wireResponseSchemas.TakeSnapshotResponse,
     )
     if (isSandboxError(taken)) {
       return taken
     }
-    return taken.snapshot_id
+    return taken.snapshotId
   }
 
   /** Wakes a sleeping session. Its files come back; shell state starts fresh. */
   async wake(sessionId: string): Promise<Result<SessionState>> {
     return this.request<SessionState>(
-      `/v1/sessions/${sessionId}/wake`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/wake`,
       { method: "POST" },
-      SessionStateSchema,
+      wireResponseSchemas.SessionState,
     )
   }
 
   async listSnapshots(sessionId: string): Promise<Result<Snapshot[]>> {
     return this.request<Snapshot[]>(
-      `/v1/sessions/${sessionId}/snapshots`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/snapshots`,
       {},
-      z.array(SnapshotSchema),
+      z.array(wireResponseSchemas.Snapshot),
     )
   }
 
   async getSnapshot(sessionId: string, snapshotId: string): Promise<Result<Snapshot>> {
     return this.request<Snapshot>(
-      `/v1/sessions/${sessionId}/snapshots/${snapshotId}`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/snapshots/${snapshotId}`,
       {},
-      SnapshotSchema,
+      wireResponseSchemas.Snapshot,
     )
   }
 
@@ -212,29 +210,111 @@ private async request<T>(
     const forked = await this.request(
       `/v1/snapshots/${snapshotId}/fork`,
       { method: "POST", body: JSON.stringify({ count }) },
-      ForkResponseSchema,
+      wireResponseSchemas.ForkResponse,
     )
     if (isSandboxError(forked)) {
       return forked
     }
-    return forked.session_ids
+    return forked.sessionIds
+  }
+
+  /// Reads a file from the session's filesystem. Returns the raw bytes.
+  async readFile(sessionId: string, path: string): Promise<Result<Uint8Array>> {
+    const encoded = encodeFsPath(path)
+    if (isSandboxError(encoded)) return encoded
+    const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
+    const response = await this.fetch(url, { method: "GET" })
+    if (isSandboxError(response)) {
+      return response
+    }
+    return new Uint8Array(await response.arrayBuffer())
+  }
+
+  /// Writes a file, creating it or replacing it.
+  async writeFile(
+    sessionId: string,
+    path: string,
+    bytes: Uint8Array,
+  ): Promise<Result<void>> {
+    const encoded = encodeFsPath(path)
+    if (isSandboxError(encoded)) return encoded
+    const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
+    const response = await this.fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: bytes as BodyInit,
+    })
+    return isSandboxError(response) ? response : (undefined as void)
+  }
+
+  /// Deletes a file or an empty directory.
+  async deleteFile(sessionId: string, path: string): Promise<Result<void>> {
+    const encoded = encodeFsPath(path)
+    if (isSandboxError(encoded)) return encoded
+    const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
+    const response = await this.fetch(url, { method: "DELETE" })
+    return isSandboxError(response) ? response : (undefined as void)
+  }
+
+  private async fetch(url: string, init: RequestInit = {}): Promise<Result<Response>> {
+    const fullUrl = `${this.baseUrlValue}${url}`
+    try {
+      const response = await fetch(fullUrl, {
+        ...init,
+        headers: {
+          ...this.headers(init.body !== undefined),
+          ...(init.headers as Record<string, string>),
+        },
+      })
+      if (!response.ok) {
+        return this.errorFromResponse(response)
+      }
+      return response
+    } catch (error) {
+      if (isSandboxError(error)) {
+        return error
+      }
+      return SandboxErrorCodes.networkError(
+        error instanceof Error ? error.message : "Network error",
+        error instanceof Error ? error : undefined,
+      )
+    }
+  }
+
+  private async errorFromResponse(response: Response): Promise<SandboxError> {
+    const body = (await response.json().catch(() => ({}))) as {
+      code?: string
+      message?: string
+    }
+    const message =
+      typeof body.message === "string"
+        ? body.message
+        : `HTTP ${response.status}: ${response.statusText}`
+    if (typeof body.code === "string") {
+      return createSandboxError(body.code as ErrorCode, message)
+    }
+    const code: ErrorCode =
+      response.status === 401
+        ? "PERMISSION_DENIED"
+        : response.status === 404
+          ? "NOT_FOUND"
+          : response.status === 400
+            ? "INVALID_ARGUMENT"
+            : response.status === 501
+              ? "UNSUPPORTED"
+              : "INTERNAL"
+    return createSandboxError(code, message)
   }
 }
 
-/// Maps a non-2xx response to the error the server sent. The server's error
-/// body is `{ code, message }`. A body without it is mapped from the status.
-async function errorFromResponse(response: Response): Promise<SandboxError> {
-  const body = (await response.json().catch(() => ({}))) as { code?: unknown; message?: unknown }
-  const message =
-    typeof body.message === "string" ? body.message : `HTTP ${response.status}: ${response.statusText}`
-  if (typeof body.code === "string") {
-    return createSandboxError(body.code as ErrorCode, message)
+/// Percent-encodes a path for the filesystem API. Dot segments are refused: an HTTP
+/// client resolves them before sending, so the request could reach another route.
+function encodeFsPath(path: string): string | SandboxError {
+  const segments = path.trimStart().split("/")
+  for (const segment of segments) {
+    if (segment === "." || segment === "..") {
+      return createSandboxError("INVALID_ARGUMENT", `path segment "${segment}" is not allowed`)
+    }
   }
-  const code: ErrorCode =
-    response.status === 401 ? "PERMISSION_DENIED"
-    : response.status === 404 ? "NOT_FOUND"
-    : response.status === 400 ? "INVALID_ARGUMENT"
-    : response.status === 501 ? "UNSUPPORTED"
-    : "INTERNAL"
-  return createSandboxError(code, message)
+  return segments.map((segment) => encodeURIComponent(segment)).join("/")
 }

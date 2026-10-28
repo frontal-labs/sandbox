@@ -1,15 +1,16 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_binary", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
-# Python SDK library
+# Python SDK library. The pip packages come from the `pypi` hub, which
+# MODULE.bazel builds from requirements_lock.txt.
 py_library(
     name = "sandbox_sdk",
     srcs = glob(["sandbox_sdk/**/*.py"]),
     imports = ["."],
     deps = [
-        "@rules_python//python/pip:httpx",
-        "@rules_python//python/pip:pydantic",
-        "@rules_python//python/pip:ulid_py",
-        "@rules_python//python/pip:python_dotenv",
+        "@pypi//httpx",
+        "@pypi//pydantic",
+        "@pypi//ulid_py",
+        "@pypi//python_dotenv",
     ],
     visibility = ["//visibility:public"],
 )
@@ -17,21 +18,28 @@ py_library(
 # Tests
 py_test(
     name = "sandbox_sdk_test",
-    srcs = glob(["tests/**/*.py"], allow_empty = True),
+    srcs = ["tools/run_module.py"] + glob(["tests/**/*.py"], allow_empty = True),
+    main = "tools/run_module.py",
+    # Bazel runs the test from the workspace root, not the package, so the path
+    # is workspace-relative.
+    args = ["pytest", "-q", "sdks/python/tests"],
     deps = [
         ":sandbox_sdk",
-        "@rules_python//python/pip:pytest",
-        "@rules_python//python/pip:pytest_asyncio",
-        "@rules_python//python/pip:pytest_cov",
+        "@pypi//pytest",
+        "@pypi//pytest_asyncio",
+        "@pypi//pytest_cov",
     ],
     visibility = ["//visibility:public"],
 )
 
-# Type checking (mypy)
+# Tools run as modules: `run_module.py mypy ...`, `run_module.py ruff ...`. A pip
+# package's console script is not a file Bazel can name, but its module is.
 py_binary(
     name = "typecheck",
-    main = "@rules_python//python/pip:mypy",
+    srcs = ["tools/run_module.py"],
+    main = "tools/run_module.py",
     args = [
+        "mypy",
         "--strict",
         "--warn-return-any",
         "--warn-unused-configs",
@@ -46,8 +54,8 @@ py_binary(
     ],
     deps = [
         ":sandbox_sdk",
-        "@rules_python//python/pip:mypy",
-        "@rules_python//python/pip:types_requests",
+        "@pypi//mypy",
+        "@pypi//types_requests",
     ],
     visibility = ["//visibility:public"],
 )
@@ -55,33 +63,30 @@ py_binary(
 # Linting (ruff)
 py_binary(
     name = "lint",
-    main = "@rules_python//python/pip:ruff",
-    args = ["check", "sandbox_sdk", "tests"],
-    deps = [
-        "@rules_python//python/pip:ruff",
-    ],
+    srcs = ["tools/run_module.py"],
+    main = "tools/run_module.py",
+    args = ["ruff", "check", "sandbox_sdk", "tests"],
+    deps = ["@pypi//ruff"],
     visibility = ["//visibility:public"],
 )
 
 # Format check
 py_binary(
     name = "format_check",
-    main = "@rules_python//python/pip:ruff",
-    args = ["format", "--check", "sandbox_sdk", "tests"],
-    deps = [
-        "@rules_python//python/pip:ruff",
-    ],
+    srcs = ["tools/run_module.py"],
+    main = "tools/run_module.py",
+    args = ["ruff", "format", "--check", "sandbox_sdk", "tests"],
+    deps = ["@pypi//ruff"],
     visibility = ["//visibility:public"],
 )
 
 # Format fix
 py_binary(
     name = "format_fix",
-    main = "@rules_python//python/pip:ruff",
-    args = ["format", "sandbox_sdk", "tests"],
-    deps = [
-        "@rules_python//python/pip:ruff",
-    ],
+    srcs = ["tools/run_module.py"],
+    main = "tools/run_module.py",
+    args = ["ruff", "format", "sandbox_sdk", "tests"],
+    deps = ["@pypi//ruff"],
     visibility = ["//visibility:public"],
 )
 

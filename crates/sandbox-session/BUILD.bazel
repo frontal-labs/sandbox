@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_session",
@@ -17,23 +17,21 @@ rust_library(
         "@crates//:tracing",
         "@crates//:thiserror",
         "@crates//:parking_lot",
-        "@crates//:schemars",
         "@crates//:serde",
         "@crates//:futures",
-    ],
+
+        "//crates/sandbox-trace:sandbox_trace",
+],
     proc_macro_deps = [
         "@crates//:async-trait",
     ],
     visibility = ["//visibility:public"],
 )
 
-rust_library(
-    name = "sandbox_session_test",
+# Unit tests in src/ (the lib compiled with cfg(test)).
+rust_test(
+    name = "sandbox_session_unit_test",
+    crate = ":sandbox_session",
     edition = "2021",
-    srcs = glob(["tests/**/*.rs"], allow_empty = True),
-    deps = [
-        ":sandbox_session",
-        "@crates//:tokio",
-    ],
-    testonly = True,
+    visibility = ["//visibility:public"],
 )

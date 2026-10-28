@@ -211,11 +211,21 @@ async fn keys_sleeping_sessions_and_snapshots_survive_a_restart() {
     assert_eq!(json_of(&body)["stdout"].as_array().unwrap().len(), 6);
     // The environment value the live session set is a secret candidate, so it is
     // never written to disk.
-    let saved = std::fs::read_to_string(dir.join("state.json")).unwrap();
-    assert!(
-        !saved.contains("hello"),
-        "an environment value reached the state file"
-    );
+    // Every state file, the base and each log, must be free of it.
+    let mut scanned = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_string_lossy().starts_with("state.") {
+            let text = std::fs::read_to_string(entry.path()).unwrap();
+            assert!(
+                !text.contains("hello"),
+                "an environment value reached {:?}",
+                entry.file_name()
+            );
+            scanned += 1;
+        }
+    }
+    assert!(scanned > 0, "there are state files to check");
 
     // The sleep snapshot forks into a running session with the same contents.
     let (status, body) = call(

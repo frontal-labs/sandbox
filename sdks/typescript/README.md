@@ -2,7 +2,9 @@
 
 TypeScript SDK for [Frontal Sandbox](https://github.com/frontal-labs/sandbox), the execution platform for AI agents. The npm package is `@frontal-labs/sandbox-sdk`. Source is in `sdks/typescript/`.
 
-**Status: early.** The client covers sessions, exec, snapshots, and forks over the server's `/v1` API. Field names and byte encodings match the server's wire format, and the tests check that against server-shaped responses and against a live server. Streaming exec is refused with `UNSUPPORTED`. "Embedded" mode is a wrapper over a remote server, not a local backend.
+**Status: early.** The client covers sessions, exec, files, snapshots, and forks over the server's `/v1` API. Field names and byte encodings match the server's wire format, and the tests check that against server-shaped responses and against a live server. Streaming exec is refused with `UNSUPPORTED`. "Embedded" mode is a wrapper over a remote server, not a local backend.
+
+**Naming.** The SDK exposes camelCase types and parameters (the idiomatic style for TypeScript) and converts them to the server's snake_case wire format automatically on request, and back again on response. The wire format itself is unchanged.
 
 ## Installation
 
@@ -40,8 +42,8 @@ const client = new Client({
 // const client = Client.fromEnv()
 
 const session = await client.createSession({
-  tenant_id: "my-tenant",
-  tier_preference: "auto",
+  tenantId: "my-tenant",
+  tierPreference: "auto",
 })
 if (isSandboxError(session)) throw session
 
@@ -53,7 +55,7 @@ const result = await client.exec(session, {
 if (isSandboxError(result)) {
   console.error("Execution failed:", result.code, result.message)
 } else {
-  console.log("Exit code:", result.exit_code)
+  console.log("Exit code:", result.exitCode)
   console.log("Stdout:", new TextDecoder().decode(result.stdout))
 }
 ```
@@ -71,7 +73,7 @@ Local in-process execution is planned. See `plans/PLAN.md`.
 ```typescript
 import { EmbeddedSandbox, isSandboxError } from "@frontal-labs/sandbox-sdk"
 
-const sandbox = await EmbeddedSandbox.new({ tenant_id: "local-dev" })
+const sandbox = await EmbeddedSandbox.new({ tenantId: "local-dev" })
 if (isSandboxError(sandbox)) throw sandbox
 
 const result = await sandbox.exec("echo hi")
@@ -103,10 +105,10 @@ Validates the config with Zod, then POSTs it. Returns the session ID.
 
 ```typescript
 interface SessionConfig {
-  tenant_id: string                             // required, min length 1
+  tenantId: string                             // required, min length 1
   tierPreference?: "auto" | "isolate" | "vm"    // default "auto"
   limits?: ResourceLimits
-  network?: NetworkPolicy                       // default default_deny: true
+  network?: NetworkPolicy                       // default defaultDeny: true
   env?: Record<string, string>
   cwd?: string                                  // default "/work"
   initialSnapshot?: string
@@ -138,7 +140,7 @@ interface ExecRequest {
 }
 
 interface ExecResult {
-  exit_code: number
+  exitCode: number
   stdout: Uint8Array
   stderr: Uint8Array
   cpuMs: number

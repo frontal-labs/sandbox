@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use sandbox_session::{IsolateBackend, Session};
-use sandbox_trace::{outcome_of, replay, Outcome, RunRecord, Trace};
+use sandbox_session::{changed_since, committed_root, replay_run, IsolateBackend, Session};
+use sandbox_trace::{outcome_of, replay, FileChange, FsOp, Outcome, RunRecord, Trace};
 use sandbox_types::{ErrorCode, ExecResult, SandboxError, SessionConfig};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -11,6 +11,49 @@ const VERSION: &str = match option_env!("SANDBOX_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
+
+#[derive(Subcommand)]
+pub enum SandboxCommand {
+    /// Print the session's environment (/etc/agent/env.json) as JSON.
+    Info {
+        /// Session ID
+        session_id: String,
+    },
+
+    /// Pin the session's current state as a checkpoint, and print its root.
+    Checkpoint {
+        /// Session ID
+        session_id: String,
+    },
+
+    /// Restore the filesystem from N checkpoints ago. The current state is kept as a
+    /// checkpoint first. Processes are not kept.
+    Undo {
+        /// Session ID
+        session_id: String,
+
+        /// How many checkpoints back to restore
+        #[arg(default_value = "1")]
+        steps: u32,
+    },
+
+    /// Fork the session's current state into N children and run a command in each.
+    /// Prints one line per child. Exits 1 when a child's command failed.
+    ///
+    /// Example: frontal-sandbox sandbox fork <session> -c 3 -- touch /r
+    Fork {
+        /// Session ID
+        session_id: String,
+
+        /// Number of children
+        #[arg(short, long, default_value = "1")]
+        count: u32,
+
+        /// The command to run in each child
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+}
 
 #[derive(Parser)]
 #[command(name = "frontal-sandbox", version = VERSION, about = "Frontal Sandbox CLI")]
@@ -56,11 +99,31 @@ pub enum Commands {
         count: usize,
     },
 
+    /// Tier 1 session tools: environment, checkpoints, undo, and fork-with-command.
+    /// Uses SANDBOX_BASE_URL and SANDBOX_API_KEY.
+    Sandbox {
+        #[command(subcommand)]
+        command: SandboxCommand,
+    },
+
     /// Replay a trace in a fresh sandbox and report every run whose output
     /// differs from the recorded one. Exits 1 when any run diverges.
     Replay {
         /// Trace file path
         trace_file: PathBuf,
+    },
+
+    /// Internal: run one `node` script from stdin in a contained child process.
+    /// Frames go to stdout. See `sandbox_worker::script`.
+    #[cfg(unix)]
+    #[command(hide = true)]
+    ScriptRun {
+        /// Unshare the network, IPC, UTS, and mount namespaces before running.
+        #[arg(long)]
+        namespaces: bool,
+        /// Install the seccomp denylist before running.
+        #[arg(long)]
+        seccomp: bool,
     },
 
     /// Internal: serve one session as gRPC on a Unix socket, for a worker host.
@@ -71,6 +134,12 @@ pub enum Commands {
         /// Socket path to listen on. The host creates its directory with mode 0700.
         #[arg(long)]
         socket: PathBuf,
+        /// Unshare the network, IPC, UTS, and mount namespaces before serving.
+        #[arg(long)]
+        namespaces: bool,
+        /// Install the seccomp denylist before serving.
+        #[arg(long)]
+        seccomp: bool,
     },
 
     /// Start the sandbox server in the foreground. Prints one API key to stderr.
@@ -82,6 +151,19 @@ pub enum Commands {
         /// survive a restart (ADR 0008). Without it the server is in memory only.
         #[arg(long)]
         data_dir: Option<PathBuf>,
+        /// Collect unreachable blobs every this many seconds (ADR 0013). 0 turns
+        /// the schedule off, and `POST /v1/gc` remains available.
+        #[arg(long, default_value_t = 600)]
+        gc_interval_secs: u64,
+        /// Put a session to sleep after this many seconds with no request (PLAN
+        /// §4.14). A request to a sleeping session wakes it. 0 turns idle sleep off.
+        #[arg(long, default_value_t = 300)]
+        idle_sleep_secs: u64,
+        /// Keep the state in this Postgres database, shared by every node that uses
+        /// it, instead of in `--data-dir` alone (PLAN §4.8). `--data-dir` still holds
+        /// the blobs, so it must be a directory every node can reach.
+        #[arg(long, requires = "data_dir")]
+        database_url: Option<String>,
     },
 
     /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
@@ -96,6 +178,10 @@ impl Cli {
     /// Parses arguments, runs the command, and exits with its status.
     pub fn run() {
         let cli = Cli::parse();
+        if let Err(e) = install_script_runner(&cli.command) {
+            eprintln!("Error: {}", e.message);
+            std::process::exit(1);
+        }
         match cli.execute() {
             Ok(code) => std::process::exit(code),
             Err(e) => {
@@ -118,14 +204,59 @@ impl Cli {
                 rt.block_on(crate::bench::run(name.as_deref()))
             }
             #[cfg(unix)]
-            Commands::Worker { socket } => {
+            Commands::ScriptRun {
+                namespaces,
+                seccomp,
+            } => {
+                // Applies the isolation before any thread exists. See `run_script_child`.
+                let isolation = sandbox_worker::Isolation {
+                    namespaces: *namespaces,
+                    seccomp: *seccomp,
+                    cgroup: None,
+                };
+                sandbox_worker::run_script_child(&isolation)?;
+                Ok(0)
+            }
+            #[cfg(unix)]
+            Commands::Worker {
+                socket,
+                namespaces,
+                seccomp,
+            } => {
+                // Before the runtime exists: namespaces and seccomp apply to the
+                // calling thread and to threads created later.
+                let isolation = sandbox_worker::Isolation {
+                    namespaces: *namespaces,
+                    seccomp: *seccomp,
+                    cgroup: None,
+                };
+                sandbox_worker::enter(&isolation)?;
                 let rt = runtime()?;
                 rt.block_on(sandbox_worker::serve(socket))?;
                 Ok(0)
             }
-            Commands::Serve { addr, data_dir } => serve(addr, data_dir.as_deref()),
+            Commands::Serve {
+                addr,
+                data_dir,
+                gc_interval_secs,
+                idle_sleep_secs,
+                database_url,
+            } => {
+                // The URL may also come from the environment, so a secret need not be on the command line.
+                let url = database_url
+                    .clone()
+                    .or_else(|| std::env::var("SANDBOX_DATABASE_URL").ok());
+                serve(
+                    addr,
+                    data_dir.as_deref(),
+                    *gc_interval_secs,
+                    *idle_sleep_secs,
+                    url.as_deref(),
+                )
+            }
             Commands::Snapshot { session_id } => snapshot(session_id),
             Commands::Fork { snapshot_id, count } => fork(snapshot_id, *count),
+            Commands::Sandbox { command } => sandbox_session(command),
         }
     }
 }
@@ -147,9 +278,9 @@ fn run_script_once(script: &str, trace: Option<&Path>) -> Result<i32, SandboxErr
     let rt = runtime()?;
     rt.block_on(async {
         let session = IsolateBackend::new(SessionConfig::default()).await?;
-        let result = session.run_script(script).await;
+        let (random_state, result, files) = run_traced(&session, script).await;
         if let Some(path) = trace {
-            let runs = vec![record(1, script, &result)];
+            let runs = vec![record(1, script, &result, files, random_state)];
             write_trace(path, runs)?;
         }
         let out = result?;
@@ -171,9 +302,15 @@ fn interactive_shell(trace: Option<&Path>) -> Result<i32, SandboxError> {
             break;
         }
         // A bad line reports its error and the session continues.
-        let result = rt.block_on(session.run_script(&line));
+        let (random_state, result, files) = rt.block_on(run_traced(&session, &line));
         if trace.is_some() {
-            runs.push(record(runs.len() as u64 + 1, &line, &result));
+            runs.push(record(
+                runs.len() as u64 + 1,
+                &line,
+                &result,
+                files,
+                random_state,
+            ));
         }
         match result {
             Ok(out) => print_output(&out.stdout, &out.stderr)
@@ -206,14 +343,10 @@ fn replay_trace(path: &Path) -> Result<i32, SandboxError> {
     let rt = runtime()?;
     let report = rt.block_on(async {
         let session = IsolateBackend::new(SessionConfig::default()).await?;
-        let report = replay(&trace, |script| {
+        let report = replay(&trace, |run| {
             let session = &session;
-            async move {
-                session
-                    .run_script(&script)
-                    .await
-                    .map(|out| (out.exit_code, out.stdout, out.stderr))
-            }
+            let run = run.clone();
+            async move { replay_run(session, &run).await }
         })
         .await;
         Ok::<_, SandboxError>(report)
@@ -226,15 +359,58 @@ fn replay_trace(path: &Path) -> Result<i32, SandboxError> {
     );
     for d in &report.divergences {
         // Scripts come from the trace file, so they are escaped before printing.
-        println!("run {} diverged: {}", d.seq, escaped(&d.script));
+        let what = match &d.fs {
+            Some(FsOp::Write { path, data }) => {
+                format!("write {} ({} bytes)", escaped(path), data.len())
+            }
+            Some(FsOp::Delete { path }) => format!("delete {}", escaped(path)),
+            None => escaped(&d.script),
+        };
+        println!("run {} diverged: {what}", d.seq);
         println!("  expected: {}", describe(&d.expected));
         println!("  actual:   {}", describe(&d.actual));
     }
     Ok(if report.matches() { 0 } else { 1 })
 }
 
-/// One run as the trace records it.
-fn record(seq: u64, script: &str, result: &Result<ExecResult, SandboxError>) -> RunRecord {
+/// Runs one script and returns its result with the files it changed.
+async fn run_traced(
+    session: &IsolateBackend,
+    script: &str,
+) -> (
+    Option<u64>,
+    Result<ExecResult, SandboxError>,
+    Result<Vec<FileChange>, SandboxError>,
+) {
+    let before = committed_root(session).await;
+    // The generator state before the run, so a replay draws the same $RANDOM values.
+    let random_state = Some(session.random_state().await);
+    let result = session.run_script(script).await;
+    let files = match before {
+        Ok(before) => changed_since(session, before)
+            .await
+            .map(|changes| changes.into_iter().map(FileChange::from).collect()),
+        Err(e) => Err(e),
+    };
+    (random_state, result, files)
+}
+
+/// One run as the trace records it. Files that could not be read leave the run
+/// without its file list, and the error is reported on stderr.
+fn record(
+    seq: u64,
+    script: &str,
+    result: &Result<ExecResult, SandboxError>,
+    files: Result<Vec<FileChange>, SandboxError>,
+    random_state: Option<u64>,
+) -> RunRecord {
+    let files = files.unwrap_or_else(|e| {
+        eprintln!(
+            "Warning: the trace does not list the files this run changed: {}",
+            e.message
+        );
+        Vec::new()
+    });
     let outcome = outcome_of(
         result
             .as_ref()
@@ -244,7 +420,10 @@ fn record(seq: u64, script: &str, result: &Result<ExecResult, SandboxError>) -> 
     RunRecord {
         seq,
         script: script.to_string(),
+        fs: None,
         outcome,
+        files,
+        random_state,
     }
 }
 
@@ -280,21 +459,80 @@ fn escaped(text: &str) -> String {
     text.escape_debug().collect()
 }
 
+/// Opens the Postgres-backed state. A build without the `clustered` feature refuses.
+#[cfg(feature = "clustered")]
+fn clustered_open(
+    rt: &tokio::runtime::Runtime,
+    scheduler: std::sync::Arc<sandbox_scheduler::Scheduler>,
+    url: &str,
+    dir: &Path,
+) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
+    rt.block_on(sandbox_server::open_clustered_with_state(
+        scheduler, url, dir,
+    ))
+}
+
+#[cfg(not(feature = "clustered"))]
+fn clustered_open(
+    _rt: &tokio::runtime::Runtime,
+    _scheduler: std::sync::Arc<sandbox_scheduler::Scheduler>,
+    _url: &str,
+    _dir: &Path,
+) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
+    Err(SandboxError::new(
+        ErrorCode::Unsupported,
+        "--database-url needs a build with the clustered feature: cargo build --features clustered",
+    ))
+}
+
 /// Runs the server until the process is stopped. The key is printed once, to
 /// stderr, because keys live in memory and nothing else can provision them.
-fn serve(addr: &str, data_dir: Option<&Path>) -> Result<i32, SandboxError> {
+fn serve(
+    addr: &str,
+    data_dir: Option<&Path>,
+    gc_interval_secs: u64,
+    idle_sleep_secs: u64,
+    database_url: Option<&str>,
+) -> Result<i32, SandboxError> {
     use std::sync::Arc;
+    // Log to stderr, so stdout keeps its key line. RUST_LOG overrides the default.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
     let scheduler = Arc::new(sandbox_scheduler::Scheduler::new());
     let rt = runtime()?;
-    let (app, new_key) = match data_dir {
-        Some(dir) => rt.block_on(sandbox_server::open_durable(scheduler, dir))?,
-        None => {
+    let (app, state, new_key) = match (data_dir, database_url) {
+        (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir)?,
+        (Some(dir), None) => {
+            rt.block_on(sandbox_server::open_durable_with_state(scheduler, dir))?
+        }
+        (None, _) => {
             let auth = Arc::new(sandbox_server::auth::AuthManager::new());
             let key = auth.create_key();
-            (sandbox_server::create_router(scheduler, auth), Some(key))
+            let (app, state) = sandbox_server::create_router_with_state(scheduler, auth);
+            (app, state, Some(key))
         }
     };
     rt.block_on(async {
+        if gc_interval_secs > 0 {
+            sandbox_server::gc::schedule(
+                state.clone(),
+                std::time::Duration::from_secs(gc_interval_secs),
+            );
+        }
+        if idle_sleep_secs > 0 {
+            // Sweep at least once a second and at most every 30 seconds, so a
+            // session sleeps soon after its idle time, not much later.
+            let every = std::time::Duration::from_secs(idle_sleep_secs.clamp(1, 30));
+            sandbox_server::idle::schedule(
+                state,
+                std::time::Duration::from_secs(idle_sleep_secs),
+                every,
+            );
+        }
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| SandboxError::unavailable(format!("binding {addr}: {e}")))?;
@@ -343,9 +581,135 @@ fn fork(snapshot_id: &str, count: usize) -> Result<i32, SandboxError> {
     Ok(0)
 }
 
+fn parse_session(raw: &str) -> Result<sandbox_types::SessionId, SandboxError> {
+    raw.parse()
+        .map_err(|_| SandboxError::invalid_argument(format!("not a session id: {raw}")))
+}
+
+fn sandbox_session(command: &SandboxCommand) -> Result<i32, SandboxError> {
+    let rt = runtime()?;
+    match command {
+        SandboxCommand::Info { session_id } => {
+            let env = rt.block_on(client()?.info(parse_session(session_id)?))?;
+            println!("{}", serde_json::to_string_pretty(&env).unwrap_or_default());
+            Ok(0)
+        }
+        SandboxCommand::Checkpoint { session_id } => {
+            let pinned = rt.block_on(client()?.checkpoint(parse_session(session_id)?))?;
+            println!("{}", pinned.root);
+            Ok(0)
+        }
+        SandboxCommand::Undo { session_id, steps } => {
+            let undone = rt.block_on(client()?.undo(parse_session(session_id)?, *steps))?;
+            println!("{}", undone.root);
+            Ok(0)
+        }
+        SandboxCommand::Fork {
+            session_id,
+            count,
+            command,
+        } => {
+            let children =
+                rt.block_on(client()?.fork_command(parse_session(session_id)?, *count, command))?;
+            let mut code = 0;
+            for child in &children {
+                let outcome = match (child.exit_code, &child.error) {
+                    (Some(0), _) => "ok".to_string(),
+                    (Some(exit), _) => {
+                        code = 1;
+                        format!("exit {exit}")
+                    }
+                    (None, error) => {
+                        code = 1;
+                        format!("error: {}", error.as_deref().unwrap_or("unknown"))
+                    }
+                };
+                println!(
+                    "{} {} changed={}",
+                    child.session_id, outcome, child.changed_files
+                );
+            }
+            Ok(code)
+        }
+    }
+}
+
+/// Chooses where `node` scripts run on this host.
+///
+/// On Linux the top-level process runs each script in a child process with
+/// namespaces, seccomp, and a cgroup memory limit. Elsewhere no runner is installed,
+/// so `node` is disabled. `FRONTAL_SANDBOX_UNSAFE_IN_PROCESS_SCRIPTS=1` runs scripts
+/// in this process with no containment. It is for development only.
+///
+/// A worker, and a script child, already run inside an isolated process: the worker
+/// process is the boundary, with its own cgroup memory cap. Those run scripts in
+/// their own process. A second containment layer inside them would be nested, and
+/// the worker's inherited seccomp filter and undelegated cgroup make that impossible.
+#[cfg(unix)]
+fn install_script_runner(command: &Commands) -> Result<(), SandboxError> {
+    if std::env::var_os("FRONTAL_SANDBOX_UNSAFE_IN_PROCESS_SCRIPTS").is_some_and(|v| v == "1") {
+        eprintln!("warning: node scripts run in-process without containment");
+        return sandbox_runtime::install_in_process_script_runner();
+    }
+    if matches!(
+        command,
+        Commands::Worker { .. } | Commands::ScriptRun { .. }
+    ) {
+        return sandbox_runtime::install_in_process_script_runner();
+    }
+    if cfg!(target_os = "linux") {
+        let program = std::env::current_exe().map_err(|e| {
+            SandboxError::internal(format!("locating the script runner binary: {e}"))
+        })?;
+        let runner = sandbox_worker::ScriptProcess::new(program);
+        return sandbox_runtime::install_script_runner(std::sync::Arc::new(runner));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn install_script_runner(_command: &Commands) -> Result<(), SandboxError> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_fork_takes_the_command_after_a_separator() {
+        let cli = Cli::try_parse_from([
+            "frontal-sandbox",
+            "sandbox",
+            "fork",
+            "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+            "-c",
+            "3",
+            "--",
+            "touch",
+            "/r",
+        ])
+        .unwrap();
+        let Commands::Sandbox {
+            command: SandboxCommand::Fork { count, command, .. },
+        } = cli.command
+        else {
+            panic!("expected sandbox fork");
+        };
+        assert_eq!(count, 3);
+        assert_eq!(command, ["touch", "/r"]);
+    }
+
+    #[test]
+    fn sandbox_fork_needs_a_command() {
+        assert!(Cli::try_parse_from([
+            "frontal-sandbox",
+            "sandbox",
+            "fork",
+            "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        ])
+        .is_err());
+    }
 
     #[test]
     fn replay_refuses_a_missing_trace_as_invalid_argument() {
