@@ -18,7 +18,7 @@ IMAGE=frontal-sandbox-linux-dev
 
 docker build -q -t "$IMAGE" -f "$ROOT/docker/linux-dev.Dockerfile" "$ROOT/docker" >/dev/null
 
-exec docker run --rm --privileged \
+exec docker run --rm --privileged --user 0:0 \
   -v "$ROOT:/src" \
   -v frontal-sandbox-cargo-registry:/usr/local/cargo/registry \
   -v frontal-sandbox-linux-target:/cache/target \

@@ -89,11 +89,9 @@ RUN ln -s bun /usr/local/bin/bunx
 
 # Coding agents.
 
-# opencode-ai and claude-code fetch their native binaries in a lifecycle script, so they
-# need scripts. Versions are pinned. codex and pi do not need scripts.
-RUN npm install -g \
-  opencode-ai@1.19.5 \
-  @anthropic-ai/claude-code@2.1.312 && \
+# opencode-ai fetches its native binary in a lifecycle script, so it needs scripts.
+# Versions are pinned. codex and pi do not need scripts.
+RUN npm install -g opencode-ai@1.19.5 && \
   npm install -g --ignore-scripts @openai/codex@0.165.0 @earendil-works/pi-coding-agent@1.4.0 && \
   npm cache clean --force
 
@@ -121,6 +119,5 @@ RUN node --version && \
   gh --version && \
   sudo whoami && \
   opencode --version && \
-  claude --version && \
   codex --version && \
   pi --version
