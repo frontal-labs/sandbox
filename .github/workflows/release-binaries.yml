@@ -143,13 +143,13 @@ jobs:
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the frontal-sandbox wrapper
+      - name: Publish the sandbox-cli wrapper
         # The wrapper lists each platform package in optionalDependencies at the
         # same version, so it is published after them.
         run: |
           VERSION="$RELEASE_VERSION"
-          WRAP="$RUNNER_TEMP/frontal-sandbox"
-          rm -rf "$WRAP" && cp -r npm/frontal-sandbox "$WRAP"
+          WRAP="$RUNNER_TEMP/sandbox-cli"
+          rm -rf "$WRAP" && cp -r npm/sandbox-cli "$WRAP"
           node -e '
             const fs = require("fs")
             const dir = process.argv[1], version = process.argv[2]
