@@ -13,7 +13,7 @@ RUN apt-get update && \
 ARG NODE_VERSION
 
 RUN mkdir -p /opt/node && \
-  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+  curl -fsSL --proto '=https' --tlsv1.2 --proto-redir '=https' "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
   | bsdtar -xJ --strip-components=1 -C /opt/node && \
   rm -f /opt/node/CHANGELOG.md /opt/node/LICENSE /opt/node/README.md
 
@@ -30,7 +30,7 @@ RUN apt-get update && \
 
 COPY --from=fetch /opt/node /usr/local
 
-RUN npm install -g pnpm@11 && \
+RUN npm install -g --ignore-scripts pnpm@11.28.9 && \
   npm cache clean --force
 
 RUN chown -R ubuntu:ubuntu /vercel

@@ -3,7 +3,7 @@ FROM builder-base AS builder-python
 ARG PYTHON_VERSION=3.13.1
 
 RUN mkdir -p /sandbox/runtimes/python && \
-  wget "https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz" && \
+  wget --https-only --secure-protocol=TLSv1_2 "https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz" && \
   tar -xvf "Python-$PYTHON_VERSION.tgz" && \
   cd "Python-$PYTHON_VERSION" && \
   ./configure --enable-optimizations --prefix=/sandbox/runtimes/python && \
@@ -14,8 +14,8 @@ RUN mkdir -p /sandbox/runtimes/python && \
 
 ENV PATH="/opt/git/bin:/sandbox/runtimes/python/bin:/home/sandbox/.local/bin:/usr/local/bin:${PATH}"
 
-RUN python3 -m pip install --upgrade pip && \
-  pip install uv
+RUN python3 -m pip install --only-binary :all: pip==26.2.2 && \
+  pip install --only-binary :all: uv==0.13.6
 
 RUN rm -rf \
   /sandbox/runtimes/python/lib/python3.13/test \

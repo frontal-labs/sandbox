@@ -42,7 +42,7 @@ FROM builder-base AS builder-git
 
 # Compile git 2.49.0 from source to /opt/git
 RUN cd /tmp && \
-  curl -L https://github.com/git/git/archive/v2.49.0.tar.gz | tar -zx && \
+  curl -L --proto '=https' --tlsv1.2 --proto-redir '=https' https://github.com/git/git/archive/v2.49.0.tar.gz | tar -zx && \
   cd git-2.49.0 && \
   make configure && \
   ./configure --prefix=/opt/git && \

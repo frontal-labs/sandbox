@@ -17,7 +17,7 @@ RUN rustup component add rustfmt clippy
 # picked by the container's architecture.
 ARG BAZELISK_VERSION=v1.25.0
 RUN arch="$(dpkg --print-architecture)" \
- && curl -fsSL -o /usr/local/bin/bazel \
+ && curl -fsSL --proto '=https' --tlsv1.2 --proto-redir '=https' -o /usr/local/bin/bazel \
     "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-${arch}" \
  && chmod +x /usr/local/bin/bazel
 

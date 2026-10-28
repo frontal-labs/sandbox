@@ -47,7 +47,8 @@ if (requested.length === 0) {
 
 for (const target of selected) {
   // The version reaches the binary at compile time (see cli/src/commands.rs), as in the release workflow.
-  execFileSync("cargo", ["build", "--release", "-p", "cli", "--target", target.triple], {
+  // cargo is taken from CARGO when a parent cargo sets it, and otherwise from PATH.
+  execFileSync(process.env.CARGO ?? "cargo", ["build", "--release", "-p", "cli", "--target", target.triple], {
     cwd: repoRoot,
     env: { ...process.env, SANDBOX_VERSION: pkg.version },
     stdio: "inherit",

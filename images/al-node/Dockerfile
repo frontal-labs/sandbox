@@ -8,7 +8,7 @@ RUN mkdir -p /sandbox/runtimes/node${NODE_MAJOR} && curl https://nodejs.org/dist
 
 ENV PATH="/sandbox/runtimes/node${NODE_MAJOR}/bin:${PATH}"
 
-RUN npm install -g pnpm@10
+RUN npm install -g --ignore-scripts pnpm@10.34.9
 
 USER sandbox
 
