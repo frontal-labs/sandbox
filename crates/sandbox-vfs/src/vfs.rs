@@ -125,6 +125,11 @@ impl Vfs {
         self.handles.read().len()
     }
 
+    /// Returns the current quotas.
+    pub fn quotas(&self) -> Quotas {
+        self.quotas
+    }
+
     pub fn with_quotas(mut self, quotas: Quotas) -> Self {
         self.quotas = quotas;
         self
