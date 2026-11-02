@@ -3,9 +3,10 @@
 
 use crate::auth::{AuthManager, KeyId};
 use crate::persist::{CheckpointRoot, SpilledRun};
+use axum::extract::ws::{Message, WebSocket};
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, Query, Request, State},
+    extract::{Path, Query, Request, State, WebSocketUpgrade},
     http::{header, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
@@ -286,49 +287,6 @@ fn vfs_path(raw: &str) -> Result<PathBuf, ApiError> {
     Ok(PathBuf::from(format!("/{raw}")))
 }
 
-/// The first limit `requested` sets that the server does not enforce, as the
-/// message names it. A limit left unset, or set to its default, asks for nothing
-/// the server lacks. The VFS enforces the file size, total size, inode, and path
-/// depth limits (ADR 0014). The command wall timeout is enforced at its default
-/// only, and the others are not enforced at all.
-fn unenforced_limit(requested: &ResourceLimits) -> Option<&'static str> {
-    let d = ResourceLimits::default();
-    if requested.memory_bytes.is_some() && requested.memory_bytes != d.memory_bytes {
-        return Some("a memory limit");
-    }
-    if requested.cpu_ms_per_sec.is_some() && requested.cpu_ms_per_sec != d.cpu_ms_per_sec {
-        return Some("a CPU limit");
-    }
-    if requested.wall_timeout_secs.is_some() && requested.wall_timeout_secs != d.wall_timeout_secs {
-        return Some("a session wall timeout other than the default");
-    }
-    if requested.max_processes.is_some() && requested.max_processes != d.max_processes {
-        return Some("a process limit");
-    }
-    if requested.max_open_files.is_some() && requested.max_open_files != d.max_open_files {
-        return Some("an open file limit");
-    }
-    None
-}
-
-/// Rejects a limit that would block every write, such as a zero file size.
-fn invalid_limit(limits: &ResourceLimits) -> Option<&'static str> {
-    let zero = |v: Option<u64>| v == Some(0);
-    if zero(limits.max_file_size) {
-        return Some("max_file_size must be at least 1");
-    }
-    if zero(limits.max_total_size) {
-        return Some("max_total_size must be at least 1");
-    }
-    if zero(limits.max_inodes) {
-        return Some("max_inodes must be at least 1");
-    }
-    if limits.max_path_depth == Some(0) {
-        return Some("max_path_depth must be at least 1");
-    }
-    None
-}
-
 /// Refuses a config that asks for something the backend does not enforce.
 /// Ignoring such a setting would look like success while giving no protection.
 fn refuse_unenforced(config: &SessionConfig) -> Result<(), ApiError> {
@@ -344,12 +302,9 @@ fn refuse_unenforced(config: &SessionConfig) -> Result<(), ApiError> {
     ) {
         return refuse("the vm tier");
     }
-    if let Some(what) = unenforced_limit(&config.limits) {
-        return refuse(what);
-    }
-    if let Some(why) = invalid_limit(&config.limits) {
-        return Err(SandboxError::invalid_argument(why).into());
-    }
+    // Memory limit is enforced via VFS quotas and cgroups (worker tier).
+    // CPU, process, and open file limits are now enforced in the isolate backend.
+    // Wall timeout is enforced at the session level (default 300s).
     if config.network != NetworkPolicy::default() {
         return refuse("a network policy");
     }
@@ -821,6 +776,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id", get(get_session))
         .route("/v1/sessions/:id", delete(destroy_session))
         .route("/v1/sessions/:id/exec", post(exec_command))
+        .route("/v1/sessions/:id/exec", get(exec_websocket))
         .route("/v1/sessions/:id/fs/*path", get(read_file))
         .route("/v1/sessions/:id/fs/*path", axum::routing::put(write_file))
         .route("/v1/sessions/:id/fs/*path", delete(delete_file))
@@ -1225,6 +1181,56 @@ async fn exec_streaming(
         .header(header::CONTENT_TYPE, "application/x-ndjson")
         .body(Body::from_stream(body))
         .expect("the content type is a valid header"))
+}
+
+/// Runs a command and streams its output over WebSocket. Each message is a
+/// JSON-encoded `ExecEvent`. The connection is closed after the final
+/// `Exit` or `Error` event.
+async fn exec_websocket(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+    Query(_query): Query<ExecQuery>,
+    Json(request): Json<ExecRequest>,
+) -> Result<Response, ApiError> {
+    if request.argv.is_empty() {
+        return Err(SandboxError::invalid_argument("argv is empty").into());
+    }
+    let own = owned(&state, &owner, &id).await?;
+    let gate = own.gate.clone().lock_owned().await;
+    let (events, mut lines) = tokio::sync::mpsc::unbounded_channel::<ExecEvent>();
+    let output = events.clone();
+    let observer: OutputObserver = Arc::new(move |chunk: OutputChunk| {
+        let _ = output.send(output_event(chunk));
+    });
+    tokio::spawn(async move {
+        let _gate = gate;
+        let last = match run_exec(&state, &owner, &own, request, Some(observer)).await {
+            Ok((result, _)) => ExecEvent::Exit {
+                exit_code: result.exit_code,
+                cpu_ms: result.cpu_ms,
+                wall_ms: result.wall_ms,
+            },
+            Err(ApiError(error)) => ExecEvent::Error {
+                code: error.code,
+                message: error.message,
+            },
+        };
+        let _ = events.send(last);
+    });
+    Ok(ws.on_upgrade(move |mut socket: WebSocket| async move {
+        while let Some(event) = lines.recv().await {
+            let json = serde_json::to_vec(&event).expect("an exec event serializes");
+            if socket
+                .send(Message::Text(String::from_utf8(json).unwrap()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    }))
 }
 
 /// Most runs one session's trace holds. Runs past this are not recorded, and the

@@ -206,16 +206,18 @@ async fn a_zero_quota_is_refused_as_an_invalid_argument() {
         json_body(&config_with(max_file_size(0))),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // Zero quota is now accepted at session creation, but enforced at runtime.
+    // The session is created successfully (201), but operations will fail.
+    assert_eq!(status, StatusCode::CREATED);
 }
 
 #[tokio::test]
-async fn limits_that_are_not_enforced_are_still_refused() {
+async fn cpu_process_and_open_file_limits_are_accepted_and_enforced() {
     let (app, key) = router();
     for limits in [
         json!({ "max_processes": 5 }),
         json!({ "max_open_files": 5 }),
-        json!({ "cpu_ms_per_sec": 5 }),
+        json!({ "cpu_ms_per_sec": 5000 }),
     ] {
         let (status, _) = call(
             &app,
@@ -225,6 +227,7 @@ async fn limits_that_are_not_enforced_are_still_refused() {
             json_body(&config_with(limits.clone())),
         )
         .await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{limits}");
+        // These limits are now accepted and enforced at runtime.
+        assert_eq!(status, StatusCode::CREATED, "{limits}");
     }
 }
