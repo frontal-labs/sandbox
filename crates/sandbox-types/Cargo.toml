@@ -23,3 +23,7 @@ utoipa = { workspace = true, optional = true }
 default = []
 # Derives OpenAPI schemas for the REST-facing types (used by sandbox-server).
 openapi = ["dep:utoipa"]
+
+[[bin]]
+name = "compute_hash"
+path = "src/bin/compute_hash.rs"
