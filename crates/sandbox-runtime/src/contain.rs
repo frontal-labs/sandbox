@@ -13,6 +13,7 @@ use crate::runtime::{execute_script_streamed, ScriptLimits, ScriptOutcome};
 use crate::StreamObserver;
 use async_trait::async_trait;
 use sandbox_types::{ErrorCode, SandboxError};
+use sandbox_vfs::Vfs;
 use std::sync::{Arc, OnceLock};
 
 /// Runs one script somewhere the host can contain it.
@@ -26,6 +27,7 @@ pub trait ScriptRunner: Send + Sync {
         code: &str,
         limits: ScriptLimits,
         observer: Option<StreamObserver>,
+        vfs: Option<Arc<Vfs>>,
     ) -> Result<ScriptOutcome, SandboxError>;
 }
 
@@ -53,9 +55,10 @@ pub async fn execute_script_contained(
     code: &str,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
 ) -> Result<ScriptOutcome, SandboxError> {
     match RUNNER.get() {
-        Some(runner) => runner.run(code, limits, observer).await,
+        Some(runner) => runner.run(code, limits, observer, vfs).await,
         None => Err(SandboxError::new(
             ErrorCode::Unsupported,
             "node is disabled: no contained script runner is installed on this host",
@@ -73,7 +76,8 @@ impl ScriptRunner for InProcessRunner {
         code: &str,
         limits: ScriptLimits,
         observer: Option<StreamObserver>,
+        vfs: Option<Arc<Vfs>>,
     ) -> Result<ScriptOutcome, SandboxError> {
-        execute_script_streamed(code, limits, observer).await
+        execute_script_streamed(code, limits, observer, vfs).await
     }
 }

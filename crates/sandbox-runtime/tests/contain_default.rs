@@ -6,7 +6,7 @@ use sandbox_types::ErrorCode;
 
 #[tokio::test]
 async fn node_is_refused_when_no_contained_runner_is_installed() {
-    let err = execute_script_contained("console.log(1)", ScriptLimits::default(), None)
+    let err = execute_script_contained("console.log(1)", ScriptLimits::default(), None, None)
         .await
         .expect_err("node must not run without a contained runner");
     assert_eq!(err.code, ErrorCode::Unsupported);

@@ -6,17 +6,48 @@
 //! its limit, a callback terminates the script. Without that callback V8
 //! would abort the whole process on out-of-memory.
 
-use crate::ops::{op_sandbox_print, ScriptOutput, StreamObserver};
+use crate::ops::{
+    env::op_sandbox_env,
+    fs::{
+        op_fs_mkdir, op_fs_read, op_fs_readdir, op_fs_readlink, op_fs_rename, op_fs_rm, op_fs_stat,
+        op_fs_symlink, op_fs_truncate, op_fs_write,
+    },
+    op_sandbox_print,
+    stdio::{op_stderr_write, op_stdout_write},
+    time::op_sandbox_now,
+    ScriptOutput, StreamObserver,
+};
 use deno_core::{extension, JsRuntime, RuntimeOptions};
 use sandbox_types::{ErrorCode, SandboxError};
-use std::sync::mpsc;
+use sandbox_vfs::Vfs;
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-extension!(sandbox_script, ops = [op_sandbox_print]);
+extension!(
+    sandbox_script,
+    ops = [
+        op_sandbox_print,
+        op_sandbox_env,
+        op_sandbox_now,
+        op_fs_read,
+        op_fs_write,
+        op_fs_stat,
+        op_fs_readdir,
+        op_fs_mkdir,
+        op_fs_rm,
+        op_fs_rename,
+        op_fs_symlink,
+        op_fs_readlink,
+        op_fs_truncate,
+        op_stdout_write,
+        op_stderr_write,
+    ]
+);
 
-/// Installed before each script. Defines `console.log` on top of the print op.
+/// Installed before each script. Defines `console.log` on top of the print op
+/// and provides the `node:` module shim.
 ///
-/// It keeps the one op it needs and then deletes the `Deno` global. The
+/// It keeps the ops it needs and then deletes the `Deno` global. The
 /// default deno_core ops (such as `op_print`, which writes to the host's
 /// stdout) would otherwise let scripts forge worker protocol responses.
 const BOOTSTRAP: &str = r#"
@@ -30,6 +61,192 @@ globalThis.console = Object.freeze({
     print(text + "\n");
   },
 });
+
+// node: module shim
+const fsOps = {
+  read: Deno.core.ops.op_fs_read,
+  write: Deno.core.ops.op_fs_write,
+  stat: Deno.core.ops.op_fs_stat,
+  readdir: Deno.core.ops.op_fs_readdir,
+  mkdir: Deno.core.ops.op_fs_mkdir,
+  rm: Deno.core.ops.op_fs_rm,
+  rename: Deno.core.ops.op_fs_rename,
+  symlink: Deno.core.ops.op_fs_symlink,
+  readlink: Deno.core.ops.op_fs_readlink,
+  truncate: Deno.core.ops.op_fs_truncate,
+};
+
+const envOps = {
+  get: Deno.core.ops.op_sandbox_env,
+};
+
+const timeOps = {
+  now: Deno.core.ops.op_sandbox_now,
+};
+
+const processOps = {
+  spawn: Deno.core.ops.op_spawn,
+};
+
+const stdioOps = {
+  stdoutWrite: Deno.core.ops.op_stdout_write,
+  stderrWrite: Deno.core.ops.op_stderr_write,
+};
+
+// Install node: modules
+globalThis.nodeModules = Object.freeze({
+  fs: Object.freeze({
+    readFileSync: (path) => {
+      const result = fsOps.read(path);
+      return new Uint8Array(result);
+    },
+    writeFileSync: (path, data) => {
+      fsOps.write(path, data);
+    },
+    statSync: (path) => {
+      const result = fsOps.stat(path);
+      return {
+        isFile: () => result.isFile,
+        isDirectory: () => result.isDirectory,
+        isSymbolicLink: () => result.isSymlink,
+        size: result.size,
+        mode: result.mode,
+        mtimeMs: result.mtime,
+      };
+    },
+    readdirSync: (path) => {
+      return fsOps.readdir(path);
+    },
+    mkdirSync: (path, options) => {
+      const mode = options?.mode ? parseInt(options.mode, 8) : 0o755;
+      fsOps.mkdir(path, mode.toString(8));
+    },
+    rmSync: (path, options) => {
+      fsOps.rm(path, !!options?.recursive);
+    },
+    renameSync: (oldPath, newPath) => {
+      fsOps.rename(oldPath, newPath);
+    },
+    symlinkSync: (target, path) => {
+      fsOps.symlink(target, path);
+    },
+    readlinkSync: (path) => {
+      return fsOps.readlink(path);
+    },
+    truncateSync: (path, len) => {
+      fsOps.truncate(path, len);
+    },
+  }),
+  env: Object.freeze({
+    get env() {
+      return envOps.get();
+    },
+  }),
+  process: Object.freeze({
+    cwd: () => "/",
+    env: {},
+    nextTick: (fn) => setTimeout(fn, 0),
+    hrtime: () => {
+      const ns = timeOps.now() * 1000000;
+      return [Math.floor(ns / 1e9), ns % 1e9];
+    },
+    exit: (code) => { throw { code: code || 0, isExit: true }; },
+  }),
+  child_process: Object.freeze({
+    execSync: (command) => {
+      const result = processOps.spawn(command);
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr);
+      }
+      return new TextEncoder().encode(result.stdout);
+    },
+    spawnSync: (command, args, options) => {
+      const fullCommand = [command, ...(args || [])].join(" ");
+      const result = processOps.spawn(fullCommand);
+      return {
+        status: result.exitCode,
+        stdout: new TextEncoder().encode(result.stdout),
+        stderr: new TextEncoder().encode(result.stderr),
+      };
+    },
+  }),
+  buffer: Object.freeze({
+    Buffer: class Buffer extends Uint8Array {
+      static from(data) {
+        if (typeof data === "string") {
+          return new TextEncoder().encode(data);
+        }
+        return new Uint8Array(data);
+      }
+    },
+  }),
+  path: Object.freeze({
+    join: (...args) => args.join("/").replace(/\/+/g, "/"),
+    resolve: (...args) => args.join("/").replace(/\/+/g, "/"),
+    dirname: (path) => path.split("/").slice(0, -1).join("/") || "/",
+    basename: (path) => path.split("/").pop() || "",
+    extname: (path) => {
+      const base = path.split("/").pop() || "";
+      const dot = base.lastIndexOf(".");
+      return dot === -1 ? "" : base.slice(dot);
+    },
+    sep: "/",
+  }),
+  url: Object.freeze({
+    URL: globalThis.URL,
+    URLSearchParams: globalThis.URLSearchParams,
+  }),
+  crypto: Object.freeze({
+    randomBytes: (size) => {
+      const arr = new Uint8Array(size);
+      crypto.getRandomValues(arr);
+      return arr;
+    },
+    randomUUID: () => crypto.randomUUID(),
+    createHash: (algorithm) => {
+      return {
+        update: (data) => { /* no-op for now */ },
+        digest: () => new Uint8Array(32),
+      };
+    },
+  }),
+  os: Object.freeze({
+    platform: () => "linux",
+    arch: () => "x64",
+    cpus: () => [],
+    totalmem: () => 0,
+    freemem: () => 0,
+    hostname: () => "sandbox",
+    homedir: () => "/",
+    tmpdir: () => "/tmp",
+  }),
+  events: Object.freeze({
+    EventEmitter: class EventEmitter {
+      constructor() { this._events = {}; }
+      on(event, listener) { this._events[event] = this._events[event] || []; this._events[event].push(listener); return this; }
+      emit(event, ...args) { (this._events[event] || []).forEach(l => l(...args)); }
+      off(event, listener) { this._events[event] = (this._events[event] || []).filter(l => l !== listener); }
+    },
+  }),
+  stream: Object.freeze({
+    Readable: class Readable {
+      constructor() { this._readable = true; }
+      pipe(dest) { return dest; }
+    },
+    Writable: class Writable {
+      constructor() { this._writable = true; }
+      write(chunk) { stdioOps.stdoutWrite(new TextEncoder().encode(chunk)); }
+      end() {}
+    },
+    Duplex: class Duplex {},
+    Transform: class Transform {},
+  }),
+  util: Object.freeze({
+    inspect: (obj) => JSON.stringify(obj),
+    promisify: (fn) => (...args) => Promise.resolve(fn(...args)),
+  }),
+});
+
 delete globalThis.Deno;
 "#;
 
@@ -68,7 +285,7 @@ pub async fn execute_script(
     code: &str,
     limits: ScriptLimits,
 ) -> Result<ScriptOutcome, SandboxError> {
-    execute_script_streamed(code, limits, None).await
+    execute_script_streamed(code, limits, None, None).await
 }
 
 /// Like [`execute_script`], and tells `observer` each piece of stdout as the script
@@ -86,17 +303,18 @@ pub async fn execute_script_streamed(
     code: &str,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
 ) -> Result<ScriptOutcome, SandboxError> {
     let code = code.to_string();
     tokio::task::spawn_blocking(move || {
         // A warm isolate is built for the default heap limit only. Any other limit
         // builds its own isolate, as it always did.
         if limits.max_heap_bytes == ScriptLimits::default().max_heap_bytes {
-            if let Some(outcome) = run_warm(&code, limits, observer.clone()) {
+            if let Some(outcome) = run_warm(&code, limits, observer.clone(), vfs.clone()) {
                 return outcome;
             }
         }
-        run_isolate(&code, limits, observer)
+        run_isolate(&code, limits, observer, vfs)
     })
     .await
     .map_err(|e| SandboxError::new(ErrorCode::RuntimeError, format!("script task failed: {e}")))
@@ -149,9 +367,10 @@ fn run_isolate(
     code: &str,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
 ) -> ScriptOutcome {
-    match build(limits) {
-        Ok(built) => run_built(built, code, limits, observer),
+    match build(limits, vfs.clone()) {
+        Ok(built) => run_built(built, code, limits, observer, vfs),
         Err(message) => failed(message),
     }
 }
@@ -175,7 +394,7 @@ impl Drop for Built {
 }
 
 /// Builds an isolate with the heap limit of `limits`, the heap guard, and the bootstrap.
-fn build(limits: ScriptLimits) -> Result<Built, String> {
+fn build(limits: ScriptLimits, vfs: Option<Arc<Vfs>>) -> Result<Built, String> {
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![sandbox_script::init()],
         create_params: Some(
@@ -199,6 +418,9 @@ fn build(limits: ScriptLimits) -> Result<Built, String> {
         guard,
     };
     let runtime = built.runtime.as_mut().expect("set just above");
+    if let Some(vfs) = vfs {
+        runtime.op_state().borrow_mut().put(vfs);
+    }
     if let Err(e) = runtime.execute_script("[sandbox:bootstrap]", BOOTSTRAP) {
         // Dropping `built` frees the isolate, then the guard.
         return Err(format!("bootstrap failed: {e}"));
@@ -212,6 +434,7 @@ fn run_built(
     code: &str,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
 ) -> ScriptOutcome {
     let guard = built.guard;
     let runtime = built
@@ -223,6 +446,9 @@ fn run_built(
         observer,
         ..ScriptOutput::default()
     });
+    if let Some(vfs) = vfs {
+        runtime.op_state().borrow_mut().put(vfs);
+    }
 
     // Watchdog: terminate the isolate if the deadline passes first. The
     // channel lets a finished script stop the watchdog.
@@ -290,6 +516,7 @@ struct WarmJob {
     code: String,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
     reply: mpsc::Sender<ScriptOutcome>,
 }
 
@@ -326,7 +553,7 @@ fn spawn_warm(pool: std::sync::Arc<WarmPool>) {
                 return;
             };
             let _entered = rt.enter();
-            let Ok(built) = build(ScriptLimits::default()) else {
+            let Ok(built) = build(ScriptLimits::default(), None) else {
                 return;
             };
             let (offer, jobs) = mpsc::channel::<WarmJob>();
@@ -334,7 +561,7 @@ fn spawn_warm(pool: std::sync::Arc<WarmPool>) {
                 ready.push(offer);
             }
             if let Ok(job) = jobs.recv() {
-                let outcome = run_built(built, &job.code, job.limits, job.observer);
+                let outcome = run_built(built, &job.code, job.limits, job.observer, job.vfs);
                 let _ = job.reply.send(outcome);
             }
         });
@@ -348,6 +575,7 @@ fn run_warm(
     code: &str,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
 ) -> Option<ScriptOutcome> {
     let pool = warm_pool();
     let offer = pool.ready.lock().ok()?.pop()?;
@@ -359,6 +587,7 @@ fn run_warm(
             code: code.to_string(),
             limits,
             observer,
+            vfs,
             reply,
         })
         .ok()?;

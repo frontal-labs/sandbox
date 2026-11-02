@@ -18,7 +18,9 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 deno_core = { workspace = true }
+deno_error = { workspace = true }
 deno_web = { workspace = true }
 deno_url = { workspace = true }
 deno_console = { workspace = true }
