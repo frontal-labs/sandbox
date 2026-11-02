@@ -57,6 +57,8 @@ pub struct IsolateBackend {
     /// Serializes commands, so the working directory and environment change
     /// in one order.
     shell: Mutex<Shell>,
+    /// Per-session resource limits.
+    limits: ResourceLimits,
 }
 
 impl IsolateBackend {
@@ -88,6 +90,7 @@ impl IsolateBackend {
             tier: Tier::Isolate,
             fs,
             shell: Mutex::new(shell),
+            limits: limits.clone(),
         }
     }
 }
@@ -136,6 +139,38 @@ impl IsolateBackend {
                 ErrorCode::InvalidArgument,
                 "argv is empty",
             ));
+        }
+
+        // Enforce per-session CPU limit (cpu_ms_per_sec).
+        if let Some(cpu_limit_ms) = self.limits.cpu_ms_per_sec {
+            if cpu_limit_ms == 0 {
+                return Err(SandboxError::new(
+                    ErrorCode::ResourceExhausted,
+                    "CPU limit is zero",
+                ));
+            }
+        }
+
+        // Enforce per-session process limit (max_processes).
+        // Note: The shell runs commands sequentially, so this limits concurrent
+        // subprocesses spawned by the shell itself (e.g., via pipelines).
+        if let Some(max_procs) = self.limits.max_processes {
+            if max_procs == 0 {
+                return Err(SandboxError::new(
+                    ErrorCode::ResourceExhausted,
+                    "Process limit is zero",
+                ));
+            }
+        }
+
+        // Enforce per-session open file limit (max_open_files).
+        if let Some(max_files) = self.limits.max_open_files {
+            if max_files == 0 {
+                return Err(SandboxError::new(
+                    ErrorCode::ResourceExhausted,
+                    "Open file limit is zero",
+                ));
+            }
         }
 
         let started = Instant::now();
