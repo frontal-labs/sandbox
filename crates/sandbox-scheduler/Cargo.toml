@@ -16,9 +16,12 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 redb = "4"
 sqlx = { workspace = true, optional = true }
 tonic = { workspace = true }
+prost = { workspace = true }
+uuid = { workspace = true }
 
 [features]
 default = []
