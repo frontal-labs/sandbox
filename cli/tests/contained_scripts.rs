@@ -174,7 +174,7 @@ mod elsewhere {
         let _ = install_script_runner(Arc::new(ScriptProcess::new(env!(
             "CARGO_BIN_EXE_frontal-sandbox"
         ))));
-        let err = execute_script_contained("console.log(1)", ScriptLimits::default(), None)
+        let err = execute_script_contained("console.log(1)", ScriptLimits::default(), None, None)
             .await
             .expect_err("contained scripts need Linux");
         assert_eq!(err.code, ErrorCode::Unsupported);

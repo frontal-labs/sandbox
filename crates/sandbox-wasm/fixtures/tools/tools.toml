@@ -1,0 +1,39 @@
+# M2 WASM Tools Registry
+# This manifest maps command names to WASI modules installed in the VFS.
+# Each tool has a pinned BLAKE3 hash for integrity verification.
+
+[[tool]]
+name = "jq"
+path = "/opt/jq_tool.wasm"
+version = "0.1.0"
+hash = "2a6904723926cb3f2696dd23638c7d851baf9debb43bb7f73efbb39e487e4b70"
+fuel = 10000000
+max_memory_bytes = 16777216
+max_output_bytes = 65536
+
+[[tool]]
+name = "git"
+path = "/opt/git_tool.wasm"
+version = "0.1.0"
+hash = "eeca6b212971c30d60ed4ac6ba194e8520b86b3ce60dd8a3b6997dcf5f100e03"
+fuel = 20000000
+max_memory_bytes = 33554432
+max_output_bytes = 131072
+
+[[tool]]
+name = "echo"
+path = "/opt/echo_tool.wasm"
+version = "0.1.0"
+hash = "140b6cec74cb05430117744123ee2634c3468bac8067f18d2c531d30993ec90b"
+
+[[tool]]
+name = "cat"
+path = "/opt/cat_tool.wasm"
+version = "0.1.0"
+hash = "67916b6f4fc843b5399d723df474c21b1218b63df712b9b8574b4759a14c6abf"
+
+[[tool]]
+name = "env"
+path = "/opt/env_tool.wasm"
+version = "0.1.0"
+hash = "f3839665e1f186339f3263416bebffab1477b993e9565a4820ecf7774d72cef3"

@@ -9,6 +9,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 const TOOL: &[u8] = include_bytes!("../fixtures/wasi_tool.wasm");
+const JQ_TOOL: &[u8] =
+    include_bytes!("../fixtures/tools/target/wasm32-wasip1/release/jq_tool.wasm");
+const GIT_TOOL: &[u8] =
+    include_bytes!("../fixtures/tools/target/wasm32-wasip1/release/git_tool.wasm");
 
 fn vfs() -> Arc<Vfs> {
     Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())))
@@ -43,6 +47,40 @@ async fn tool(vfs: &Arc<Vfs>, root: &str, args: &[&str], stdin: &[u8]) -> WasiOu
     argv.extend(args.iter().map(|a| a.to_string()));
     run_module_with_mount(
         TOOL.to_vec(),
+        argv,
+        stdin.to_vec(),
+        WasiLimits::default(),
+        Some(Mount {
+            vfs: vfs.clone(),
+            root: root.to_string(),
+        }),
+    )
+    .await
+    .unwrap()
+}
+
+async fn jq_tool(vfs: &Arc<Vfs>, root: &str, args: &[&str], stdin: &[u8]) -> WasiOutcome {
+    let mut argv = vec!["jq_tool".to_string()];
+    argv.extend(args.iter().map(|a| a.to_string()));
+    run_module_with_mount(
+        JQ_TOOL.to_vec(),
+        argv,
+        stdin.to_vec(),
+        WasiLimits::default(),
+        Some(Mount {
+            vfs: vfs.clone(),
+            root: root.to_string(),
+        }),
+    )
+    .await
+    .unwrap()
+}
+
+async fn git_tool(vfs: &Arc<Vfs>, root: &str, args: &[&str], stdin: &[u8]) -> WasiOutcome {
+    let mut argv = vec!["git_tool".to_string()];
+    argv.extend(args.iter().map(|a| a.to_string()));
+    run_module_with_mount(
+        GIT_TOOL.to_vec(),
         argv,
         stdin.to_vec(),
         WasiLimits::default(),
@@ -196,4 +234,121 @@ async fn host_handles_are_released_after_a_run() {
     tool(&vfs, "/work", &["cat", "f"], b"").await;
     tool(&vfs, "/work", &["cat", "f"], b"").await;
     assert_eq!(vfs.open_handle_count(), 0);
+}
+
+#[tokio::test]
+async fn jq_tool_processes_json() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+
+    // Test identity filter via stdin
+    let out = jq_tool(
+        &vfs,
+        "/work",
+        &["."],
+        b"{\"name\": \"test\", \"value\": 42, \"tags\": [\"a\", \"b\"]}",
+    )
+    .await;
+    eprintln!("jq_tool identity stdout: {}", text(&out.stdout));
+    eprintln!("jq_tool identity stderr: {}", text(&out.stderr));
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert!(
+        text(&out.stdout).contains("test"),
+        "stdout: {}",
+        text(&out.stdout)
+    );
+    assert!(
+        text(&out.stdout).contains("42"),
+        "stdout: {}",
+        text(&out.stdout)
+    );
+
+    // Test field access via stdin
+    let out = jq_tool(
+        &vfs,
+        "/work",
+        &[".name"],
+        b"{\"name\": \"test\", \"value\": 42}",
+    )
+    .await;
+    eprintln!("jq_tool .name stdout: {}", text(&out.stdout));
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout).trim(), "\"test\"");
+
+    // Test array access via stdin
+    let out = jq_tool(&vfs, "/work", &[".tags"], b"{\"tags\": [\"a\", \"b\"]}").await;
+    eprintln!("jq_tool .tags stdout: {}", text(&out.stdout));
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("a"));
+    assert!(text(&out.stdout).contains("b"));
+}
+
+#[tokio::test]
+async fn jq_tool_handles_stdin() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+
+    // Test with stdin
+    let out = jq_tool(&vfs, "/work", &[".value"], b"{\"value\": 123}").await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout).trim(), "123");
+}
+
+#[tokio::test]
+async fn git_tool_basic_commands() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+
+    // Test init
+    let out = git_tool(&vfs, "/work", &["init"], b"").await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("Initialized empty Git repository"));
+
+    // Test status
+    let out = git_tool(&vfs, "/work", &["status"], b"").await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("On branch main"));
+
+    // Test log
+    let out = git_tool(&vfs, "/work", &["log", "--oneline"], b"").await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("Initial commit"));
+}
+
+#[tokio::test]
+async fn git_tool_commit_flow() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+
+    // Initialize
+    git_tool(&vfs, "/work", &["init"], b"").await;
+
+    // Create a file
+    put(&vfs, "/work/hello.txt", b"hello world").await;
+
+    // Add file
+    let out = git_tool(&vfs, "/work", &["add", "hello.txt"], b"").await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+
+    // Commit
+    let out = git_tool(&vfs, "/work", &["commit", "-m", "Add hello"], b"").await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("Created commit"));
+
+    // Log
+    let out = git_tool(&vfs, "/work", &["log"], b"").await;
+    eprintln!("git_tool log stdout: {}", text(&out.stdout));
+    eprintln!("git_tool log stderr: {}", text(&out.stderr));
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("Initial commit"));
+}
+
+#[tokio::test]
+async fn git_tool_unknown_command() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+
+    let out = git_tool(&vfs, "/work", &["unknown"], b"").await;
+    assert_eq!(out.exit_code, 1, "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("unknown command"));
 }
