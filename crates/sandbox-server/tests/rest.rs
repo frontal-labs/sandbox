@@ -386,8 +386,10 @@ async fn settings_the_backend_does_not_enforce_are_refused_not_ignored() {
 
     let mut with_limits: Value = config();
     with_limits["limits"] = json!({ "memory_bytes": 1024, "cpu_ms_per_sec": null, "wall_timeout_secs": null, "max_file_size": null, "max_total_size": null, "max_inodes": null, "max_path_depth": null, "max_processes": null, "max_open_files": null });
+    // Every limit field is accepted now (ADR 0014 and commit 76fcdd5), so the
+    // session is created rather than refused.
     let (status, _) = call(&app, "POST", "/v1/sessions", &key, json_body(&with_limits)).await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, StatusCode::CREATED);
 }
 
 #[tokio::test]

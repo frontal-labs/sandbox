@@ -109,10 +109,12 @@ pub(crate) fn effective_timeout(requested_ms: Option<u64>, wall_secs: u64) -> (D
     }
 }
 
-/// The session wall timeout, in seconds. Every isolate session uses the default,
-/// because the server does not accept per-session limits yet (PLAN §4.1).
-fn session_wall_secs() -> u64 {
-    ResourceLimits::default().wall_timeout_secs.unwrap_or(300)
+/// The session wall timeout, in seconds. A session without its own value gets
+/// the default, so a command never runs unbounded.
+fn session_wall_secs(limits: &ResourceLimits) -> u64 {
+    limits
+        .wall_timeout_secs
+        .unwrap_or_else(|| ResourceLimits::default().wall_timeout_secs.unwrap_or(300))
 }
 
 fn to_result(out: ExecutionResult, started: Instant) -> ExecResult {
@@ -183,7 +185,7 @@ impl IsolateBackend {
         }
         let stdin = req.stdin.unwrap_or_default();
         let run = shell.run_argv_streamed(&req.argv, &stdin, observer);
-        let (limit, reason) = effective_timeout(req.timeout_ms, session_wall_secs());
+        let (limit, reason) = effective_timeout(req.timeout_ms, session_wall_secs(&self.limits));
         // The shell runs no background tasks, and its loops are bounded by a
         // command budget, so dropping the command at its next await is safe.
         // Its partial writes stay in the filesystem, as they would after a kill.
@@ -305,8 +307,7 @@ pub async fn restore_checkpoint_limited(
 }
 
 /// The filesystem quotas a session's limits set. A limit the caller leaves
-/// unset takes its default. The VFS enforces these four. The others are not
-/// enforced yet, and the server refuses them.
+/// unset takes its default. The VFS enforces these four.
 pub fn quotas_for(limits: &ResourceLimits) -> sandbox_vfs::Quotas {
     let defaults = sandbox_vfs::Quotas::default();
     sandbox_vfs::Quotas {
@@ -419,6 +420,41 @@ mod tests {
             .1
             .contains("wall timeout"));
         assert!(effective_timeout(Some(50), 300).1.contains("50 ms"));
+    }
+
+    #[test]
+    fn the_session_wall_timeout_is_the_sessions_own_limit_or_the_default() {
+        let own = ResourceLimits {
+            wall_timeout_secs: Some(10),
+            ..ResourceLimits::default()
+        };
+        assert_eq!(session_wall_secs(&own), 10);
+
+        let unset = ResourceLimits {
+            wall_timeout_secs: None,
+            ..ResourceLimits::default()
+        };
+        assert_eq!(session_wall_secs(&unset), 300);
+    }
+
+    #[test]
+    fn quotas_for_uses_max_total_size_fallback_to_default() {
+        let explicit_total = ResourceLimits {
+            max_total_size: Some(8192),
+            memory_bytes: Some(4096),
+            ..ResourceLimits::default()
+        };
+        assert_eq!(quotas_for(&explicit_total).total_bytes, 8192);
+
+        let neither = ResourceLimits {
+            max_total_size: None,
+            memory_bytes: Some(4096),
+            ..ResourceLimits::default()
+        };
+        assert_eq!(
+            quotas_for(&neither).total_bytes,
+            sandbox_vfs::Quotas::default().total_bytes
+        );
     }
 
     #[tokio::test]
