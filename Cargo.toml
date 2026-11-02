@@ -109,7 +109,7 @@ sysinfo = "0.30"
 # grep. The crate is already in Cargo.lock through other dependencies.
 regex = "1"
 hdrhistogram = "7"
-indicatif = "0.17"
+indicatif = "0.18"
 csv = "1"
 deno_error = "0.7"
 sandbox-types = { path = "crates/sandbox-types" }
