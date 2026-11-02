@@ -48,7 +48,7 @@ object_store = "0.14"
 zstd = "0.14"
 # Wasmtime's default features minus `profiling`: that feature links ittapi
 # (GPL-2.0-only) and fxprof-processed-profile, which deny.toml rejects.
-wasmtime = { version = "36.0.19", default-features = false, features = ["async", "gc", "gc-drc", "gc-null", "wat", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "threads", "stack-switching", "std"] }
+wasmtime = { version = "36.0.20", default-features = false, features = ["async", "gc", "gc-drc", "gc-null", "wat", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "threads", "stack-switching", "std"] }
 deno_core = { version = "0.413", features = ["v8"] }
 deno_web = "0.291"
 deno_url = "0.222"
@@ -80,8 +80,14 @@ tonic-prost-build = "0.14"
 tonic-prost = "0.14"
 tokio-stream = "0.1"
 hyper-util = "0.1"
+tokio-util = { version = "0.7", features = ["codec"] }
+firecracker = "0.1"
 vsock = "0.4"
 redb = "4"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
+flate2 = "1"
 # Default features are off: they add the MySQL driver (pulls in the `rsa` crate,
 # RUSTSEC-2023-0071, with no fix), which the clustered scheduler does not use.
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
@@ -98,13 +104,14 @@ nix = { version = "0.28", features = ["fs"] }
 brush-parser = "0.2"
 uutils_core = { version = "0.0.25", features = ["fs"] }
 glob = "0.3"
-wasmtime-wasi = { version = "36", features = ["preview1"] }
+wasmtime-wasi = { version = "36.0.20", features = ["preview1"] }
 sysinfo = "0.30"
 # grep. The crate is already in Cargo.lock through other dependencies.
 regex = "1"
 hdrhistogram = "7"
 indicatif = "0.17"
 csv = "1"
+deno_error = "0.7"
 sandbox-types = { path = "crates/sandbox-types" }
 frontal-sandbox-sdk = { path = "sdks/rust" }
 
