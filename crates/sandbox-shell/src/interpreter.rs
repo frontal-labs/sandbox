@@ -1511,8 +1511,8 @@ impl Shell {
         written.map(|_| ())
     }
 
-    pub(crate) fn fs(&self) -> &Vfs {
-        &self.fs
+    pub(crate) fn fs(&self) -> Arc<Vfs> {
+        self.fs.clone()
     }
 
     /// The working directory as a WASI preopen, so tools see relative paths.

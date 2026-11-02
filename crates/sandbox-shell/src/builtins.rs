@@ -957,6 +957,7 @@ impl Shell {
             &code,
             sandbox_runtime::ScriptLimits::default(),
             self.tool_stdout(),
+            Some(self.fs().clone()),
         )
         .await
         {
