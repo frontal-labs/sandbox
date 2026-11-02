@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::fs as tokio_fs;
 use tokio::io::AsyncReadExt;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 const SHARD_BITS: u8 = 4;
 const SHARD_COUNT: usize = 1 << SHARD_BITS;
@@ -27,6 +27,8 @@ const CDC_MAX: usize = 256 * 1024;
 const MANIFEST_VERSION: u8 = 2;
 /// Distinguishes temporary files written by concurrent writers in one process.
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+/// Pattern for temporary files created by write_file.
+const TEMP_PATTERN: &str = ".tmp-";
 
 #[derive(Debug)]
 pub struct DiskStore {
@@ -63,10 +65,47 @@ impl DiskStore {
 
         let shards = std::array::from_fn(|_| tokio::sync::RwLock::new(()));
 
-        Ok(Self {
-            root,
+        let store = Self {
+            root: root.clone(),
             shards: Arc::new(shards),
-        })
+        };
+
+        // Clean up stale temporary files from crashed writes (ADR 0017).
+        if let Err(e) = store.cleanup_stale_temps() {
+            warn!("Failed to clean up stale temporary files: {}", e);
+        }
+
+        Ok(store)
+    }
+
+    /// Removes temporary files left behind by crashed writes.
+    /// These files match the pattern `.tmp-<pid>-<seq>`.
+    fn cleanup_stale_temps(&self) -> BlobStoreResult<()> {
+        for i in 0..SHARD_COUNT {
+            let shard_dir = self.root.join(format!("{:02x}", i));
+            if !shard_dir.exists() {
+                continue;
+            }
+            let entries = fs::read_dir(&shard_dir).map_err(BlobStoreError::Io)?;
+            for entry in entries {
+                let entry = entry.map_err(BlobStoreError::Io)?;
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+                if name.contains(TEMP_PATTERN) {
+                    let temp_path = entry.path();
+                    if let Err(e) = fs::remove_file(&temp_path) {
+                        warn!(
+                            "Failed to remove stale temp file {}: {}",
+                            temp_path.display(),
+                            e
+                        );
+                    } else {
+                        trace!("Removed stale temp file: {}", temp_path.display());
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn shard_index(&self, hash: &ContentHash) -> usize {
@@ -798,6 +837,53 @@ mod tests {
         let keys = store.list_parts().await.unwrap();
         assert!(keys.iter().all(|key| !key.contains(".tmp-")));
         assert!(store.delete_parts(&keys, &HashSet::new()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn stale_temp_files_are_cleaned_up_on_open() {
+        let dir = tempdir().unwrap();
+        // Create a store and write some data to set up shards.
+        let store = DiskStore::new(dir.path()).unwrap();
+        let data = pseudo_random(128 * 1024, 7);
+        store.put(&data, PutOptions::default()).await.unwrap();
+
+        // Simulate a crashed write by creating stale temp files in multiple shards.
+        for i in 0..SHARD_COUNT {
+            let shard_dir = dir.path().join(format!("{:02x}", i));
+            std::fs::create_dir_all(&shard_dir).unwrap();
+            let temp_file = shard_dir.join("deadbeef.tmp-1234-5678");
+            std::fs::write(&temp_file, b"stale data").unwrap();
+        }
+
+        // Re-open the store; cleanup should run.
+        let store2 = DiskStore::open(dir.path()).unwrap();
+
+        // Verify temp files were removed.
+        for i in 0..SHARD_COUNT {
+            let shard_dir = dir.path().join(format!("{:02x}", i));
+            if shard_dir.exists() {
+                let entries: Vec<_> = fs::read_dir(&shard_dir).unwrap().collect();
+                for entry in entries {
+                    let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                    assert!(
+                        !name.contains(".tmp-"),
+                        "stale temp file {} not cleaned up",
+                        name
+                    );
+                }
+            }
+        }
+
+        // Original data should still be readable.
+        assert_eq!(
+            store2
+                .get(&ContentHash::new(&data))
+                .await
+                .unwrap()
+                .unwrap()
+                .as_ref(),
+            data.as_slice()
+        );
     }
 
     mod properties {
