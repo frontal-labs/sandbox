@@ -2,7 +2,7 @@
 
 In-VM guest agent for Tier 2 microVMs. Planned as a static musl binary.
 
-**Status: scaffolded.** The crate defines protocol message types and a Unix-socket listener. The connection handler does nothing, so no requests are served yet. There is no vsock transport and no binary target.
+**Status: scaffolded.** The crate defines a Unix-socket listener using the protobuf types from `sandbox-proto`. The connection handler does nothing, so no requests are served yet. There is no vsock transport and no binary target.
 
 ## Public API
 
@@ -11,17 +11,15 @@ Re-exported from `src/lib.rs`:
 - `GuestAgent` (`src/agent.rs`)
   - `new(socket_path: &str)`: binds a `tokio::net::UnixListener`.
   - `run(&self)`: accepts connections in a loop and spawns a task per connection.
-- `protocol` (`src/protocol.rs`), prost message types:
-  - `ExecRequest { argv, env, cwd, stdin }` and `ExecResponse { exit_code, stdout, stderr }`
-  - `FileRequest { path, operation, data }` and `FileResponse { data, error }`
-  - `FileOperation { Read, Write, List, Stat }`
-  - `encode_message` and `decode_message` helpers
+- `guest` (`src/lib.rs`): re-exports the protocol types from `sandbox-proto::v1::guest`
+  - `GuestService` gRPC service: `Ping`, `Exec`, `ReadFile`, `WriteFile`, `ListDir`, `Sync`
+  - Message types: `PingResponse`, `ReadFileRequest`, `ReadFileResponse`, `WriteFileRequest`, `ListDirRequest`, `ListDirResponse`, `DirEntry`, `SyncRequest`, `SyncResponse`
 
 Cargo feature `vsock` enables an optional `vsock` dependency. Nothing in the crate uses it yet.
 
 ## Differences from the planned protocol
 
-The PLAN describes length-prefixed frames over vsock with `Exec`, `Signal`, `ReadFile`, `WriteFile`, `ListDir`, `Sync`, and `Ping`, plus streamed stdout/stderr. The code has none of the streaming, signal, sync, or ping messages, and no framing.
+The PLAN describes length-prefixed frames over vsock with `Exec`, `Signal`, `ReadFile`, `WriteFile`, `ListDir`, `Sync`, and `Ping`, plus streamed stdout/stderr. The current code uses the protobuf service definition which matches the PLAN's messages, but has no framing, no streaming, no signal handling, and listens on a Unix socket instead of vsock.
 
 ## Invariants
 

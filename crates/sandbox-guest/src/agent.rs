@@ -1,37 +1,205 @@
-use sandbox_types::SandboxError;
+use sandbox_proto::v1::guest::{
+    guest_service_server::GuestService, guest_service_server::GuestServiceServer, DirEntry,
+    ListDirRequest, ListDirResponse, PingResponse, ReadFileRequest, ReadFileResponse, SyncRequest,
+    SyncResponse, WriteFileRequest,
+};
+use sandbox_types::{ContentHash, SandboxError};
+use sandbox_vfs::{SessionFs, Vfs};
+use std::convert::TryFrom;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::net::UnixListener;
-use tracing::{error, info};
+use tokio_stream::wrappers::UnixListenerStream;
+use tonic::{transport::Server, Request, Response, Status};
+use tracing::info;
 
 pub struct GuestAgent {
+    vfs: Arc<Vfs>,
     listener: UnixListener,
 }
 
 impl GuestAgent {
-    pub async fn new(socket_path: &str) -> Result<Self, SandboxError> {
+    pub async fn new(socket_path: &str, vfs: Arc<Vfs>) -> Result<Self, SandboxError> {
+        // Remove existing socket if it exists
+        let _ = tokio::fs::remove_file(socket_path).await;
+
         let listener = UnixListener::bind(socket_path).map_err(|e| {
             SandboxError::internal(format!("Failed to bind to {}: {}", socket_path, e))
         })?;
-        Ok(Self { listener })
+
+        Ok(Self { vfs, listener })
     }
 
-    pub async fn run(&self) -> Result<(), SandboxError> {
+    pub async fn run(self) -> Result<(), SandboxError> {
         info!("Guest agent listening on socket");
 
-        loop {
-            let (stream, _addr) = self.listener.accept().await.map_err(|e| {
-                SandboxError::internal(format!("Failed to accept connection: {}", e))
-            })?;
+        let vfs = self.vfs.clone();
+        let service = GuestServiceImpl { vfs };
 
-            tokio::spawn(async move {
-                if let Err(e) = Self::handle_connection(stream).await {
-                    error!("Connection error: {}", e);
-                }
-            });
-        }
-    }
+        let incoming = UnixListenerStream::new(self.listener);
 
-    async fn handle_connection(_stream: tokio::net::UnixStream) -> Result<(), SandboxError> {
-        // Handle guest protocol messages
+        Server::builder()
+            .add_service(GuestServiceServer::new(service))
+            .serve_with_incoming(incoming)
+            .await
+            .map_err(|e| SandboxError::internal(format!("Guest server error: {}", e)))?;
+
         Ok(())
     }
+}
+
+#[derive(Clone)]
+struct GuestServiceImpl {
+    vfs: Arc<Vfs>,
+}
+
+#[tonic::async_trait]
+impl GuestService for GuestServiceImpl {
+    async fn ping(&self, _request: Request<()>) -> Result<Response<PingResponse>, Status> {
+        Ok(Response::new(PingResponse {
+            agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        }))
+    }
+
+    async fn exec(
+        &self,
+        request: Request<sandbox_proto::v1::types::ExecRequest>,
+    ) -> Result<Response<sandbox_proto::v1::types::ExecResult>, Status> {
+        let req = request.into_inner();
+        let argv = req.argv;
+        let env: Vec<(String, String)> = req.env.into_iter().collect();
+        let cwd = req.cwd;
+        let stdin = req.stdin;
+
+        let mut shell =
+            sandbox_shell::Shell::new(self.vfs.clone(), sandbox_shell::ShellConfig::default());
+        for (k, v) in env {
+            shell.set_env(k, v);
+        }
+        if let Some(cwd) = cwd {
+            shell
+                .chdir(&cwd)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+        }
+
+        let out = shell
+            .run_argv_streamed(&argv, &stdin.unwrap_or_default(), None)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let exec_result = sandbox_types::ExecResult {
+            exit_code: out.exit_code,
+            stdout: out.stdout,
+            stderr: out.stderr,
+            cpu_ms: 0,
+            wall_ms: 0,
+        };
+
+        Ok(Response::new(exec_result.into()))
+    }
+
+    async fn read_file(
+        &self,
+        request: Request<ReadFileRequest>,
+    ) -> Result<Response<ReadFileResponse>, Status> {
+        let req = request.into_inner();
+        let path = PathBuf::from(&req.path);
+
+        let flags = sandbox_vfs::OpenFlags::default();
+        let handle = self
+            .vfs
+            .open(&path, flags)
+            .await
+            .map_err(|e| Status::not_found(format!("File not found: {}", e)))?;
+
+        let mut data = Vec::new();
+        loop {
+            let chunk = self
+                .vfs
+                .read(&handle, data.len() as u64, 65536)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+            if chunk.is_empty() {
+                break;
+            }
+            data.extend_from_slice(&chunk);
+        }
+        self.vfs.close(&handle);
+
+        Ok(Response::new(ReadFileResponse { data }))
+    }
+
+    async fn write_file(&self, request: Request<WriteFileRequest>) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        let path = PathBuf::from(&req.path);
+
+        let flags = sandbox_vfs::OpenFlags {
+            read: false,
+            write: true,
+            create: true,
+            truncate: true,
+            ..Default::default()
+        };
+        let handle = self
+            .vfs
+            .open(&path, flags)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        self.vfs
+            .write(&handle, 0, &req.data)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        self.vfs.close(&handle);
+
+        Ok(Response::new(()))
+    }
+
+    async fn list_dir(
+        &self,
+        request: Request<ListDirRequest>,
+    ) -> Result<Response<ListDirResponse>, Status> {
+        let req = request.into_inner();
+        let path = PathBuf::from(&req.path);
+
+        let entries = self
+            .vfs
+            .readdir(&path)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let entries = entries
+            .into_iter()
+            .map(|e| DirEntry {
+                name: e.name,
+                is_dir: e.is_dir,
+                size: e.size,
+            })
+            .collect();
+
+        Ok(Response::new(ListDirResponse { entries }))
+    }
+
+    async fn sync(&self, request: Request<SyncRequest>) -> Result<Response<SyncResponse>, Status> {
+        let req = request.into_inner();
+
+        if let Some(expected_hash_pb) = req.expected_root {
+            let _expected = ContentHash::try_from(expected_hash_pb)
+                .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            // Compare with actual root (placeholder)
+        }
+
+        let root = ContentHash::nil();
+        let root_pb: sandbox_proto::v1::types::ContentHash = root.into();
+
+        Ok(Response::new(SyncResponse {
+            root: Some(root_pb),
+        }))
+    }
+}
+
+pub async fn start_guest_agent(socket_path: &str, vfs: Arc<Vfs>) -> Result<(), SandboxError> {
+    let agent = GuestAgent::new(socket_path, vfs).await?;
+    agent.run().await
 }
