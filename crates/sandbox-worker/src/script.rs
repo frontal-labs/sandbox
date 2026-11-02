@@ -24,6 +24,7 @@ use sandbox_runtime::{
 #[cfg(not(target_os = "linux"))]
 use sandbox_types::ErrorCode;
 use sandbox_types::SandboxError;
+use sandbox_vfs::Vfs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -83,10 +84,11 @@ impl ScriptRunner for ScriptProcess {
         code: &str,
         limits: ScriptLimits,
         observer: Option<StreamObserver>,
+        vfs: Option<Arc<Vfs>>,
     ) -> Result<ScriptOutcome, SandboxError> {
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (code, limits, observer, &self.program);
+            let _ = (code, limits, observer, vfs, &self.program);
             Err(SandboxError::new(
                 ErrorCode::Unsupported,
                 "contained scripts need Linux namespaces, seccomp, and cgroups",
@@ -94,7 +96,7 @@ impl ScriptRunner for ScriptProcess {
         }
         #[cfg(target_os = "linux")]
         {
-            run_contained(&self.program, code, limits, observer).await
+            run_contained(&self.program, code, limits, observer, vfs).await
         }
     }
 }
@@ -105,6 +107,7 @@ async fn run_contained(
     code: &str,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
 ) -> Result<ScriptOutcome, SandboxError> {
     use crate::isolation::{CgroupGuard, CgroupLimits};
     use std::process::Stdio;
@@ -300,6 +303,7 @@ pub fn run_script_child(isolation: &Isolation) -> Result<(), SandboxError> {
         &request.code,
         limits,
         Some(observer),
+        None,
     )) {
         Ok(outcome) => (outcome.exit_code, outcome.stderr),
         Err(e) => (1, e.message.into_bytes()),

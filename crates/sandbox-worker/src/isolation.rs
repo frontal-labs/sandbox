@@ -205,6 +205,155 @@ fn denied_syscalls() -> Vec<i64> {
     denied
 }
 
+/// Syscalls the worker explicitly allows. This is the allowlist approach,
+/// which is more secure than the denylist because it only permits known-safe
+/// syscalls. The list below includes syscalls needed for basic script execution,
+/// file I/O, and memory management.
+/// See the Linux syscall table for the architecture-specific numbers.
+#[cfg(target_os = "linux")]
+fn allowed_syscalls() -> Vec<i64> {
+    let mut allowed = vec![
+        // Process management
+        libc::SYS_exit,
+        libc::SYS_exit_group,
+        libc::SYS_getpid,
+        libc::SYS_getppid,
+        libc::SYS_getuid,
+        libc::SYS_geteuid,
+        libc::SYS_getgid,
+        libc::SYS_getegid,
+        // Memory management
+        libc::SYS_mmap,
+        libc::SYS_munmap,
+        libc::SYS_mprotect,
+        libc::SYS_brk,
+        libc::SYS_madvise,
+        libc::SYS_mincore,
+        // File I/O
+        libc::SYS_openat,
+        libc::SYS_close,
+        libc::SYS_read,
+        libc::SYS_write,
+        libc::SYS_pread64,
+        libc::SYS_pwrite64,
+        libc::SYS_lseek,
+        libc::SYS_fstat,
+        libc::SYS_statx,
+        libc::SYS_fcntl,
+        libc::SYS_ioctl,
+        libc::SYS_dup,
+        libc::SYS_dup2,
+        libc::SYS_dup3,
+        libc::SYS_pipe2,
+        // Directory operations
+        libc::SYS_getdents64,
+        libc::SYS_mkdirat,
+        libc::SYS_unlinkat,
+        libc::SYS_renameat,
+        libc::SYS_linkat,
+        libc::SYS_symlinkat,
+        libc::SYS_readlinkat,
+        libc::SYS_fchdir,
+        libc::SYS_getcwd,
+        // Time
+        libc::SYS_clock_gettime,
+        libc::SYS_nanosleep,
+        libc::SYS_gettimeofday,
+        // Signal handling
+        libc::SYS_rt_sigaction,
+        libc::SYS_rt_sigprocmask,
+        libc::SYS_rt_sigreturn,
+        libc::SYS_sigaltstack,
+        // Futex (for threading)
+        libc::SYS_futex,
+        // Socket (for vsock)
+        libc::SYS_socket,
+        libc::SYS_connect,
+        libc::SYS_bind,
+        libc::SYS_listen,
+        libc::SYS_accept,
+        libc::SYS_sendmsg,
+        libc::SYS_recvmsg,
+        libc::SYS_sendto,
+        libc::SYS_recvfrom,
+        libc::SYS_setsockopt,
+        libc::SYS_getsockopt,
+        libc::SYS_shutdown,
+        // Event polling
+        libc::SYS_epoll_create1,
+        libc::SYS_epoll_ctl,
+        libc::SYS_epoll_pwait,
+        // Miscellaneous
+        libc::SYS_getrandom,
+        libc::SYS_prlimit64,
+        libc::SYS_getrlimit,
+        libc::SYS_setrlimit,
+        libc::SYS_prctl,
+        libc::SYS_arch_prctl,
+        libc::SYS_sysinfo,
+        libc::SYS_uname,
+        libc::SYS_sched_getaffinity,
+        libc::SYS_sched_setaffinity,
+        libc::SYS_sched_yield,
+        libc::SYS_sched_getparam,
+        libc::SYS_sched_setparam,
+        libc::SYS_sched_getscheduler,
+        libc::SYS_sched_setscheduler,
+        libc::SYS_sched_get_priority_max,
+        libc::SYS_sched_get_priority_min,
+    ];
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        allowed.extend([libc::SYS_ioctl, libc::SYS_sigaltstack, libc::SYS_arch_prctl]);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        allowed.extend([libc::SYS_ioctl, libc::SYS_sigaltstack]);
+    }
+
+    allowed.sort();
+    allowed.dedup();
+    allowed
+}
+
+/// Installs an allowlist-based seccomp filter (more secure than denylist).
+#[cfg(target_os = "linux")]
+fn install_seccomp_allowlist() -> Result<(), SandboxError> {
+    use std::convert::TryInto;
+
+    let rules = allowed_syscalls()
+        .into_iter()
+        .map(|nr| (nr, Vec::new()))
+        .collect();
+    // Allowed calls pass through, everything else fails with EPERM.
+    let filter = seccompiler::SeccompFilter::new(
+        rules,
+        seccompiler::SeccompAction::Errno(libc::EPERM as u32),
+        seccompiler::SeccompAction::Allow,
+        target_arch()?,
+    )
+    .map_err(|e| {
+        SandboxError::new(
+            ErrorCode::Internal,
+            format!("building seccomp allowlist filter: {e}"),
+        )
+    })?;
+    let program: seccompiler::BpfProgram = filter.try_into().map_err(|e| {
+        SandboxError::new(
+            ErrorCode::Internal,
+            format!("compiling seccomp allowlist filter: {e}"),
+        )
+    })?;
+    seccompiler::apply_filter(&program).map_err(|e| {
+        SandboxError::new(
+            ErrorCode::Internal,
+            format!("installing seccomp allowlist filter: {e}"),
+        )
+    })
+}
+
 #[cfg(target_os = "linux")]
 fn target_arch() -> Result<seccompiler::TargetArch, SandboxError> {
     #[cfg(target_arch = "x86_64")]
