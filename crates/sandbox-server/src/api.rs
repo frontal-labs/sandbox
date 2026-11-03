@@ -2068,9 +2068,9 @@ fn evict_to_budget(lists: &mut [&mut Vec<CheckpointRoot>], budget: u64) -> bool 
         .map(|root| root.bytes)
         .sum();
     while total > budget {
-        // Feasible, so some list still has an older root to drop.
+        // A total over budget with nothing left to drop does not fit, so the answer is no.
         let Some(list) = lists.iter_mut().find(|roots| roots.len() > 1) else {
-            break;
+            return false;
         };
         total -= list.remove(0).bytes;
     }

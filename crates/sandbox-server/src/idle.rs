@@ -26,23 +26,22 @@ pub async fn sweep(state: &AppState, after: Duration) -> usize {
 
     let mut slept = 0;
     for (id, gate) in candidates {
-        let Ok(_gate) = gate.try_lock_owned() else {
-            continue;
-        };
-        // A request may have touched the session since the scan. Check again
-        // under the gate, so a session that was just used is not put to sleep.
-        let still_idle = {
-            let table = state.sessions.0.read().await;
-            table.get(&id).is_some_and(|entry| {
-                entry.session.is_some() && entry.last_active.load(Ordering::Relaxed) <= cutoff
-            })
-        };
-        if !still_idle {
-            continue;
-        }
-        match sleep_locked(state, id).await {
-            Ok(_) => slept += 1,
-            Err(error) => tracing::warn!(session = %id, ?error, "idle sleep failed"),
+        // A session that is busy with a command is skipped, not waited for.
+        if let Ok(_gate) = gate.try_lock_owned() {
+            // A request may have touched the session since the scan. Check again
+            // under the gate, so a session that was just used is not put to sleep.
+            let still_idle = {
+                let table = state.sessions.0.read().await;
+                table.get(&id).is_some_and(|entry| {
+                    entry.session.is_some() && entry.last_active.load(Ordering::Relaxed) <= cutoff
+                })
+            };
+            if still_idle {
+                match sleep_locked(state, id).await {
+                    Ok(_) => slept += 1,
+                    Err(error) => tracing::warn!(session = %id, ?error, "idle sleep failed"),
+                }
+            }
         }
     }
     slept

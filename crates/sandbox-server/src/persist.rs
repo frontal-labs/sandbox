@@ -417,10 +417,11 @@ fn replay(path: &Path, entities: &mut Entities) -> Result<u64, SandboxError> {
         .iter()
         .rposition(|b| *b == b'\n')
         .map_or(0, |last| last + 1);
-    for (index, line) in bytes[..complete].split(|b| *b == b'\n').enumerate() {
-        if line.is_empty() {
-            continue;
-        }
+    for (index, line) in bytes[..complete]
+        .split(|b| *b == b'\n')
+        .enumerate()
+        .filter(|(_, line)| !line.is_empty())
+    {
         let record: Record = serde_json::from_slice(line).map_err(|e| {
             SandboxError::internal(format!(
                 "{} is damaged at record {}: {e}",

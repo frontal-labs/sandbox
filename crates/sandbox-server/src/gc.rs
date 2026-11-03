@@ -57,87 +57,95 @@ pub struct GcReport {
 pub async fn collect_garbage(state: &AppState) -> Result<GcReport, SandboxError> {
     let store = blob_store();
     loop {
-        // Blobs that exist before the sweep. Blobs written later are not in
-        // these lists, so they are kept.
-        let listed = store.list(None).await?;
-        let listed_parts = store.list_parts().await?;
-
-        let members: Vec<(SessionId, Arc<Mutex<()>>)> = {
-            let table = state.sessions.0.read().await;
-            let mut members: Vec<_> = table.iter().map(|(id, e)| (*id, e.gate.clone())).collect();
-            members.sort_by_key(|(id, _)| *id);
-            members
-        };
-        // Taking the gates one at a time, without the table lock, cannot
-        // deadlock with a command, which holds a gate and then the table.
-        let mut gates = Vec::with_capacity(members.len());
-        for (_, gate) in &members {
-            gates.push(gate.clone().lock_owned().await);
+        // A session created or destroyed during a pass leaves its gates stale, so the
+        // pass starts again.
+        if let Some(report) = sweep_once(state, store.as_ref()).await? {
+            return Ok(report);
         }
-
-        let table = state.sessions.0.write().await;
-        let unchanged =
-            table.len() == members.len() && members.iter().all(|(id, _)| table.contains_key(id));
-        if !unchanged {
-            // A session was created or destroyed since the gates were taken. Start
-            // again, so that every session that can write is gated.
-            drop(table);
-            drop(gates);
-            continue;
-        }
-
-        let mut roots = Vec::new();
-        let mut raw_blobs: Vec<sandbox_types::hash::ContentHash> = Vec::new();
-        for (id, _) in &members {
-            let Some(entry) = table.get(id) else {
-                continue;
-            };
-            if let Some(session) = &entry.session {
-                roots.push(committed_root(session.as_ref()).await?);
-            }
-            if let Some(checkpoint) = &entry.checkpoint {
-                roots.push(checkpoint.root);
-            }
-            // Pinned checkpoints keep their blobs alive, so undo still has them.
-            roots.extend(entry.roots.iter().map(|pinned| pinned.root));
-            // Spilled outputs are plain blobs, not trees, so they are marked directly.
-            raw_blobs.extend(
-                entry
-                    .spilled
-                    .iter()
-                    .flat_map(|run| [run.stdout, run.stderr]),
-            );
-        }
-        {
-            let records = state.snapshots.records.read().await;
-            roots.extend(records.values().map(|record| record.root));
-        }
-
-        let mut live = sandbox_vfs::reachable_blobs(store.as_ref(), &roots)
-            .await
-            .map_err(vfs_error)?;
-        live.extend(raw_blobs);
-        let mut blobs_removed = 0;
-        for hash in &listed {
-            if !live.contains(hash) && store.delete(hash).await? {
-                blobs_removed += 1;
-            }
-        }
-        // A live blob may be stored as chunks. Chunks are shared, so only the
-        // ones no live blob names are removed.
-        let mut keep = HashSet::new();
-        for hash in &live {
-            keep.extend(store.parts(hash).await?);
-        }
-        let chunks_removed = store.delete_parts(&listed_parts, &keep).await?;
-
-        return Ok(GcReport {
-            roots: roots.len(),
-            blobs_listed: listed.len(),
-            blobs_removed,
-            chunks_removed,
-        });
     }
+}
+
+/// One mark and sweep. Returns `None` when the sessions changed while the gates were
+/// taken, so the caller starts again.
+async fn sweep_once(
+    state: &AppState,
+    store: &dyn sandbox_cas::BlobStore,
+) -> Result<Option<GcReport>, SandboxError> {
+    // Blobs that exist before the sweep. Blobs written later are not in
+    // these lists, so they are kept.
+    let listed = store.list(None).await?;
+    let listed_parts = store.list_parts().await?;
+
+    let members: Vec<(SessionId, Arc<Mutex<()>>)> = {
+        let table = state.sessions.0.read().await;
+        let mut members: Vec<_> = table.iter().map(|(id, e)| (*id, e.gate.clone())).collect();
+        members.sort_by_key(|(id, _)| *id);
+        members
+    };
+    // Taking the gates one at a time, without the table lock, cannot
+    // deadlock with a command, which holds a gate and then the table.
+    let mut gates = Vec::with_capacity(members.len());
+    for (_, gate) in &members {
+        gates.push(gate.clone().lock_owned().await);
+    }
+
+    let table = state.sessions.0.write().await;
+    let unchanged =
+        table.len() == members.len() && members.iter().all(|(id, _)| table.contains_key(id));
+    if !unchanged {
+        // A session was created or destroyed since the gates were taken. Start
+        // again, so that every session that can write is gated.
+        return Ok(None);
+    }
+
+    let mut roots = Vec::new();
+    let mut raw_blobs: Vec<sandbox_types::hash::ContentHash> = Vec::new();
+    for entry in members.iter().filter_map(|(id, _)| table.get(id)) {
+        if let Some(session) = &entry.session {
+            roots.push(committed_root(session.as_ref()).await?);
+        }
+        if let Some(checkpoint) = &entry.checkpoint {
+            roots.push(checkpoint.root);
+        }
+        // Pinned checkpoints keep their blobs alive, so undo still has them.
+        roots.extend(entry.roots.iter().map(|pinned| pinned.root));
+        // Spilled outputs are plain blobs, not trees, so they are marked directly.
+        raw_blobs.extend(
+            entry
+                .spilled
+                .iter()
+                .flat_map(|run| [run.stdout, run.stderr]),
+        );
+    }
+    {
+        let records = state.snapshots.records.read().await;
+        roots.extend(records.values().map(|record| record.root));
+    }
+
+    let mut live = sandbox_vfs::reachable_blobs(store, &roots)
+        .await
+        .map_err(vfs_error)?;
+    live.extend(raw_blobs);
+    let mut blobs_removed = 0;
+    for hash in &listed {
+        if !live.contains(hash) && store.delete(hash).await? {
+            blobs_removed += 1;
+        }
+    }
+    // A live blob may be stored as chunks. Chunks are shared, so only the
+    // ones no live blob names are removed.
+    let mut keep = HashSet::new();
+    for hash in &live {
+        keep.extend(store.parts(hash).await?);
+    }
+    let chunks_removed = store.delete_parts(&listed_parts, &keep).await?;
+
+    Ok(Some(GcReport {
+        roots: roots.len(),
+        blobs_listed: listed.len(),
+        blobs_removed,
+        chunks_removed,
+    }))
 }
 
 /// Start a garbage collection of the blob store. It runs in the background, so
