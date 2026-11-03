@@ -595,3 +595,42 @@ async fn export_and_unset_manage_variables() {
     assert_eq!(code, 1);
     assert!(err.contains("not a valid name"), "{err}");
 }
+
+/// `python` as a registry tool, with CPython 3.13.1 and its stdlib in the session's VFS.
+/// Ignored unless the artifacts from `tools/wasm/python/build.sh` are given:
+///   SANDBOX_PYTHON_WASM=... SANDBOX_PYTHON_ZIP=... cargo test -p sandbox-shell -- --ignored python
+#[tokio::test]
+#[ignore = "needs tools/wasm/python/out"]
+async fn python_runs_from_the_registry_with_a_read_only_stdlib() {
+    let wasm =
+        std::fs::read(std::env::var("SANDBOX_PYTHON_WASM").expect("set SANDBOX_PYTHON_WASM"))
+            .unwrap();
+    let zip = std::fs::read(std::env::var("SANDBOX_PYTHON_ZIP").expect("set SANDBOX_PYTHON_ZIP"))
+        .unwrap();
+    let mut sh = shell();
+    run(&mut sh, "mkdir -p /etc /opt /usr/lib /w").await;
+    sh.write_file("/opt/python.wasm", &wasm, false)
+        .await
+        .unwrap();
+    sh.write_file("/usr/lib/python313.zip", &zip, false)
+        .await
+        .unwrap();
+    let manifest = "[[tool]]\nname = \"python\"\npath = \"/opt/python.wasm\"\n\
+        argv0 = \"/usr/bin/python\"\npreopen = [\"/usr\"]\n\
+        fuel = 5000000000\nmax_memory_bytes = 268435456\n";
+    sh.write_file("/etc/tools.toml", manifest.as_bytes(), false)
+        .await
+        .unwrap();
+
+    let (code, out, err) = run(&mut sh, "python -c \"print(6 * 7)\"").await;
+    assert_eq!((code, out.as_str()), (0, "42\n"), "stderr: {err}");
+
+    // The stdlib is read-only to the guest, whatever the working directory is.
+    let (code, _, err) = run(
+        &mut sh,
+        "python -c \"open('/usr/lib/python313.zip', 'ab')\"",
+    )
+    .await;
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("Errno") || err.contains("Read-only"), "{err}");
+}

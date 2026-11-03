@@ -1097,12 +1097,18 @@ impl Shell {
             }
             None => sandbox_wasm::WasiLimits::default(),
         };
-        match sandbox_wasm::run_module_with_mount(
+        let (run_argv, preopens) = match &spec {
+            Some(spec) => (spec.argv_for(argv), spec.preopens()),
+            None => (argv.to_vec(), Vec::new()),
+        };
+        match sandbox_wasm::run_module_with_preopens_streamed(
             module,
-            argv.to_vec(),
+            run_argv,
             stdin,
             limits,
             Some(self.mount()),
+            preopens,
+            None,
         )
         .await
         {
