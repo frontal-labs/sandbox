@@ -21,7 +21,7 @@ Please check if your PR fulfills the following requirements:
 - [ ] Clippy passes (`cargo clippy --workspace --all-targets -- -D warnings`)
 - [ ] Rust tests pass (`cargo test --workspace`), if Rust code changed
 - [ ] TypeScript SDK lint and tests pass (`bun run lint`, `bun run ts:test`), if TypeScript changed
-- [ ] Documentation has been updated if necessary (including plans/PLAN.md if behavior or public API changed)
+- [ ] Documentation has been updated if necessary (if behavior or public API changed)
 - [ ] I have only claimed checks in this description that I actually ran
 
 ## Additional Information
