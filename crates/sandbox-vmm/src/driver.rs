@@ -207,10 +207,7 @@ impl VmmDriver {
         // Wait for socket to be ready
         let pid = child.id().unwrap_or(0);
         let mut retries = 50;
-        while retries > 0 {
-            if tokio::fs::metadata(&socket_path).await.is_ok() {
-                break;
-            }
+        while retries > 0 && tokio::fs::metadata(&socket_path).await.is_err() {
             tokio::time::sleep(Duration::from_millis(100)).await;
             retries -= 1;
         }
