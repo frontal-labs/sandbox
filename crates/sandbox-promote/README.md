@@ -36,3 +36,7 @@ Planned properties:
 ## Spec
 
 See [plans/PLAN.md](../../plans/PLAN.md) section 4.11. Performance target: promotion under 400 ms.
+
+## License
+
+Apache-2.0

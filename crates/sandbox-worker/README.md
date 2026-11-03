@@ -13,3 +13,7 @@ Working for process isolation. Covered by unit tests in `src/worker.rs` and inte
 - Guest output is data in the `ExecResult`, not a protocol channel. The old stdout JSON-lines protocol is gone.
 
 Not implemented: seccomp, cgroups, namespaces, and `PR_SET_NO_NEW_PRIVS` (Linux-only; see plans/PLAN.md section 4.13). The worker isolates crashes, not hostile code. No scheduler client uses this yet.
+
+## License
+
+Apache-2.0

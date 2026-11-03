@@ -1,4 +1,4 @@
-# sandbox-proto
+# Sandbox Proto
 
 Generated protobuf and gRPC bindings for the sandbox wire contracts, plus the conversions to and from `sandbox-types`.
 
@@ -21,3 +21,7 @@ Working, with unit, property, and contract tests (`tests/roundtrip.rs`, `tests/c
 ## Adding a message
 
 Add it to a `.proto` file, add the conversion in `src/convert/`, add it to the round-trip property tests, and run `buf lint proto`. Never reuse a field number or an enum value.
+
+## License
+
+Apache-2.0

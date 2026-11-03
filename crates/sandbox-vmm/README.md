@@ -33,3 +33,7 @@ Intended to drive Firecracker over its Unix-socket REST API, with a jailer per V
 Omitted: the driver and pool do not start real VMs yet.
 
 See `plans/PLAN.md` section 4.10 for the target spec.
+
+## License
+
+Apache-2.0

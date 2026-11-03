@@ -61,3 +61,7 @@ Snapshots are held in this server's own table, so the per-key limits, the owner 
 ## Spec
 
 The OpenAPI spec is generated from the handler annotations and committed under `openapi/v1/`. The `committed_json_matches_the_code` test fails when the committed files drift. See [docs/adr/0001](../../docs/adr/0001-protobuf-and-openapi-contracts.md).
+
+## License
+
+Apache-2.0

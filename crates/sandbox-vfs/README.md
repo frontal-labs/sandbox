@@ -50,3 +50,7 @@ let root = vfs.commit().await?;           // persist; restore later with Vfs::ne
 ```
 
 See `plans/PLAN.md` section 4.3 for the target spec.
+
+## License
+
+Apache-2.0

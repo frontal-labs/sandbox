@@ -1,4 +1,4 @@
-# sandbox-session
+# Sandbox Session
 
 The `Session` trait and the isolate (Tier 1) backend.
 
@@ -24,3 +24,7 @@ Re-exported from `src/lib.rs`: `IsolateBackend`, `Session`, `restore`.
 ## Spec
 
 See [plans/PLAN.md](../../plans/PLAN.md) section 4.8. The VM tier and the streaming `ExecHandle` in the plan are not implemented.
+
+## License
+
+Apache-2.0

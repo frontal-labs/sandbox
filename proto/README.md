@@ -21,3 +21,7 @@ buf build proto
 - Never reuse a field number or an enum value. Reserve them when removing.
 - Enum zero values are `*_UNSPECIFIED`, and the conversion layer rejects them.
 - Use wrapper messages where unset and empty must differ (for example `PortList`).
+
+## License
+
+Apache-2.0

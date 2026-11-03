@@ -22,3 +22,7 @@ cargo run -p sandbox-server --bin gen_openapi
 
 - Routes that return 501 refuse a setting the backend does not enforce yet. Their responses say so.
 - Byte fields (`stdout`, `stderr`, `stdin`) are integer arrays, which is serde's default for `Vec<u8>`. The SDKs model them as bytes but do not decode them. Choosing a JSON encoding (for example base64) is a wire-format decision that is still open.
+
+## License
+
+Apache-2.0

@@ -37,3 +37,7 @@ Not provided. The API does not yet produce a runnable session, so an example wou
 ## Spec
 
 See [plans/PLAN.md](../../plans/PLAN.md) section 4.9. Performance targets: snapshot under 5 ms, restore under 25 ms, fork under 5 ms. Nothing has been measured.
+
+## License
+
+Apache-2.0
