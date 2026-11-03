@@ -917,7 +917,7 @@ impl Parser {
             self.skip_separators();
             if self.keyword().as_deref() == Some("esac") {
                 self.pos += 1;
-                break;
+                return Ok(Command::Case(CaseClause { subject, arms }));
             }
             if self.peek().is_none() {
                 return Err(syntax("syntax error: expected 'esac'"));
@@ -925,18 +925,7 @@ impl Parser {
             if matches!(self.peek(), Some(Token::LParen)) {
                 self.pos += 1;
             }
-            let mut patterns = Vec::new();
-            loop {
-                match self.bump() {
-                    Some(Token::Word(pattern)) => patterns.push(pattern),
-                    _ => return Err(syntax("syntax error: case pattern expected")),
-                }
-                match self.bump() {
-                    Some(Token::Pipe) => continue,
-                    Some(Token::RParen) => break,
-                    _ => return Err(syntax("syntax error: expected ')' after case pattern")),
-                }
-            }
+            let patterns = self.case_patterns()?;
             let body = self.list(&["esac"])?;
             arms.push(CaseArm { patterns, body });
             match self.peek() {
@@ -945,7 +934,22 @@ impl Parser {
                 _ => return Err(syntax("syntax error: expected ';;' or 'esac'")),
             }
         }
-        Ok(Command::Case(CaseClause { subject, arms }))
+    }
+
+    /// Reads `pattern [| pattern]...)`, up to and including the `)`.
+    fn case_patterns(&mut self) -> Result<Vec<Word>, SandboxError> {
+        let mut patterns = Vec::new();
+        loop {
+            match self.bump() {
+                Some(Token::Word(pattern)) => patterns.push(pattern),
+                _ => return Err(syntax("syntax error: case pattern expected")),
+            }
+            match self.bump() {
+                Some(Token::Pipe) => {}
+                Some(Token::RParen) => return Ok(patterns),
+                _ => return Err(syntax("syntax error: expected ')' after case pattern")),
+            }
+        }
     }
 
     fn simple(&mut self) -> Result<Command, SandboxError> {
@@ -959,12 +963,13 @@ impl Parser {
                 Some(Token::Redirect { .. }) => {
                     command.redirects.extend(self.redirects()?);
                 }
-                _ => break,
+                _ => {
+                    if command.words.is_empty() && command.redirects.is_empty() {
+                        return Err(syntax("syntax error: missing command"));
+                    }
+                    return Ok(Command::Simple(command));
+                }
             }
         }
-        if command.words.is_empty() && command.redirects.is_empty() {
-            return Err(syntax("syntax error: missing command"));
-        }
-        Ok(Command::Simple(command))
     }
 }
