@@ -23,7 +23,7 @@ Build from the repo with `cargo build -p sandbox-sdk`.
 `Client::from_env()` reads:
 
 - `SANDBOX_BASE_URL`, default `http://localhost:8080`
-- `SANDBOX_API_KEY`, sent as a bearer token. The server issues keys at startup (`sandbox serve` prints one).
+- `SANDBOX_API_KEY`, sent as a bearer token. The server issues keys at startup (`frontal-sandbox serve` prints one).
 
 `Client::new(base_url, api_key)` takes both explicitly.
 
@@ -103,3 +103,7 @@ bazel test //sdks/rust:sandbox_sdk_unit_test //sdks/rust:sandbox_sdk_test
 - `crates/sandbox-server/`: the server these methods call. Its routes and limits are in its README.
 - `crates/sandbox-types/`: `SessionConfig`, `SessionId`, `SnapshotId`, `Snapshot`, and `SandboxError`.
 - `sdks/typescript/` and `sdks/python/`: the other SDKs. They use the same snake_case wire format.
+
+## License
+
+Apache-2.0
