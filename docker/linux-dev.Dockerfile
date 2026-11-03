@@ -1,7 +1,8 @@
 # Linux build and test environment for the parts of Frontal Sandbox that need
 # Linux: worker isolation (PLAN.md §4.13), cgroups, namespaces, and seccomp, and
-# the Bazel Linux targets (bazel/platforms). Build and run it with
-# docker/run-linux.sh. The container runs privileged, because namespace and
+# the Bazel Linux targets (bazel/platforms), and the emulated guest VM
+# (docker/run-emulated-vm.sh: QEMU's software emulator, since no KVM is available).
+# Build and run it with docker/run-linux.sh. The container runs privileged, because namespace and
 # cgroup tests need CAP_SYS_ADMIN.
 FROM rust:1.95-bookworm
 
@@ -10,6 +11,7 @@ RUN apt-get update \
     protobuf-compiler libprotobuf-dev \
     python3 unzip zip curl ca-certificates \
     clang lld wasi-libc libclang-rt-14-dev-wasm32 \
+    qemu-system-x86 linux-image-amd64 busybox-static cpio kmod xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 RUN rustup component add rustfmt clippy

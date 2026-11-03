@@ -3958,6 +3958,7 @@ dependencies = [
  "bytes",
  "prost",
  "prost-types",
+ "sandbox-cas",
  "sandbox-proto",
  "sandbox-shell",
  "sandbox-types",

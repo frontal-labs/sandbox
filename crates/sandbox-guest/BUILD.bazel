@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 rust_library(
     name = "sandbox_guest",
@@ -49,4 +49,36 @@ rust_library(
     ],
     visibility = ["//visibility:public"],
     target_compatible_with = ["@platforms//os:linux"],
+)
+
+# The agent as a process, booted as the emulated test guest's init (docker/emulated-vm).
+rust_binary(
+    name = "sandbox_guest_agent",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    edition = "2021",
+    deps = [
+        ":sandbox_guest",
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The guest protocol over TCP. Ignored unless SANDBOX_GUEST_ADDR is set, as
+# docker/run-emulated-vm.sh does.
+rust_test(
+    name = "sandbox_guest_emulated_test",
+    srcs = ["tests/emulated_guest.rs"],
+    crate_root = "tests/emulated_guest.rs",
+    edition = "2021",
+    deps = [
+        ":sandbox_guest",
+        "//crates/sandbox-proto:sandbox_proto",
+        "@crates//:tokio",
+        "@crates//:tonic",
+    ],
+    visibility = ["//visibility:public"],
 )

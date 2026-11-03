@@ -8,14 +8,21 @@ use sandbox_vfs::{SessionFs, Vfs};
 use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::net::UnixListener;
-use tokio_stream::wrappers::UnixListenerStream;
+use tokio::net::{TcpListener, UnixListener};
+use tokio_stream::wrappers::{TcpListenerStream, UnixListenerStream};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::info;
 
+/// Where the agent accepts connections. A Firecracker guest uses a Unix socket. The
+/// emulated test guest (`docker/emulated-vm/run.sh`) uses TCP over a forwarded port.
+enum Listener {
+    Unix(UnixListener),
+    Tcp(TcpListener),
+}
+
 pub struct GuestAgent {
     vfs: Arc<Vfs>,
-    listener: UnixListener,
+    listener: Listener,
 }
 
 impl GuestAgent {
@@ -27,24 +34,42 @@ impl GuestAgent {
             SandboxError::internal(format!("Failed to bind to {}: {}", socket_path, e))
         })?;
 
-        Ok(Self { vfs, listener })
+        Ok(Self {
+            vfs,
+            listener: Listener::Unix(listener),
+        })
+    }
+
+    /// Binds a TCP address, such as `0.0.0.0:7000`.
+    pub async fn new_tcp(addr: &str, vfs: Arc<Vfs>) -> Result<Self, SandboxError> {
+        let listener = TcpListener::bind(addr)
+            .await
+            .map_err(|e| SandboxError::internal(format!("Failed to bind to {addr}: {e}")))?;
+        Ok(Self {
+            vfs,
+            listener: Listener::Tcp(listener),
+        })
     }
 
     pub async fn run(self) -> Result<(), SandboxError> {
-        info!("Guest agent listening on socket");
+        info!("Guest agent listening");
 
-        let vfs = self.vfs.clone();
-        let service = GuestServiceImpl { vfs };
-
-        let incoming = UnixListenerStream::new(self.listener);
-
-        Server::builder()
-            .add_service(GuestServiceServer::new(service))
-            .serve_with_incoming(incoming)
-            .await
-            .map_err(|e| SandboxError::internal(format!("Guest server error: {}", e)))?;
-
-        Ok(())
+        let service = GuestServiceServer::new(GuestServiceImpl { vfs: self.vfs });
+        let served = match self.listener {
+            Listener::Unix(listener) => {
+                Server::builder()
+                    .add_service(service)
+                    .serve_with_incoming(UnixListenerStream::new(listener))
+                    .await
+            }
+            Listener::Tcp(listener) => {
+                Server::builder()
+                    .add_service(service)
+                    .serve_with_incoming(TcpListenerStream::new(listener))
+                    .await
+            }
+        };
+        served.map_err(|e| SandboxError::internal(format!("Guest server error: {e}")))
     }
 }
 
