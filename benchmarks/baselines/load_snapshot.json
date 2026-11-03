@@ -1,29 +1,29 @@
 {
   "scenario": "snapshot_fork",
-  "duration_secs": 10.025421704,
+  "duration_secs": 10.026203917,
   "concurrency": 20,
-  "total_iterations": 822004,
+  "total_iterations": 832882,
   "total_errors": 0,
   "latencies": {
     "overall": {
-      "min": 17192,
-      "max": 342660,
-      "mean": 22034.708541564276,
+      "min": 16712,
+      "max": 708910,
+      "mean": 21721.759662233064,
       "percentiles": {
-        "50": 21530,
-        "90": 22241,
-        "95": 23204,
-        "99": 36078
+        "95": 22742,
+        "90": 22011,
+        "50": 21260,
+        "99": 35676
       },
-      "std_dev": 2891.3204915642395,
-      "count": 822004
+      "std_dev": 2955.8080640959993,
+      "count": 832882
     }
   },
   "throughput": {
-    "overall": 81991.9624599963
+    "overall": 83070.52269182369
   },
   "error_rates": {
     "overall": 0.0
   },
-  "timestamp": "2026-11-03T08:50:12.135604608+00:00"
+  "timestamp": "2026-11-03T09:00:24.112358493+00:00"
 }
