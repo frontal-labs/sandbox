@@ -2,7 +2,7 @@
 
 _The Tier 2 guest: a headless, Ubuntu-userland Linux image built for agents, booted by Firecracker, resumed from snapshots, with optional per-thread Xfce desktops._
 
-This document is the spec for a coding agent to build the Tier 2 image. It extends `plans/PLAN.md` §4.9 (snapshots), §4.10 (`sandbox-vmm`, `sandbox-guest`), §4.11 (promotion) and §4.16 (CLI). Read `PLAN.md` first. Where the two disagree, `PLAN.md`'s core invariants (§2) win; raise the conflict in an ADR instead of working around it.
+This document is the spec for a coding agent to build the Tier 2 image. It extends the project specification §4.9 (snapshots), §4.10 (`sandbox-vmm`, `sandbox-guest`), §4.11 (promotion) and §4.16 (CLI). Read the project specification first. Where the two disagree, the project specification's core invariants (§2) win; raise the conflict in an ADR instead of working around it.
 
 Work milestone by milestone (§9). Do not start a milestone until the previous one's acceptance criteria pass. Statements marked **[verify]** are believed true but must be checked against the pinned Firecracker release's docs before you rely on them.
 
@@ -27,7 +27,7 @@ Work milestone by milestone (§9). Do not start a milestone until the previous o
 - A shared X server across agent threads. X11 does not isolate clients on the same server.
 - Our own kernel-level input driver beyond XTEST/uinput. Cua Driver integration is evaluated in I5, not built.
 - arm64 images. x86_64 first; arm64 after I4.
-- Persisting running processes across promotion (unchanged from `PLAN.md`).
+- Persisting running processes across promotion (unchanged from the project specification).
 
 ## 2. Architecture overview
 
@@ -52,8 +52,8 @@ guest
 
 **Core invariants**
 
-1. The VFS is the source of truth (`PLAN.md` §2). The session overlay is derived from the VFS root; package layers are CAS objects named in the session lockfile.
-2. The guest never holds long-lived credentials. Secrets are attached by the host egress proxy (`PLAN.md` §4.7). Nothing secret exists in a VM when it is snapshotted.
+1. The VFS is the source of truth (project specification §2). The session overlay is derived from the VFS root; package layers are CAS objects named in the session lockfile.
+2. The guest never holds long-lived credentials. Secrets are attached by the host egress proxy (project specification §4.7). Nothing secret exists in a VM when it is snapshotted.
 3. `sandbox-guest` is always the vsock **listener** and the host always dials. Firecracker closes open vsock connections on snapshot; listening sockets survive.
 4. No process runs in the guest outside `sandbox-guest`'s tree. No timers, no periodic jobs. An idle guest uses no CPU.
 5. After every snapshot load, the host sends `Reseed` before anything else. The guest rejects every other frame until `Reseed` succeeds on that connection generation.
@@ -103,7 +103,7 @@ This replaces "install = mount a hash" from earlier drafts. Debian packages run 
 
 - **Layer:** a read-only filesystem image produced by running `apt-get install` for a resolved package set on top of a parent layer, inside a build sandbox, with maintainer scripts executed.
 - **Layer ID:** `BLAKE3(parent_layer_id ‖ sorted[(name, version, arch, deb_sha256)] ‖ builder_version)`. Same inputs, same ID.
-- **Format:** **decide by benchmark** in I3: EROFS vs ext4, measured on resume latency, read throughput and CAS dedupe ratio. Store in `sandbox-cas` with FastCDC chunking (`PLAN.md` §4.2).
+- **Format:** **decide by benchmark** in I3: EROFS vs ext4, measured on resume latency, read throughput and CAS dedupe ratio. Store in `sandbox-cas` with FastCDC chunking (project specification §4.2).
 - **Archive pinning:** every manifest pins an archive snapshot timestamp so builds are reproducible. **[verify]** that `snapshot.ubuntu.com` serves the chosen suite; otherwise mirror the archive into object storage.
 - **Suite:** one Ubuntu LTS suite per image generation, recorded in `images/base/manifest.toml`. Open question §12.
 - **Snaps:** forbidden. Ship `/etc/apt/preferences.d/no-snap` pinning `snapd` to priority -1. Ubuntu's `firefox` and `chromium-browser` debs are snap transitional packages; get browsers from Playwright's managed Chromium or Mozilla's apt repository instead.
@@ -112,13 +112,13 @@ This replaces "install = mount a hash" from earlier drafts. Debian packages run 
 - **Runtime installs (later):** attaching a cached layer to a running VM depends on Firecracker block-device hotplug. **[verify]** what `docs/device-hotplug.md` supports in the pinned release before designing on it.
 - **Templates:** `python-3.12` and `node-20` are layers plus a warm headless snapshot.
 
-### 4.3 `sandbox-guest` (extends `PLAN.md` §4.10)
+### 4.3 `sandbox-guest` (extends project specification §4.10)
 
 **PID 1 duties:** mount `proc`, `sys`, `dev`, `devpts`, `cgroup2`, `tmpfs /run`; assemble the overlay root; reap zombies; handle `SIGTERM` and `SIGINT` for clean shutdown; never exit.
 
 **Transport:** vsock, listening on `SANDBOX_GUEST_PORT` (constant in `sandbox-types`). Protobuf frames generated from `proto/` (the repo already uses `tonic`/`prost`). Length-prefixed.
 
-**Frames (v1).** Existing frames from `PLAN.md`: `Exec`, `Signal`, `ReadFile`, `WriteFile`, `ListDir`, `Sync`, `Ping`. New:
+**Frames (v1).** Existing frames from project specification: `Exec`, `Signal`, `ReadFile`, `WriteFile`, `ListDir`, `Sync`, `Ping`. New:
 
 | Frame | Direction | Purpose |
 | --- | --- | --- |
@@ -133,13 +133,13 @@ This replaces "install = mount a hash" from earlier drafts. Debian packages run 
 **Rules**
 
 - Until `Reseed` succeeds on a connection that follows a transport reset, every frame except `Hello` and `Ping` returns `NOT_READY`.
-- Fuzz the frame decoder (`cargo-fuzz`), as `PLAN.md` M4 requires.
+- Fuzz the frame decoder (`cargo-fuzz`), as project specification M4 requires.
 - `sandbox-guest` is a static musl binary. No dynamic dependencies.
 
 ### 4.4 Networking
 
 - One network namespace per VM on the host, with the tap device inside it. Every clone keeps the same in-guest IP and MAC, following Firecracker's `docs/snapshotting/network-for-clones.md`.
-- Egress leaves the namespace only through the `sandbox-policy` proxy. nftables rules mirror policy (`PLAN.md` §4.7), including the private-range and metadata blocks.
+- Egress leaves the namespace only through the `sandbox-policy` proxy. nftables rules mirror policy (project specification §4.7), including the private-range and metadata blocks.
 - After resume, the guest's open network connections are not guaranteed to survive (Firecracker docs). The agent sees ordinary connection errors; nothing tries to preserve them.
 
 ### 4.5 Agent-native interfaces
@@ -170,7 +170,7 @@ These work in **both tiers**. Most of the work belongs in `sandbox-session`, `sa
   - `sandbox undo [N]` restores the VFS root from N checkpoints ago. In Tier 2 this restarts the VM from the base snapshot with the restored overlay; running processes are lost, and the command says so.
   - `sandbox checkpoint` takes a manual checkpoint.
 - **Checkpoints.** Session config `checkpoint: per_exec | manual` (default `per_exec`). Each top-level exec ends with an incremental `vfs.commit()`; root hashes form the undo stack. Use VFS roots, not Firecracker diff snapshots, which are still in developer preview.
-- **Checkpoint retention.** Keep the last `checkpoint_retain` roots per session (default 50) and unpin older ones. `PLAN.md` §14 notes that checkpoint and blob GC is not implemented yet, so per-exec checkpoints grow storage until GC lands. Until then, I0 must at least unpin old roots and report per-session checkpoint bytes in `GET /v1/sessions/{id}`.
+- **Checkpoint retention.** Keep the last `checkpoint_retain` roots per session (default 50) and unpin older ones. project specification §14 notes that checkpoint and blob GC is not implemented yet, so per-exec checkpoints grow storage until GC lands. Until then, I0 must at least unpin old roots and report per-session checkpoint bytes in `GET /v1/sessions/{id}`.
 - **Exec user.** `Exec` runs as user `agent` (uid 1000) with passwordless `sudo`, in both the headless image and the desktop. Root is reachable by design (§5). Tier 1 reports the same user in `env.json` (`"user": "agent"`).
 - **Approval gates.** Policy gains `require_approval: [{ host, methods, paths? }]`. The egress proxy holds a matching request, emits `ApprovalRequired { id, request_summary }` on the trace, and waits up to `approval_timeout_s` for `POST /v1/sessions/{id}/approvals/{aid}`. On timeout the request is denied and a `PolicyDenied` event is emitted. Enforcement is on the host, never in the guest.
 
@@ -228,23 +228,23 @@ All commands support `--json`. Input failures exit non-zero. A key press that ca
 
 ## 5. Security model
 
-Inherits `PLAN.md` §5. Additions:
+Inherits project specification §5. Additions:
 
 - Root inside the guest is allowed. The boundary is KVM, Firecracker and the jailer.
 - Firecracker trusts snapshot and memory files. Never load a snapshot file that did not come from our own CAS with a verified hash. Users cannot upload snapshots.
 - No `snapd`, no sshd, no inbound network. A human desktop viewer (I5) tunnels over vsock through the host and requires an authenticated session key.
 - No kernel modules. Kernel config changes require an ADR.
 - Fuzz the guest frame decoder and the `cua batch` JSONL parser.
-- Escape tests from `PLAN.md` §5 must also pass inside Tier 2.
+- Escape tests from project specification §5 must also pass inside Tier 2.
 
 ## 6. Performance targets
 
-Targets from `PLAN.md` are binding. Targets marked **(new)** are proposals; record the first real measurement in `docs/decisions/` and adjust by ADR.
+Targets from project specification are binding. Targets marked **(new)** are proposals; record the first real measurement in `docs/decisions/` and adjust by ADR.
 
 | Metric | Target |
 | --- | --- |
-| Headless resume from snapshot | < 150 ms p50 (`PLAN.md`) |
-| Promotion, isolate → VM | < 400 ms p50 (`PLAN.md`) |
+| Headless resume from snapshot | < 150 ms p50 (project specification) |
+| Promotion, isolate → VM | < 400 ms p50 (project specification) |
 | Desktop fork → first screenshot | < 500 ms p50 **(new)** |
 | `cua screenshot`, warm | < 300 ms p50 **(new)** |
 | Idle headless guest CPU | 0 wakeups/s from guest userspace **(new)** |
@@ -256,7 +256,7 @@ Benchmark under concurrency as well as sequentially. Report p50, p95 and p99. Pi
 
 ## 7. Testing strategy
 
-- **Boot and smoke:** Firecracker on KVM-enabled CI runners (`PLAN.md` §7). Boot to `Ping`, run `bash -lc 'python3 -V && apt-get --version'`.
+- **Boot and smoke:** Firecracker on KVM-enabled CI runners (project specification §7). Boot to `Ping`, run `bash -lc 'python3 -V && apt-get --version'`.
 - **No-daemon check:** after boot, the guest process list contains only `sandbox-guest` and its children.
 - **Uniqueness:** fork one snapshot 50 ways. Assert all distinct: `getrandom` output, `/etc/machine-id`, `boot_id`, hostname, X cookie (desktop), wall clock within 1 s of host.
 - **vsock reconnect:** restore, dial, assert `NOT_READY` before `Reseed` and success after.
@@ -264,7 +264,7 @@ Benchmark under concurrency as well as sequentially. Report p50, p95 and p99. Pi
 - **No-snap:** `apt-get install firefox` either installs a non-snap build from the configured repo or fails with a clear message. `snapd` is never installed.
 - **Reproducibility:** build each layer twice in clean environments; IDs and bytes match.
 - **CUA conformance:** scripted tasks with known outcomes: open `xfce4-terminal`, type a 500-character string, verify the result by reading a file; click a target in a test HTML page in Chromium at three resolutions with `--from` scaling; drag-and-drop between two windows.
-- **Transcript corpus:** run the `PLAN.md` agent-transcript corpus with tier forced to `Vm`. Track pass rate per image version.
+- **Transcript corpus:** run the project specification agent-transcript corpus with tier forced to `Vm`. Track pass rate per image version.
 - **Approval gate:** a gated `POST` waits, is approved, and succeeds; another times out and is denied with a `PolicyDenied` event.
 
 ## 8. Dependencies (initial pin list)
@@ -273,51 +273,51 @@ Host and build: Firecracker ≥ v1.16.1 (pinned exactly), jailer, `mmdebstrap` (
 
 Rust: `tokio-vsock`, `prost`/`tonic` (already in the workspace), `nix`/`rustix`, `x11rb`, `png`, `blake3`, `toml`, `serde_json`. `evdev` only if uinput wins the I4 test.
 
-Rule from `PLAN.md` §8 applies: justify every new dependency in the PR description.
+Rule from project specification §8 applies: justify every new dependency in the PR description.
 
 ## 9. Milestones and acceptance criteria
 
-### I0: Interfaces and ADRs (alongside `PLAN.md` M3)
+### I0: Interfaces and ADRs (alongside project specification M3)
 
 - ADR: package layers and lockfile (§4.2). ADR: guest protocol v1 (§4.3).
 - `env.json` schema and generation in Tier 1. Output capping in `ExecRequest`. `sandbox info`, `sandbox fork`, `sandbox undo`, `sandbox checkpoint` in Tier 1. `checkpoint: per_exec`.
 - **Accept:** both ADRs merged. Every Tier 1 session has a valid `/etc/agent/env.json`. A 100k-line command returns capped output with a working full-output path. `sandbox fork 3 -- sh -c 'echo $RANDOM > /r'` yields 3 sessions with independent `/r`. `sandbox undo 1` restores the previous root hash.
 
-### I1: Headless image v0 (start of `PLAN.md` M4)
+### I1: Headless image v0 (start of project specification M4)
 
 - Kernel 6.18 per §4.1. Base image as one ext4 layer. `sandbox-guest` as PID 1 with existing frames, plus `Hello`.
 - **Accept:** boots under the jailer to `Ping`. Smoke and no-daemon tests pass. The image build is reproducible. Idle RSS is measured and recorded.
 
-### I2: Snapshots, uniqueness, promotion (`PLAN.md` M4)
+### I2: Snapshots, uniqueness, promotion (project specification M4)
 
 - `PrepareSnapshot`, `Reseed`, `EnvInfo`. Per-VM network namespaces. Warm pool from snapshots. Promotion through `export_ext4`.
 - MMIO vs PCI transport benchmark recorded.
-- **Accept:** headless resume < 150 ms p50. Promotion < 400 ms p50. Uniqueness, vsock-reconnect and network-clone tests pass. `ffmpeg` runs via auto-promotion (`PLAN.md` M4).
+- **Accept:** headless resume < 150 ms p50. Promotion < 400 ms p50. Uniqueness, vsock-reconnect and network-clone tests pass. `ffmpeg` runs via auto-promotion (project specification M4).
 
 ### Gate G1: promotion rate (before I3 and I4)
 
 - Replay the transcript corpus in `Auto` tier. Record the share of sessions that hit `NeedsVm` and which commands caused it, in `docs/decisions/`.
 - A human decides from that data whether I3 and I4 proceed now or wait. Record the decision.
 
-### I3: Layered packages and templates (`PLAN.md` M4 → M5)
+### I3: Layered packages and templates (project specification M4 → M5)
 
 - `sandbox-image` layer builder, layer IDs, lockfile. EROFS vs ext4 benchmark. Host package cache in the egress proxy. Templates `python-3.12` and `node-20`.
 - **Accept:** layer IDs are reproducible. A cached `pip install pandas` downloads nothing from the internet on its second run. Promotion with layers stays < 400 ms p50; **if it does not, keep one image per template and record why.** No-snap test passes.
 
-### I4: Desktop (`PLAN.md` M5)
+### I4: Desktop (project specification M5)
 
 - Desktop layer, `DesktopStart`, desktop template snapshot, per-thread forks, `cua` with `--json` and `batch`, idle pause, XTEST vs uinput test, balloon benchmark.
-- VM snapshots (`PLAN.md` §4.9 `VmSnapshot`) are a prerequisite. Move them into this milestone if they aren't done.
+- VM snapshots (project specification §4.9 `VmSnapshot`) are a prerequisite. Move them into this milestone if they aren't done.
 - **Accept:** desktop fork → first screenshot < 500 ms p50. CUA conformance suite passes. Uniqueness test passes for desktop forks, including X cookies. Paused desktops resume and accept `cua` input. Chromium launches without snapd.
 
-### I5: Human-in-the-loop (`PLAN.md` M6)
+### I5: Human-in-the-loop (project specification M6)
 
 - Approval gates (§4.5). Authenticated desktop viewer over vsock with a separate human cursor. Evaluation of Cua Driver inside the desktop image, recorded as an ADR.
 - **Accept:** approval-gate tests pass. A human can join a desktop, act, and hand back control without breaking the agent's next `cua batch`.
 
 ## 10. Instructions for the building agent
 
-1. Follow `PLAN.md` §11 in full.
+1. Follow project specification §11 in full.
 2. Firecracker behavior changes between releases. Before relying on any Firecracker feature (snapshots, vsock reset, PCI, hotplug, balloon, VMGenID), read the docs for the exact pinned version and cite them in the PR.
 3. Never install `snapd` or systemd, or add a background daemon to an image. If a package pulls one in, pin it out and find another package.
 4. Never put credentials into a VM or a snapshot. If a test needs a secret, inject it through the egress proxy.
@@ -353,7 +353,7 @@ Each question has a default. Build with the default unless a human has overridde
 
 ## 12a. Conventions
 
-- ADRs continue the existing sequence in `docs/adr/` (`PLAN.md` §14 cites 0003–0010; use the next free number).
+- ADRs continue the existing sequence in `docs/adr/` (project specification §14 cites 0003–0010; use the next free number).
 - Tier 2 tests sit behind a Cargo feature (for example `vm-tests`) and run only on KVM-enabled runners. Confirm `/dev/kvm` exists on the runner before enabling the job.
 - Image builds run in their own workflow, triggered by changes under `images/**`, `crates/sandbox-guest/**`, `crates/sandbox-cua/**` and `crates/sandbox-image/**`. Never commit built kernels, layers or snapshots; publish them to GHCR or object storage, addressed by layer ID.
 

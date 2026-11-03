@@ -1,7 +1,7 @@
 # Documentation
 
 This directory holds the project's documentation. Most files describe the
-target design from [plans/PLAN.md](../plans/PLAN.md). Where a feature is not
+target design from the project specification. Where a feature is not
 implemented, the "Current State" sections say so.
 
 ## Guides

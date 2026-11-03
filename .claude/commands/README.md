@@ -5,7 +5,7 @@ command files). `aliases.sh` holds shell shortcuts only; see its notes below.
 
 Planned command families, not yet implemented:
 
-- `/sandbox:plan`: review `plans/PLAN.md` and identify the next milestone.
+- `/sandbox:plan`: review the project specification and identify the next milestone.
 - `/sandbox:architecture`: inspect boundaries, invariants, and data flow.
 - `/sandbox:security`: review capabilities, isolation, and promotion paths.
 - `/sandbox:types`: work on shared IDs, errors, events, and configuration.

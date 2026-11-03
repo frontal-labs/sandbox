@@ -7,7 +7,7 @@ Accepted
 2026-10-16
 
 ## Context
-ADR 0008 kept keys, snapshots, and sleeping sessions across a restart, but a running session was lost. ADR 0006 also dropped the working directory and environment on sleep. plans/PLAN.md lists durable state as part of the plan, so a session should come back after a restart as it was.
+ADR 0008 kept keys, snapshots, and sleeping sessions across a restart, but a running session was lost. ADR 0006 also dropped the working directory and environment on sleep. The project specification lists durable state as part of the plan, so a session should come back after a restart as it was.
 
 ## Decision
 - A session's checkpoint is its committed filesystem root, its working directory, and its environment. The environment is kept in memory only: its values are often secrets, so the state file never holds them, and a restored session starts with an empty environment. `Session::checkpoint()` returns one and replaces `Session::sleep()`. `restore_checkpoint` starts a session from one. `snapshot()` and `restore(root)` are unchanged, and snapshots still record only the root (ADR 0004).

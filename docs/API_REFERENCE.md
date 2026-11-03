@@ -5,7 +5,7 @@
 > API key.
 > Settings the backend does not enforce (VM tier, memory, CPU, process, and open-file limits, network policy,
 > secrets, environment, working directory) are refused with `501`, not ignored. The file size, total size, inode, and path depth limits are enforced (ADR 0014). The full target API is specified in
-> [plans/PLAN.md section 4.15](../plans/PLAN.md#415-sandbox-server).
+> the project specification section 4.15.
 
 ## Base URL
 
@@ -54,7 +54,7 @@ Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 
 ## Planned, not routed
 
-These appear in plans/PLAN.md section 4.15 but have no route in `api.rs`:
+These appear in the project specification section 4.15 but have no route in `api.rs`:
 
 - `GET /v1/sessions/{id}/fs?list=...`: directory listing
 
@@ -77,7 +77,7 @@ keys get `401 Unauthorized`.
 Keys have the form `sbx_<key-id>_<secret>`. `AuthManager::create_key` returns
 the plaintext once. The store keeps only a BLAKE3 digest of the secret, and
 `revoke` removes a key by id. Per-key scopes and quotas are still planned
-(plans/PLAN.md section 4.15).
+(project specification section 4.15).
 
 ## Error format
 

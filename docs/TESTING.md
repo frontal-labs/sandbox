@@ -1,7 +1,7 @@
 # Testing
 
 This document separates what test infrastructure exists today from the
-strategy in plans/PLAN.md section 7. Nothing here means a suite passes. No test run
+strategy in the project specification section 7. Nothing here means a suite passes. No test run
 was performed as part of writing this document.
 
 ## What Exists Today
@@ -45,7 +45,7 @@ been run in this refresh.
 
 ## Planned Test Strategy
 
-The sections below describe the target strategy from plans/PLAN.md section 7. Each
+The sections below describe the target strategy from the project specification section 7. Each
 item is planned unless it is listed in "What Exists Today".
 
 ### Unit Tests (planned conventions)
@@ -64,7 +64,7 @@ which is already a workspace dependency.
 ### Conformance Suite (planned)
 
 Shell and coreutils behavior compared against a reference. Target: 200+ shell
-cases for M1 (plans/PLAN.md section 9). Directory `tests/conformance/` does not exist
+cases for M1 (project specification section 9). Directory `tests/conformance/` does not exist
 yet.
 
 ### Integration Tests (planned)
@@ -103,7 +103,7 @@ trace on the local runtime produce identical results.
   `common/`, and `baselines/` directories. Whether they build or run was not
   verified.
 
-Targets from plans/PLAN.md section 6, all **not measured**:
+Targets from the project specification section 6, all **not measured**:
 
 | Benchmark | Target |
 |-----------|--------|

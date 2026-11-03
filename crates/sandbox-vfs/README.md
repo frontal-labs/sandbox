@@ -17,7 +17,7 @@ Known limits:
 - File modes and timestamps are not stored. Directories report mode `0o755` and files `0o644`, and `modified` is `0`.
 - Quota checks are not reserved, so concurrent writers can overshoot a limit.
 - Overlay writes are not coalesced. A large file is held in memory until commit.
-- Not implemented: `export_ext4` and `import_from_dir` (plans/PLAN.md section 4.3), and a model-based fuzz target for the path normalizer.
+- Not implemented: `export_ext4` and `import_from_dir` (project specification section 4.3), and a model-based fuzz target for the path normalizer.
 - Symlink targets containing `..` are rejected, so relative links cannot climb out of their directory.
 
 ## Overview
@@ -49,7 +49,7 @@ vfs.write(&h, 0, b"hi").await?;
 let root = vfs.commit().await?;           // persist; restore later with Vfs::new(root, store)
 ```
 
-See `plans/PLAN.md` section 4.3 for the target spec.
+See the project specification section 4.3 for the target spec.
 
 ## License
 

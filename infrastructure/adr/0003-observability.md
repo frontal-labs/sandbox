@@ -7,7 +7,7 @@ Accepted
 2026-10-17
 
 ## Context
-plans/PLAN.md section 10 lists metrics, logs, and traces as planned but not defined
+The project specification section 10 lists metrics, logs, and traces as planned but not defined
 in code. Infrastructure needs a concrete, minimal observability surface that
 the service crates will implement against.
 
@@ -36,5 +36,5 @@ the service crates will implement against.
   on-prem / bring-your-own-host model.
 
 ## References
-- plans/PLAN.md sections 6, 10
+- Project specification sections 6, 10
 - docs/PERFORMANCE.md

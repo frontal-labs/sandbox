@@ -127,7 +127,7 @@ sandbox/
 
 ## Coding Standards
 
-- No `unwrap()` outside tests and `main` (plans/PLAN.md section 11).
+- No `unwrap()` outside tests and `main` (project specification section 11).
 - Use `?` with error types from `sandbox-types` (`SandboxError`, `ErrorCode`).
 - Every `unsafe` block needs a `// SAFETY:` comment and a test.
 - Public API changes need an ADR in `docs/adr/` (see
@@ -189,7 +189,7 @@ command.
 
 ## Documentation
 
-- **Every crate**: a README with purpose, invariants, and example (plans/PLAN.md section 11).
+- **Every crate**: a README with purpose, invariants, and example (project specification section 11).
 - **Public API changes**: ADR in `docs/adr/NNNN-title.md`.
 - **Benchmark decisions**: record in `docs/decisions/`.
 - **Architecture changes**: update `docs/ARCHITECTURE.md`.

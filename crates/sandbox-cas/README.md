@@ -49,7 +49,7 @@ Not compiled in this pass. Checked against the signatures in `src/blob_store.rs`
 
 ## Spec
 
-See [plans/PLAN.md](../../plans/PLAN.md) section 4.2 for the target design. Still planned: `ObjectStore` backend, FastCDC chunking, refcounting, and GC.
+See the project specification section 4.2 for the target design. Still planned: `ObjectStore` backend, FastCDC chunking, refcounting, and GC.
 
 ## License
 

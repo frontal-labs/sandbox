@@ -34,7 +34,7 @@ alias rust:clippy="bun run cargo:clippy"
 alias rust:fmt="bun run cargo:fmt"
 
 # Analysis shortcuts
-alias analyze:plan="rg -n 'Milestone|Acceptance|Goal|Non-goal' plans/PLAN.md"
+alias analyze:plan="rg -n 'Milestone|Acceptance|Goal|Non-goal' docs/MILESTONES.md"
 
 # Utility shortcuts
 alias cache:clear="rm -rf target node_modules/.cache"
@@ -42,6 +42,6 @@ alias reset:hard="git reset --hard HEAD && git clean -fd"
 alias prune:branches="git branch --merged | grep -v '\\*\\|main\\|master' | xargs -n 1 git branch -d"
 
 # Sandbox-specific shortcuts
-alias sandbox:plan="sed -n '1,240p' plans/PLAN.md"
-alias sandbox:architecture="rg -n 'invariant|backend|capability|promotion' plans/PLAN.md"
-alias sandbox:security="rg -n 'security|capability|network|isolate|microVM' plans/PLAN.md"
+alias sandbox:plan="sed -n '1,240p' docs/MILESTONES.md"
+alias sandbox:architecture="rg -n 'invariant|backend|capability|promotion' docs/ARCHITECTURE.md"
+alias sandbox:security="rg -n 'security|capability|network|isolate|microVM' docs/SECURITY_MODEL.md"

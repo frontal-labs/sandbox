@@ -7,7 +7,7 @@ Accepted
 2026-10-15
 
 ## Context
-`Session::sleep` returned `Unsupported`. plans/PLAN.md calls for sleeping sessions that hold no memory, and the sleep method was declared to return a `SnapshotId`. ADR 0004 moved snapshot IDs to the server, so the session crate can no longer return one.
+`Session::sleep` returned `Unsupported`. The project specification calls for sleeping sessions that hold no memory, and the sleep method was declared to return a `SnapshotId`. ADR 0004 moved snapshot IDs to the server, so the session crate can no longer return one.
 
 ## Decision
 - `Session::sleep()` returns the committed root (`ContentHash`), the same type as `snapshot()`. For `IsolateBackend`, sleep is a checkpoint. The session keeps running until its owner drops it.

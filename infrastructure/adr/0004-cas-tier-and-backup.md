@@ -35,6 +35,6 @@ bucket and to back up/restore state.
   M3/M4 and avoids a new dependency.
 
 ## References
-- plans/PLAN.md sections 4.2, 4.14
+- Project specification sections 4.2, 4.14
 - docs/adr/0008-durable-server-state.md
 - `infrastructure/scripts/`

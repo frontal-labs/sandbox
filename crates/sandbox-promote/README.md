@@ -14,7 +14,7 @@ Re-exported from `src/lib.rs`:
 
 ## Planned flow
 
-The PLAN describes this sequence. None of it is implemented:
+The project specification describes this sequence. None of it is implemented:
 
 1. Pause the isolate session.
 2. `vfs.commit()` to a new root hash.
@@ -35,7 +35,7 @@ Planned properties:
 
 ## Spec
 
-See [plans/PLAN.md](../../plans/PLAN.md) section 4.11. Performance target: promotion under 400 ms.
+See the project specification section 4.11. Performance target: promotion under 400 ms.
 
 ## License
 
