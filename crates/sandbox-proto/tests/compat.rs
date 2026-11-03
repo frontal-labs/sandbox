@@ -18,10 +18,7 @@ fn proto_fields(set: &FileDescriptorSet, package: &str, message: &str) -> BTreeS
     fn find<'a>(msgs: &'a [DescriptorProto], name: &str) -> Option<&'a DescriptorProto> {
         msgs.iter().find(|m| m.name() == name)
     }
-    for file in &set.file {
-        if file.package() != package {
-            continue;
-        }
+    for file in set.file.iter().filter(|file| file.package() == package) {
         if let Some(msg) = find(&file.message_type, message) {
             return msg.field.iter().map(|f| f.name().to_string()).collect();
         }
