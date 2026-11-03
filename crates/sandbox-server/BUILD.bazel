@@ -61,9 +61,11 @@ _SERVER_TEST_DEPS = [
     "//crates/sandbox-vfs:sandbox_vfs",
     "@crates//:axum",
     "@crates//:bytes",
+    "@crates//:futures",
     "@crates//:serde",
     "@crates//:serde_json",
     "@crates//:tokio",
+    "@crates//:tokio-tungstenite",
     "@crates//:tower",
     "@crates//:utoipa",
 ]
@@ -103,5 +105,6 @@ rust_test(
         "limits",
         "openapi",
         "rest",
+        "websocket",
     ]
 ]
