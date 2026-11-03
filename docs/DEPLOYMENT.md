@@ -38,7 +38,7 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 | `.github/workflows/ci.yml` | `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `cargo bench --no-run`, using the `rust-toolchain.toml` pin | Runs without Nix. Not verified to pass in this refresh. |
 | `.github/workflows/pr-checks.yml` | Conventional-commit PR title, semver label, size warning, auto-assign | Active |
 | `.github/workflows/benchmarks.yml` | Criterion and load-test runs, baseline comparison | Runs, but see [PERFORMANCE.md](PERFORMANCE.md). `benchmarks/baselines/` is empty, so no regression check compares against recorded data. |
-| `.github/workflows/release-binaries.yml` | Tag build of the `cli` crate (binary `frontal-sandbox`) for five targets, npm platform packages and the `@frontal-labs/frontal-sandbox` wrapper to npmjs, `SHA256SUMS` attached to the release | Builds `-p cli`. Windows copies `frontal-sandbox.exe`. |
+| `.github/workflows/release-binaries.yml` | Tag build of the `cli` crate (binary `frontal-sandbox`) for five targets, npm platform packages and the `@frontal-labs/sandbox-cli` wrapper to npmjs, `SHA256SUMS` attached to the release | Builds `-p cli`. Windows copies `frontal-sandbox.exe`. |
 | `.github/workflows/codeql-analysis.yml` | CodeQL analysis | Not reviewed in this refresh |
 
 `.devcontainer/Dockerfile` builds a development container (Rust and Bun). It is not a deployment image.

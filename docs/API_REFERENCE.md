@@ -43,7 +43,7 @@ integers. The SDKs convert those arrays to bytes on their side.
 | GET | `/v1/sessions/{id}/snapshots` | `list_snapshots` | Snapshots taken from a session |
 | GET | `/v1/sessions/{id}/snapshots/{snapshot_id}` | `get_snapshot` | One snapshot taken from a session |
 | GET | `/v1/usage` | `get_usage` | The caller's counters since the server started (ADR 0015) |
-| POST | `/v1/gc` | `run_gc` | Start a blob store collection in the background (`202`). One per minute, else `429` (ADR 0013). `sandbox serve --gc-interval-secs` also runs one on a schedule |
+| POST | `/v1/gc` | `run_gc` | Start a blob store collection in the background (`202`). One per minute, else `429` (ADR 0013). `frontal-sandbox serve --gc-interval-secs` also runs one on a schedule |
 
 Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 
@@ -243,7 +243,7 @@ often hold secrets (ADR 0010).
 A request to a sleeping session wakes it first, so `exec`, file operations, and
 `snapshot` succeed. `get` and `destroy` never wake it. Sleeping a sleeping session,
 or waking a running one, returns `409` with code `INVALID_STATE`. Idle sessions
-sleep by themselves when `sandbox serve --idle-sleep-secs` is set (default 300). See
+sleep by themselves when `frontal-sandbox serve --idle-sleep-secs` is set (default 300). See
 [ADR 0006](adr/0006-sleep-and-wake.md) and [ADR 0015](adr/0015-idle-sleep-and-metering.md).
 
 ### Command trace

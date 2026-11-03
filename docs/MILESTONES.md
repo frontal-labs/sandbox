@@ -57,10 +57,10 @@ Last reviewed against the source tree on 2026-10-19.
       the shell. Snapshot and sleep are not implemented.
 - [ ] **Partial.** `sandbox-sdk` (Rust): embedded `exec` and `create_session`
       return `Unsupported`; the in-process path is `sandbox-session` directly
-- [x] `cli` (`sandbox run`, `sandbox shell`): execute in an isolate session
+- [x] `cli` (`frontal-sandbox run`, `frontal-sandbox shell`): execute in an isolate session
 
 ### Acceptance Criteria
-- [x] `sandbox run "echo hi | cat > /a && cat /a"` works
+- [x] `frontal-sandbox run "echo hi | cat > /a && cat /a"` works
 - [x] `node -e`, `node FILE.js`, and `node FILE.ts` run against VFS (ADR 0024: TypeScript by type stripping; types are not checked)
 - [x] Cold start < 5 ms from warm pool in `bench/`: a new Tier 1 session takes a p50 of 833 ns, and a `node` run takes a p50 of 0.41 ms from a warm isolate (5.10 ms cold). The back-to-back tail is the cold cost (ADR 0025)
 - [x] 200+ shell conformance cases pass (219 of 219 against GNU bash 5.3.8, ADR 0019)
@@ -167,7 +167,7 @@ Last reviewed against the source tree on 2026-10-19.
 
 ### Deliverables
 - [ ] Interactive PTY shell
-- [x] `sandbox replay` CLI, with recording through `run --trace` and `shell --trace`
+- [x] `frontal-sandbox replay` CLI, with recording through `run --trace` and `shell --trace`
 - [ ] VS Code / MCP server
 - [ ] Docs site
 - [ ] Examples: coding agent, data agent, browser agent
