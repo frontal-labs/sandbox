@@ -10,7 +10,10 @@ mod index;
 mod object;
 
 use index::{Index, IndexEntry, REGULAR_FILE};
-use object::{encode_commit, encode_tree, hash_object, hex, parse_commit, parse_tree, sort_tree_entries, Commit, Kind, ObjectStore, Oid, TreeEntry};
+use object::{
+    encode_commit, encode_tree, hash_object, hex, parse_commit, parse_tree, sort_tree_entries,
+    Commit, Kind, ObjectStore, Oid, TreeEntry,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -182,7 +185,12 @@ impl Repo {
         Ok(files)
     }
 
-    fn flatten(&self, tree: &Oid, prefix: &str, out: &mut BTreeMap<String, (u32, Oid)>) -> Result<()> {
+    fn flatten(
+        &self,
+        tree: &Oid,
+        prefix: &str,
+        out: &mut BTreeMap<String, (u32, Oid)>,
+    ) -> Result<()> {
         let (kind, body) = self.objects.read(tree)?;
         if kind != Kind::Tree {
             return Err(Fatal::new("expected a tree object"));
@@ -284,7 +292,10 @@ fn cmd_init(operands: &[String]) -> Result<()> {
             .map_err(|e| Fatal::new(format!("cannot create {dir}: {e}")))?;
     }
     if !existed {
-        write_file(&git_dir.join("HEAD"), format!("ref: refs/heads/{BRANCH}\n").as_bytes())?;
+        write_file(
+            &git_dir.join("HEAD"),
+            format!("ref: refs/heads/{BRANCH}\n").as_bytes(),
+        )?;
         write_file(
             &git_dir.join("config"),
             b"[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n",
@@ -327,7 +338,8 @@ fn cmd_add(operands: &[String]) -> Result<()> {
     for spec in operands {
         let spec = normalize(spec);
         for path in worktree.iter().filter(|path| matches(&spec, path)) {
-            let bytes = fs::read(path).map_err(|e| Fatal::new(format!("cannot read {path}: {e}")))?;
+            let bytes =
+                fs::read(path).map_err(|e| Fatal::new(format!("cannot read {path}: {e}")))?;
             let oid = repo.objects.write(Kind::Blob, &bytes)?;
             index.entries.insert(
                 path.clone(),
@@ -385,7 +397,10 @@ fn cmd_commit(globals: &Globals, operands: &[String]) -> Result<()> {
     if nothing_staged {
         // git prints the status here, so the message comes with the branch line.
         let changes = changes(&repo)?;
-        print!("{}", render_status(&repo.head_branch()?, head.is_some(), &changes));
+        print!(
+            "{}",
+            render_status(&repo.head_branch()?, head.is_some(), &changes)
+        );
         return Err(Fatal::silent(1));
     }
 
@@ -414,7 +429,10 @@ fn cmd_commit(globals: &Globals, operands: &[String]) -> Result<()> {
         message: message.clone(),
     };
     let oid = repo.objects.write(Kind::Commit, &encode_commit(&commit))?;
-    write_file(&repo.branch_path(&repo.head_branch()?), format!("{}\n", hex(&oid)).as_bytes())?;
+    write_file(
+        &repo.branch_path(&repo.head_branch()?),
+        format!("{}\n", hex(&oid)).as_bytes(),
+    )?;
     let subject = message.lines().next().unwrap_or_default();
     let root = if head.is_none() { " (root-commit)" } else { "" };
     println!("[{BRANCH}{root} {}] {subject}", index::short(&oid));
@@ -474,9 +492,12 @@ fn render_status(branch: &str, has_commits: bool, changes: &Changes) -> String {
             "Changes to be committed:".to_string(),
             format!("  (use \"{unstage} <file>...\" to unstage)"),
         ];
-        lines.extend(changes.staged.iter().map(|(code, path)| {
-            format!("\t{:<12}{path}", staged_label(*code))
-        }));
+        lines.extend(
+            changes
+                .staged
+                .iter()
+                .map(|(code, path)| format!("\t{:<12}{path}", staged_label(*code))),
+        );
         sections.push(lines.join("\n"));
     }
     if !changes.unstaged.is_empty() {
@@ -491,9 +512,12 @@ fn render_status(branch: &str, has_commits: bool, changes: &Changes) -> String {
             format!("  (use \"git {verb} <file>...\" to update what will be committed)"),
             "  (use \"git restore <file>...\" to discard changes in working directory)".to_string(),
         ];
-        lines.extend(changes.unstaged.iter().map(|(code, path)| {
-            format!("\t{:<12}{path}", unstaged_label(*code))
-        }));
+        lines.extend(
+            changes
+                .unstaged
+                .iter()
+                .map(|(code, path)| format!("\t{:<12}{path}", unstaged_label(*code))),
+        );
         sections.push(lines.join("\n"));
     }
     if !changes.untracked.is_empty() {
@@ -526,7 +550,10 @@ fn summary(changes: &Changes, has_commits: bool) -> Option<String> {
     } else if !changes.unstaged.is_empty() {
         Some("no changes added to commit (use \"git add\" and/or \"git commit -a\")".to_string())
     } else if !changes.untracked.is_empty() {
-        Some("nothing added to commit but untracked files present (use \"git add\" to track)".to_string())
+        Some(
+            "nothing added to commit but untracked files present (use \"git add\" to track)"
+                .to_string(),
+        )
     } else if has_commits {
         Some("nothing to commit, working tree clean".to_string())
     } else {
@@ -644,7 +671,10 @@ fn collapse_untracked(path: &str, index: &Index) -> String {
         .map(|depth| parts[..depth].join("/"))
         .find(|dir| {
             let prefix = format!("{dir}/");
-            !index.entries.keys().any(|tracked| tracked.starts_with(&prefix))
+            !index
+                .entries
+                .keys()
+                .any(|tracked| tracked.starts_with(&prefix))
         })
         .map(|dir| format!("{dir}/"))
         .unwrap_or_else(|| path.to_string())
@@ -682,7 +712,13 @@ fn cmd_log(operands: &[String]) -> Result<()> {
     let mut shown = 0usize;
     while let (Some(oid), true) = (cursor, shown < limit) {
         let commit = repo.read_commit(&oid)?;
-        out.push_str(&format_commit(&oid, &commit, oneline, format.as_deref(), shown == 0));
+        out.push_str(&format_commit(
+            &oid,
+            &commit,
+            oneline,
+            format.as_deref(),
+            shown == 0,
+        ));
         cursor = commit.parents.first().copied();
         shown += 1;
     }
@@ -691,7 +727,13 @@ fn cmd_log(operands: &[String]) -> Result<()> {
 }
 
 /// One commit in `log` output. `first` tells whether a separator goes before it.
-fn format_commit(oid: &Oid, commit: &Commit, oneline: bool, format: Option<&str>, first: bool) -> String {
+fn format_commit(
+    oid: &Oid,
+    commit: &Commit,
+    oneline: bool,
+    format: Option<&str>,
+    first: bool,
+) -> String {
     let subject = commit.message.lines().next().unwrap_or_default();
     if let Some(template) = format {
         return format!("{}\n", expand(template, oid, commit));
@@ -777,7 +819,8 @@ fn list_worktree() -> Result<Vec<String>> {
 }
 
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<()> {
-    let entries = fs::read_dir(dir).map_err(|e| Fatal::new(format!("cannot read {}: {e}", dir.display())))?;
+    let entries =
+        fs::read_dir(dir).map_err(|e| Fatal::new(format!("cannot read {}: {e}", dir.display())))?;
     for entry in entries {
         let entry = entry.map_err(|e| Fatal::new(e.to_string()))?;
         let name = entry
@@ -840,8 +883,11 @@ fn git_date(seconds: i64, offset: &str) -> String {
     let days = local.div_euclid(86_400);
     let clock = local.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
-    let weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(days + 4).rem_euclid(7) as usize];
-    let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let weekday =
+        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(days + 4).rem_euclid(7) as usize];
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     format!(
         "{weekday} {} {day} {:02}:{:02}:{:02} {year} {offset}",
         months[(month - 1) as usize],

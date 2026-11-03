@@ -332,17 +332,33 @@ async fn git_tool_commit_flow() {
     let out = git_tool(
         &vfs,
         "/work",
-        &["-c", "user.name=Tester", "-c", "user.email=t@example.com", "commit", "-m", "Add hello"],
+        &[
+            "-c",
+            "user.name=Tester",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-m",
+            "Add hello",
+        ],
         b"",
     )
     .await;
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
-    assert!(text(&out.stdout).contains("[main (root-commit) "), "{}", text(&out.stdout));
+    assert!(
+        text(&out.stdout).contains("[main (root-commit) "),
+        "{}",
+        text(&out.stdout)
+    );
 
     // Log
     let out = git_tool(&vfs, "/work", &["log"], b"").await;
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
-    assert!(text(&out.stdout).contains("    Add hello"), "{}", text(&out.stdout));
+    assert!(
+        text(&out.stdout).contains("    Add hello"),
+        "{}",
+        text(&out.stdout)
+    );
 }
 
 #[tokio::test]

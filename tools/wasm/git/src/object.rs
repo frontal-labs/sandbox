@@ -76,7 +76,8 @@ impl ObjectStore {
         let Some(dir) = path.parent() else {
             return Err(Fatal::new("object path has no directory"));
         };
-        fs::create_dir_all(dir).map_err(|e| Fatal::new(format!("cannot create {}: {e}", dir.display())))?;
+        fs::create_dir_all(dir)
+            .map_err(|e| Fatal::new(format!("cannot create {}: {e}", dir.display())))?;
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder
             .write_all(format!("{} {}\0", kind.name(), body.len()).as_bytes())
@@ -92,8 +93,8 @@ impl ObjectStore {
 
     pub fn read(&self, oid: &Oid) -> Result<(Kind, Vec<u8>), Fatal> {
         let path = self.path(oid);
-        let compressed = fs::read(&path)
-            .map_err(|_| Fatal::new(format!("bad object {}", hex(oid))))?;
+        let compressed =
+            fs::read(&path).map_err(|_| Fatal::new(format!("bad object {}", hex(oid))))?;
         let mut raw = Vec::new();
         ZlibDecoder::new(compressed.as_slice())
             .read_to_end(&mut raw)

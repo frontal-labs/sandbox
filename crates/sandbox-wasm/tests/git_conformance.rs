@@ -71,13 +71,25 @@ async fn the_wasm_tool_matches_host_git_on_hashes_index_and_status() {
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
     let out = git(
         &vfs,
-        &["-c", "user.name=Tester", "-c", "user.email=t@example.com", "commit", "-m", "first"],
+        &[
+            "-c",
+            "user.name=Tester",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-m",
+            "first",
+        ],
     )
     .await;
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
 
     let clean = git(&vfs, &["status", "--porcelain"]).await;
-    assert_eq!(text(&clean.stdout), "", "a committed tree has no status lines");
+    assert_eq!(
+        text(&clean.stdout),
+        "",
+        "a committed tree has no status lines"
+    );
 
     put(&vfs, "/work/root.txt", b"more\n", true).await;
     put(&vfs, "/work/new.txt", b"n\n", false).await;
@@ -95,9 +107,15 @@ async fn the_wasm_tool_matches_host_git_on_hashes_index_and_status() {
          100644 7a7b8aae67a0c255a7b13641fb7b630963842409 0\troot.txt\n"
     );
     let tree = git(&vfs, &["write-tree"]).await;
-    assert_eq!(text(&tree.stdout), "baac38ad086d955f079de720551e7f90b09a78a0\n");
+    assert_eq!(
+        text(&tree.stdout),
+        "baac38ad086d955f079de720551e7f90b09a78a0\n"
+    );
     let blob = git(&vfs, &["hash-object", "root.txt"]).await;
-    assert_eq!(text(&blob.stdout), "7a7b8aae67a0c255a7b13641fb7b630963842409\n");
+    assert_eq!(
+        text(&blob.stdout),
+        "7a7b8aae67a0c255a7b13641fb7b630963842409\n"
+    );
 
     let subjects = git(&vfs, &["log", "--format=%s"]).await;
     assert_eq!(text(&subjects.stdout), "first\n");
