@@ -718,10 +718,9 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                     Fd::Stdout | Fd::Stderr => return Err(errno::BADF),
                 };
                 let mut cursor = 0;
-                for (buf, len) in vectors {
-                    if cursor >= data.len() {
-                        break;
-                    }
+                let mut vectors = vectors.into_iter();
+                // Vectors are filled until the data runs out.
+                while let Some((buf, len)) = vectors.next().filter(|_| cursor < data.len()) {
                     let n = len.min(data.len() - cursor);
                     write_bytes(&mut c, buf, &data[cursor..cursor + n])?;
                     cursor += n;
@@ -1137,7 +1136,9 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                 // record may be cut at `buf_len`, which WASI allows.
                 let mut data = Vec::new();
                 let start = usize::try_from(cookie.max(0)).unwrap_or(usize::MAX);
-                for (index, entry) in entries.iter().enumerate().skip(start) {
+                let mut records = entries.iter().enumerate().skip(start);
+                // Records are added until the buffer is full.
+                while let Some((index, entry)) = records.next().filter(|_| data.len() < buf_len) {
                     let filetype: u8 = if entry.is_dir {
                         3
                     } else if entry.is_symlink {
@@ -1151,9 +1152,6 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                     data.push(filetype);
                     data.extend_from_slice(&[0, 0, 0]);
                     data.extend_from_slice(entry.name.as_bytes());
-                    if data.len() >= buf_len {
-                        break;
-                    }
                 }
                 data.truncate(buf_len);
                 write_bytes(&mut c, buf, &data)?;

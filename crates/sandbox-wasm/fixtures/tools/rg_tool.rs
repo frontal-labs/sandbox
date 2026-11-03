@@ -68,26 +68,27 @@ fn main() -> anyhow::Result<()> {
 fn search_file(path: &str, regex: &Regex, args: &Args) -> anyhow::Result<usize> {
     let content = fs::read_to_string(path)?;
     let mut matches = 0;
-    
-    for (line_num, line) in content.lines().enumerate() {
-        if regex.is_match(line) {
-            matches += 1;
-            if args.count {
-                continue;
-            }
-            
+
+    let matching_lines = content
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| regex.is_match(line));
+    for (line_num, line) in matching_lines {
+        matches += 1;
+        // With -c only the count is printed, so matching lines are not printed.
+        if !args.count {
             let prefix = if args.paths.len() > 1 {
                 format!("{}:", path)
             } else {
                 String::new()
             };
-            
+
             let line_prefix = if args.line_number {
                 format!("{}:", line_num + 1)
             } else {
                 String::new()
             };
-            
+
             if args.only_matching {
                 for mat in regex.find_iter(line) {
                     println!("{}{}{}", prefix, line_prefix, mat.as_str());
@@ -97,6 +98,6 @@ fn search_file(path: &str, regex: &Regex, args: &Args) -> anyhow::Result<usize> 
             }
         }
     }
-    
+
     Ok(matches)
 }

@@ -42,8 +42,7 @@ fn apply_filter(value: &Value, filter: &str) -> anyhow::Result<Value> {
             // Field access: .field or .field.subfield
             let path = &f[1..];
             let mut current = value;
-            for part in path.split('.') {
-                if part.is_empty() { continue; }
+            for part in path.split('.').filter(|part| !part.is_empty()) {
                 if let Some(idx) = part.strip_suffix("]").and_then(|p| p.strip_prefix('[')).and_then(|i| i.parse::<usize>().ok()) {
                     current = current.get(idx).ok_or_else(|| anyhow::anyhow!("Index out of bounds"))?;
                 } else {

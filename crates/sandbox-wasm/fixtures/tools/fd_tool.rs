@@ -46,11 +46,13 @@ fn main() -> anyhow::Result<()> {
         walker = walker.max_depth(depth);
     }
     
-    for entry in walker.into_iter().filter_map(|e| e.ok()) {
+    let wanted = walker.into_iter().filter_map(|e| e.ok()).filter(|entry| {
+        let file_type = entry.file_type();
+        (!args.type_file || file_type.is_file()) && (!args.type_dir || file_type.is_dir())
+    });
+    for entry in wanted {
         let file_type = entry.file_type();
         
-        if args.type_file && !file_type.is_file() { continue; }
-        if args.type_dir && !file_type.is_dir() { continue; }
         
         let name = entry.file_name().to_string_lossy();
         let haystack = if args.ignore_case {
