@@ -93,7 +93,6 @@ sandbox/
 │   └── python/             # Package `sandbox_sdk` (pyproject.toml)
 ├── benchmarks/             # Benchmark sources and load tests (not a workspace member)
 ├── docs/                   # This directory
-├── plans/PLAN.md                 # Forward-looking spec
 ├── package.json            # Root scripts (Biome, Bazel wrappers)
 ├── MODULE.bazel, BUILD.bazel, .bazelrc
 └── .github/workflows/      # CI workflows
@@ -106,7 +105,7 @@ sandbox/
 - **Members** are listed in the root `Cargo.toml`. A new crate must be added
   there.
 - **No cycles**: dependencies flow from `sandbox-types` and `sandbox-cas` up to
-  `sandbox-server` and `cli` (plans/PLAN.md section 11).
+  `sandbox-server` and `cli` (project specification section 11).
 - **Lints**: `clippy.toml` and `rustfmt.toml` are committed. CI runs clippy with
   `-D warnings`.
 - **Shared dependencies** use `workspace = true` (see `[workspace.dependencies]`
@@ -123,7 +122,7 @@ sandbox/
 2. Add the path to `[workspace] members` in the root `Cargo.toml`.
 3. Define public traits and types in `src/lib.rs`.
 4. Write tests alongside the implementation (see [TESTING.md](TESTING.md)).
-5. Add a `README.md` with purpose, invariants, and an example (plans/PLAN.md section 11).
+5. Add a `README.md` with purpose, invariants, and an example (project specification section 11).
 6. Update [ARCHITECTURE.md](ARCHITECTURE.md) if the architecture changes.
 
 ## Coding Standards
