@@ -81,11 +81,10 @@ impl DiskStore {
     /// Removes temporary files left behind by crashed writes.
     /// These files match the pattern `.tmp-<pid>-<seq>`.
     fn cleanup_stale_temps(&self) -> BlobStoreResult<()> {
-        for i in 0..SHARD_COUNT {
-            let shard_dir = self.root.join(format!("{:02x}", i));
-            if !shard_dir.exists() {
-                continue;
-            }
+        let shard_dirs = (0..SHARD_COUNT)
+            .map(|i| self.root.join(format!("{:02x}", i)))
+            .filter(|dir| dir.exists());
+        for shard_dir in shard_dirs {
             let entries = fs::read_dir(&shard_dir).map_err(BlobStoreError::Io)?;
             for entry in entries {
                 let entry = entry.map_err(BlobStoreError::Io)?;
@@ -394,11 +393,10 @@ impl BlobStore for DiskStore {
 
     async fn list_parts(&self) -> BlobStoreResult<Vec<String>> {
         let mut keys = Vec::new();
-        for i in 0..SHARD_COUNT {
-            let chunks = self.root.join(format!("{:02x}", i)).join("chunks");
-            if !chunks.exists() {
-                continue;
-            }
+        let chunk_dirs = (0..SHARD_COUNT)
+            .map(|i| (i, self.root.join(format!("{:02x}", i)).join("chunks")))
+            .filter(|(_, chunks)| chunks.exists());
+        for (i, chunks) in chunk_dirs {
             let mut prefixes = tokio_fs::read_dir(&chunks)
                 .await
                 .map_err(BlobStoreError::Io)?;
@@ -411,15 +409,14 @@ impl BlobStore for DiskStore {
                     // file from a write that did not finish, and is not a sweep
                     // candidate (`delete_parts` would reject its name).
                     let name = file.file_name().to_string_lossy().to_string();
-                    if ContentHash::from_hex(&name).is_err() {
-                        continue;
+                    if ContentHash::from_hex(&name).is_ok() {
+                        keys.push(format!(
+                            "{:02x}/chunks/{}/{}",
+                            i,
+                            prefix.file_name().to_string_lossy(),
+                            name
+                        ));
                     }
-                    keys.push(format!(
-                        "{:02x}/chunks/{}/{}",
-                        i,
-                        prefix.file_name().to_string_lossy(),
-                        name
-                    ));
                 }
             }
         }
@@ -452,25 +449,24 @@ impl BlobStore for DiskStore {
                     "not a chunk key: {key}"
                 )));
             };
-            if keep.contains(&hash) {
-                continue;
-            }
-            let shard = key
-                .split('/')
-                .next()
-                .and_then(|s| usize::from_str_radix(s, 16).ok());
-            let Some(shard) = shard.filter(|s| *s < SHARD_COUNT) else {
-                return Err(BlobStoreError::InvalidArgument(format!(
-                    "not a chunk key: {key}"
-                )));
-            };
-            let _guard = self.shards[shard].write().await;
-            let path = self.root.join(key);
-            if path.exists() {
-                tokio_fs::remove_file(&path)
-                    .await
-                    .map_err(BlobStoreError::Io)?;
-                removed += 1;
+            if !keep.contains(&hash) {
+                let shard = key
+                    .split('/')
+                    .next()
+                    .and_then(|s| usize::from_str_radix(s, 16).ok());
+                let Some(shard) = shard.filter(|s| *s < SHARD_COUNT) else {
+                    return Err(BlobStoreError::InvalidArgument(format!(
+                        "not a chunk key: {key}"
+                    )));
+                };
+                let _guard = self.shards[shard].write().await;
+                let path = self.root.join(key);
+                if path.exists() {
+                    tokio_fs::remove_file(&path)
+                        .await
+                        .map_err(BlobStoreError::Io)?;
+                    removed += 1;
+                }
             }
         }
         Ok(removed)
@@ -480,12 +476,10 @@ impl BlobStore for DiskStore {
         let mut results = Vec::new();
         let prefix_str = prefix.unwrap_or("");
 
-        for i in 0..SHARD_COUNT {
-            let shard_dir = self.root.join(format!("{:02x}", i));
-            if !shard_dir.exists() {
-                continue;
-            }
-
+        let shard_dirs = (0..SHARD_COUNT)
+            .map(|i| self.root.join(format!("{:02x}", i)))
+            .filter(|dir| dir.exists());
+        for shard_dir in shard_dirs {
             let mut entries = tokio_fs::read_dir(&shard_dir)
                 .await
                 .map_err(BlobStoreError::Io)?;
@@ -494,11 +488,10 @@ impl BlobStore for DiskStore {
                 // manifest's name is the blob's hash.
                 let name = entry.file_name().to_string_lossy().to_string();
                 let hex = name.strip_suffix(".manifest").unwrap_or(&name);
-                if !hex.starts_with(prefix_str) {
-                    continue;
-                }
-                if let Ok(hash) = ContentHash::from_hex(hex) {
-                    results.push(hash);
+                if hex.starts_with(prefix_str) {
+                    if let Ok(hash) = ContentHash::from_hex(hex) {
+                        results.push(hash);
+                    }
                 }
             }
         }
