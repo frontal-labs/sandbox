@@ -24,6 +24,7 @@ exec docker run --rm --privileged --user 0:0 \
   -v frontal-sandbox-linux-target:/cache/target \
   -e CARGO_TARGET_DIR=/cache/target \
   -e CARGO_TERM_COLOR=never \
+  -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-3}" \
   -e SANDBOX_CGROUP_ROOT=/sys/fs/cgroup/workers \
   -w /src \
   "$IMAGE" sh -c '
