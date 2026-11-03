@@ -20,7 +20,9 @@ fn module(name: &str) -> Option<&'static [u8]> {
 fn the_pinned_hashes_match_the_shipped_modules() {
     let registry = Registry::parse(MANIFEST).unwrap();
     for name in ["jq", "rg", "sqlite3"] {
-        let spec = registry.find(name).unwrap_or_else(|| panic!("{name} is not in the manifest"));
+        let spec = registry
+            .find(name)
+            .unwrap_or_else(|| panic!("{name} is not in the manifest"));
         let bytes = module(name).unwrap();
         spec.verify(bytes)
             .unwrap_or_else(|e| panic!("{name}: {}", e.message));

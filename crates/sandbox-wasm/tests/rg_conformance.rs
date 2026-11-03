@@ -59,5 +59,10 @@ async fn the_sandboxed_rg_matches_ripgrep_on_stdin() {
             ));
         }
     }
-    assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} mismatches:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }

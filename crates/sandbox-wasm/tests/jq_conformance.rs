@@ -27,7 +27,9 @@ async fn the_sandboxed_jq_matches_reference_jq() {
     let cases: Vec<Case> = serde_json::from_str(CASES).unwrap();
     assert!(cases.len() >= 40, "the corpus shrank to {}", cases.len());
     let vfs = Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())));
-    vfs.mkdir(std::path::Path::new("/work"), 0o755).await.unwrap();
+    vfs.mkdir(std::path::Path::new("/work"), 0o755)
+        .await
+        .unwrap();
 
     let mut failures = Vec::new();
     for case in &cases {
@@ -60,5 +62,10 @@ async fn the_sandboxed_jq_matches_reference_jq() {
             ));
         }
     }
-    assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} mismatches:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }

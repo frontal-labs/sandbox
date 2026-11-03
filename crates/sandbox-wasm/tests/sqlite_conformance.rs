@@ -71,7 +71,12 @@ async fn the_sandboxed_sqlite_matches_the_reference_cli() {
             ));
         }
     }
-    assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} mismatches:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 #[tokio::test]
@@ -83,14 +88,33 @@ async fn a_file_database_persists_between_runs() {
 
     let write = run(
         &vfs,
-        vec!["sqlite3".into(), db.clone(), "create table k(v); insert into k values(42);".into()],
+        vec![
+            "sqlite3".into(),
+            db.clone(),
+            "create table k(v); insert into k values(42);".into(),
+        ],
         Vec::new(),
     )
     .await;
-    assert_eq!(write.exit_code, 0, "{}", String::from_utf8_lossy(&write.stderr));
+    assert_eq!(
+        write.exit_code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&write.stderr)
+    );
 
-    let read = run(&vfs, vec!["sqlite3".into(), db, "select v from k;".into()], Vec::new()).await;
-    assert_eq!(read.exit_code, 0, "{}", String::from_utf8_lossy(&read.stderr));
+    let read = run(
+        &vfs,
+        vec!["sqlite3".into(), db, "select v from k;".into()],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(
+        read.exit_code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&read.stdout), "42\n");
 }
 
@@ -100,7 +124,11 @@ async fn an_sql_error_is_reported_on_stderr_with_exit_status_one() {
     vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
     let out = run(
         &vfs,
-        vec!["sqlite3".into(), ":memory:".into(), "select * from nope;".into()],
+        vec![
+            "sqlite3".into(),
+            ":memory:".into(),
+            "select * from nope;".into(),
+        ],
         Vec::new(),
     )
     .await;
