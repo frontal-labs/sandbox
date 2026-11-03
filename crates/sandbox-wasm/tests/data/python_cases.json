@@ -1,0 +1,68 @@
+[
+  {
+    "name": "arithmetic",
+    "code": "print(6 * 7, 2 ** 100 % 97, 7 // 2, -7 % 3)",
+    "stdout": "42 16 3 2\n",
+    "exit_code": 0
+  },
+  {
+    "name": "json_sorted",
+    "code": "import json; print(json.dumps({'b': [1, 2.5, None], 'a': True}, sort_keys=True))",
+    "stdout": "{\"a\": true, \"b\": [1, 2.5, null]}\n",
+    "exit_code": 0
+  },
+  {
+    "name": "regex",
+    "code": "import re; print(re.findall(r'\\d+', 'a1 b22 c333'), re.sub(r'(\\w)(\\d)', r'\\2\\1', 'x1y2'))",
+    "stdout": "['1', '22', '333'] 1x2y\n",
+    "exit_code": 0
+  },
+  {
+    "name": "version",
+    "code": "import sys; print(sys.version_info[:2], sys.implementation.name)",
+    "stdout": "(3, 13) cpython\n",
+    "exit_code": 0
+  },
+  {
+    "name": "work_file_roundtrip",
+    "code": "open('notes.txt', 'w').write('line one\\nline two\\n'); print(open('notes.txt').read().splitlines())",
+    "stdout": "['line one', 'line two']\n",
+    "exit_code": 0
+  },
+  {
+    "name": "positional_io",
+    "code": "import os; fd = os.open('p.bin', os.O_RDWR | os.O_CREAT); os.pwrite(fd, b'hello', 0); os.pwrite(fd, b'J', 0); print(os.pread(fd, 5, 0), os.pread(fd, 3, 2)); os.close(fd)",
+    "stdout": "b'Jello' b'llo'\n",
+    "exit_code": 0
+  },
+  {
+    "name": "listdir_sorted",
+    "code": "import os; open('b.txt', 'w').close(); open('a.txt', 'w').close(); print(sorted(os.listdir('.')))",
+    "stdout": "['a.txt', 'b.txt']\n",
+    "exit_code": 0
+  },
+  {
+    "name": "exit_code",
+    "code": "import sys; print('before'); sys.exit(3)",
+    "stdout": "before\n",
+    "exit_code": 3
+  },
+  {
+    "name": "uncaught_exception",
+    "code": "print('partial'); raise ValueError('boom')",
+    "stdout": "partial\n",
+    "exit_code": 1
+  },
+  {
+    "name": "sorting_and_comprehensions",
+    "code": "words = ['pear', 'fig', 'apple']; print(sorted(words, key=len), {w[0]: len(w) for w in words})",
+    "stdout": "['fig', 'pear', 'apple'] {'p': 4, 'f': 3, 'a': 5}\n",
+    "exit_code": 0
+  },
+  {
+    "name": "stdlib_is_read_only",
+    "code": "import errno\ntry:\n    open('/usr/lib/python313.zip', 'ab')\nexcept OSError as e:\n    print(e.errno == errno.EROFS)\n",
+    "stdout": "True\n",
+    "exit_code": 0
+  }
+]
