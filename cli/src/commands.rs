@@ -295,12 +295,13 @@ fn interactive_shell(trace: Option<&Path>) -> Result<i32, SandboxError> {
     let session = rt.block_on(IsolateBackend::new(SessionConfig::default()))?;
     let mut runs = Vec::new();
 
-    for line in std::io::stdin().lock().lines() {
-        let line =
-            line.map_err(|e| SandboxError::internal(format!("failed to read stdin: {e}")))?;
-        if line.trim() == "exit" {
-            break;
-        }
+    let lines = std::io::stdin()
+        .lock()
+        .lines()
+        .map(|line| line.map_err(|e| SandboxError::internal(format!("failed to read stdin: {e}"))))
+        .take_while(|line| !matches!(line, Ok(text) if text.trim() == "exit"));
+    for line in lines {
+        let line = line?;
         // A bad line reports its error and the session continues.
         let (random_state, result, files) = rt.block_on(run_traced(&session, &line));
         if trace.is_some() {
