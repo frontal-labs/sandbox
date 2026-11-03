@@ -781,7 +781,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id", get(get_session))
         .route("/v1/sessions/:id", delete(destroy_session))
         .route("/v1/sessions/:id/exec", post(exec_command))
-        .route("/v1/sessions/:id/exec", get(exec_websocket))
+        .route("/v1/sessions/:id/ws", get(exec_websocket))
         .route("/v1/sessions/:id/fs/*path", get(read_file))
         .route("/v1/sessions/:id/fs/*path", axum::routing::put(write_file))
         .route("/v1/sessions/:id/fs/*path", delete(delete_file))
@@ -1156,6 +1156,32 @@ async fn exec_streaming(
     }
     let own = owned(&state, &owner, &id).await?;
     let gate = own.gate.clone().lock_owned().await;
+    let lines = start_exec(state, owner, own, request, gate);
+    let body = UnboundedReceiverStream::new(lines).map(|event| {
+        // An event that cannot be encoded ends the stream with an error, so the
+        // client sees a truncated response rather than a silent gap.
+        let mut line = serde_json::to_vec(&event).map_err(std::io::Error::other)?;
+        line.push(b'\n');
+        Ok::<Bytes, std::io::Error>(Bytes::from(line))
+    });
+    let mut response = Response::new(Body::from_stream(body));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/x-ndjson"),
+    );
+    Ok(response)
+}
+
+/// Runs `request` in the background and returns the stream of its events. The stream
+/// ends with an `Exit` or an `Error`. The command keeps `gate` until it ends, so no
+/// other command or checkpoint runs on the session meanwhile.
+fn start_exec(
+    state: AppState,
+    owner: KeyId,
+    own: Owned,
+    request: ExecRequest,
+    gate: tokio::sync::OwnedMutexGuard<()>,
+) -> UnboundedReceiver<ExecEvent> {
     let (events, lines) = tokio::sync::mpsc::unbounded_channel::<ExecEvent>();
     let output = events.clone();
     let observer: OutputObserver = Arc::new(move |chunk: OutputChunk| {
@@ -1177,69 +1203,85 @@ async fn exec_streaming(
         };
         let _ = events.send(last);
     });
-    let body = UnboundedReceiverStream::new(lines).map(|event| {
-        // An event that cannot be encoded ends the stream with an error, so the
-        // client sees a truncated response rather than a silent gap.
-        let mut line = serde_json::to_vec(&event).map_err(std::io::Error::other)?;
-        line.push(b'\n');
-        Ok::<Bytes, std::io::Error>(Bytes::from(line))
-    });
-    let mut response = Response::new(Body::from_stream(body));
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/x-ndjson"),
-    );
-    Ok(response)
+    lines
 }
 
-/// Runs a command and streams its output over WebSocket. Each message is a
-/// JSON-encoded `ExecEvent`. The connection is closed after the final
-/// `Exit` or `Error` event.
+/// Runs commands over a WebSocket at `/v1/sessions/{id}/ws`. The client's first
+/// message is the JSON `ExecRequest`. The server then sends each `ExecEvent` as a
+/// text message, and closes the connection after the final `Exit` or `Error`.
+/// Later client messages are not read (ADR 0030).
 async fn exec_websocket(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     Extension(owner): Extension<KeyId>,
     Path(id): Path<String>,
-    Query(_query): Query<ExecQuery>,
-    Json(request): Json<ExecRequest>,
 ) -> Result<Response, ApiError> {
-    if request.argv.is_empty() {
-        return Err(SandboxError::invalid_argument("argv is empty").into());
-    }
     let own = owned(&state, &owner, &id).await?;
+    Ok(ws.on_upgrade(move |socket: WebSocket| serve_exec_socket(socket, state, owner, own)))
+}
+
+async fn serve_exec_socket(mut socket: WebSocket, state: AppState, owner: KeyId, own: Owned) {
+    run_exec_socket(&mut socket, state, owner, own).await;
+    // A close frame tells the client that the stream is complete, not dropped.
+    let _ = socket.send(Message::Close(None)).await;
+}
+
+async fn run_exec_socket(socket: &mut WebSocket, state: AppState, owner: KeyId, own: Owned) {
+    let request = match read_exec_request(socket).await {
+        Ok(request) => request,
+        Err(error) => {
+            send_event(
+                socket,
+                &ExecEvent::Error {
+                    code: error.code,
+                    message: error.message,
+                },
+            )
+            .await;
+            return;
+        }
+    };
+    if request.argv.is_empty() {
+        send_event(
+            socket,
+            &ExecEvent::Error {
+                code: ErrorCode::InvalidArgument,
+                message: "argv is empty".to_string(),
+            },
+        )
+        .await;
+        return;
+    }
     let gate = own.gate.clone().lock_owned().await;
-    let (events, mut lines) = tokio::sync::mpsc::unbounded_channel::<ExecEvent>();
-    let output = events.clone();
-    let observer: OutputObserver = Arc::new(move |chunk: OutputChunk| {
-        let _ = output.send(output_event(chunk));
-    });
-    tokio::spawn(async move {
-        let _gate = gate;
-        let last = match run_exec(&state, &owner, &own, request, Some(observer)).await {
-            Ok((result, _)) => ExecEvent::Exit {
-                exit_code: result.exit_code,
-                cpu_ms: result.cpu_ms,
-                wall_ms: result.wall_ms,
-            },
-            Err(ApiError(error)) => ExecEvent::Error {
-                code: error.code,
-                message: error.message,
-            },
-        };
-        let _ = events.send(last);
-    });
-    Ok(ws.on_upgrade(move |mut socket: WebSocket| async move {
-        forward_events(&mut socket, &mut lines).await;
-    }))
+    let mut lines = start_exec(state, owner, own, request, gate);
+    forward_events(socket, &mut lines).await;
+}
+
+/// Reads the exec request that must be the connection's first message.
+async fn read_exec_request(socket: &mut WebSocket) -> Result<ExecRequest, SandboxError> {
+    match socket.recv().await {
+        Some(Ok(Message::Text(text))) => serde_json::from_str(&text).map_err(|e| {
+            SandboxError::invalid_argument(format!("the first message is not an exec request: {e}"))
+        }),
+        _ => Err(SandboxError::invalid_argument(
+            "the first message must be a JSON exec request",
+        )),
+    }
+}
+
+/// Sends one event as a text message. False when the event cannot be sent or the
+/// client has gone away.
+async fn send_event(socket: &mut WebSocket, event: &ExecEvent) -> bool {
+    let Ok(json) = serde_json::to_string(event) else {
+        return false;
+    };
+    socket.send(Message::Text(json)).await.is_ok()
 }
 
 /// Sends each event as a text message until the command ends or the client leaves.
 async fn forward_events(socket: &mut WebSocket, lines: &mut UnboundedReceiver<ExecEvent>) {
     while let Some(event) = lines.recv().await {
-        let Ok(json) = serde_json::to_string(&event) else {
-            return;
-        };
-        if socket.send(Message::Text(json)).await.is_err() {
+        if !send_event(socket, &event).await {
             return;
         }
     }

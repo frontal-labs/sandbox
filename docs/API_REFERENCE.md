@@ -56,9 +56,15 @@ Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 
 These appear in plans/PLAN.md section 4.15 but have no route in `api.rs`:
 
-- `GET /v1/sessions/{id}/ws`: interactive WebSocket
 - `GET /v1/sessions/{id}/fs?list=...`: directory listing
-- `GET /v1/sessions/{id}/trace`: trace event stream
+
+Routed now, beyond the REST table in the spec:
+
+- `GET /v1/sessions/{id}/ws`: exec over WebSocket. The first client message is the
+  JSON exec request. The server sends each event as a text message, then a close
+  frame after `exit` or `error`. Stdin beyond the request's `stdin` field and
+  signals are not part of this protocol yet (ADR 0030).
+- `GET /v1/sessions/{id}/trace`: the session's trace as JSON Lines.
 - Served now: `GET /v1/openapi.json` returns the generated spec (no auth). The
   committed copies are in `openapi/v1/`, and `openapi/README.md` covers
   regeneration and the drift check.

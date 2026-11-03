@@ -31,7 +31,9 @@ blake3 = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+futures = { workspace = true }
 sandbox-runtime = { path = "../sandbox-runtime" }
+tokio-tungstenite = "0.24"
 tower = { workspace = true, features = ["util"] }
 
 [features]

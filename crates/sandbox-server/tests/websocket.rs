@@ -1,0 +1,182 @@
+//! The WebSocket exec route at `/v1/sessions/{id}/ws`, served over a real TCP socket.
+//! The first client message is the exec request. The server then sends each event as
+//! a text message and closes after the final `Exit` or `Error` (ADR 0030).
+
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use futures::{SinkExt, StreamExt};
+use sandbox_scheduler::Scheduler;
+use sandbox_server::auth::AuthManager;
+use sandbox_server::create_router;
+use sandbox_types::{SessionConfig, TenantId, TierPreference};
+use serde_json::{json, Value};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::Message;
+use tower::ServiceExt;
+
+/// Serves the router on an ephemeral port, and returns its address.
+async fn serve(app: axum::Router) -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    addr
+}
+
+async fn create_session(app: &axum::Router, key: &str) -> String {
+    let config = serde_json::to_vec(
+        &serde_json::to_value(SessionConfig {
+            tenant_id: TenantId::nil(),
+            tier_preference: TierPreference::Isolate,
+            ..SessionConfig::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions")
+                .header(header::AUTHORIZATION, format!("Bearer {key}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(config))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: Value = serde_json::from_slice(&bytes).unwrap();
+    value["session_id"].as_str().unwrap().to_string()
+}
+
+/// Opens the socket for `session` with `key` as the bearer token.
+async fn connect(
+    addr: SocketAddr,
+    session: &str,
+    key: &str,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    tokio_tungstenite::tungstenite::Error,
+> {
+    let url = format!("ws://{addr}/v1/sessions/{session}/ws");
+    let mut request = url.into_client_request().unwrap();
+    request.headers_mut().insert(
+        header::AUTHORIZATION,
+        format!("Bearer {key}").parse().unwrap(),
+    );
+    tokio_tungstenite::connect_async(request)
+        .await
+        .map(|(socket, _)| socket)
+}
+
+/// Reads every event until the server closes the connection.
+async fn events_until_close(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> Vec<Value> {
+    let mut events = Vec::new();
+    while let Some(message) = socket.next().await {
+        match message.unwrap() {
+            Message::Text(text) => events.push(serde_json::from_str(&text).unwrap()),
+            Message::Close(_) => break,
+            other => panic!("unexpected frame: {other:?}"),
+        }
+    }
+    events
+}
+
+#[tokio::test]
+async fn a_command_streams_its_output_then_exits() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await.unwrap();
+    let request =
+        json!({"argv": ["sh", "-c", "echo hi; echo oops >&2"], "env": {}, "stream": true});
+    socket
+        .send(Message::Text(request.to_string()))
+        .await
+        .unwrap();
+    let events = events_until_close(&mut socket).await;
+
+    let kinds: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+    assert_eq!(kinds.last(), Some(&"exit"), "{events:?}");
+    let exit = events.last().unwrap();
+    assert_eq!(exit["exit_code"], 0);
+    let stdout: Vec<u8> = events
+        .iter()
+        .filter(|e| e["type"] == "output" && e["stream"] == "stdout")
+        .flat_map(|e| {
+            e["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| b.as_u64().unwrap() as u8)
+        })
+        .collect();
+    assert_eq!(stdout, b"hi\n");
+}
+
+#[tokio::test]
+async fn a_first_message_that_is_not_a_request_is_an_error() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await.unwrap();
+    socket
+        .send(Message::Text("not json".to_string()))
+        .await
+        .unwrap();
+    let events = events_until_close(&mut socket).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["type"], "error");
+    assert_eq!(events[0]["code"], "INVALID_ARGUMENT");
+}
+
+#[tokio::test]
+async fn an_empty_argv_is_an_error_and_runs_nothing() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await.unwrap();
+    socket
+        .send(Message::Text(
+            json!({"argv": [], "env": {}, "stream": true}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let events = events_until_close(&mut socket).await;
+    assert_eq!(events[0]["code"], "INVALID_ARGUMENT");
+}
+
+#[tokio::test]
+async fn the_upgrade_is_refused_without_a_valid_key_or_session() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let wrong_key = connect(addr, &session, "sbx_not_a_key").await;
+    assert!(wrong_key.is_err(), "a bad key must not upgrade");
+    let missing = connect(addr, "01ARZ3NDEKTSV4RRFFQ69G5FAV", &key).await;
+    assert!(missing.is_err(), "an unknown session must not upgrade");
+}
