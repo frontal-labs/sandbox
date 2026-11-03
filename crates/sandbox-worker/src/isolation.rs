@@ -211,6 +211,7 @@ fn denied_syscalls() -> Vec<i64> {
 /// file I/O, and memory management.
 /// See the Linux syscall table for the architecture-specific numbers.
 #[cfg(target_os = "linux")]
+#[expect(dead_code)]
 fn allowed_syscalls() -> Vec<i64> {
     let mut allowed = vec![
         // Process management
@@ -320,6 +321,7 @@ fn allowed_syscalls() -> Vec<i64> {
 
 /// Installs an allowlist-based seccomp filter (more secure than denylist).
 #[cfg(target_os = "linux")]
+#[expect(dead_code)]
 fn install_seccomp_allowlist() -> Result<(), SandboxError> {
     use std::convert::TryInto;
 

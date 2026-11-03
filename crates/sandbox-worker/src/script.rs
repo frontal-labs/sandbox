@@ -107,7 +107,7 @@ async fn run_contained(
     code: &str,
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
-    vfs: Option<Arc<Vfs>>,
+    _vfs: Option<Arc<Vfs>>,
 ) -> Result<ScriptOutcome, SandboxError> {
     use crate::isolation::{CgroupGuard, CgroupLimits};
     use std::process::Stdio;
