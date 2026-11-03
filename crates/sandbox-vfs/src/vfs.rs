@@ -94,6 +94,14 @@ fn kind_of_stored(stored: &Stored) -> Kind {
     }
 }
 
+/// The outcome of one pass over a path's components.
+enum Walk {
+    /// The path resolved, and every component is in place.
+    Resolved(String),
+    /// A symlink changed the path, so the walk restarts from this one.
+    Restart(String),
+}
+
 impl Vfs {
     pub fn new(root: ContentHash, store: Arc<dyn BlobStore>) -> Self {
         Self {
@@ -198,7 +206,7 @@ impl Vfs {
         let mut parts = Vec::new();
         for part in s.split('/') {
             match part {
-                "" | "." => continue,
+                "" | "." => {}
                 ".." => return Err(VfsError::InvalidPath(format!("'..' is not allowed: {s}"))),
                 other => parts.push(other),
             }
@@ -224,47 +232,60 @@ impl Vfs {
     async fn resolve_path(&self, path: &Path, follow_final: bool) -> VfsResult<String> {
         let mut current = self.normalize_path(path)?;
         let mut hops = 0usize;
-
-        'restart: loop {
-            let components: Vec<&str> = components(&current).collect();
-            let mut resolved = String::from("/");
-
-            for (i, name) in components.iter().enumerate() {
-                let candidate = join(&resolved, name);
-                let is_final = i + 1 == components.len();
-                if is_final && !follow_final {
-                    return Ok(candidate);
-                }
-
-                match self.kind(&candidate).await? {
-                    Some(Kind::Symlink(target)) => {
-                        hops += 1;
-                        if hops > MAX_SYMLINK_HOPS {
-                            return Err(VfsError::InvalidPath(format!(
-                                "too many levels of symbolic links: {current}"
-                            )));
-                        }
-                        // Relative targets resolve against the link's parent.
-                        let base = if target.starts_with('/') {
-                            target
-                        } else {
-                            format!("{resolved}/{target}")
-                        };
-                        let rest: String = components[i + 1..]
-                            .iter()
-                            .map(|c| format!("/{c}"))
-                            .collect();
-                        current = self.normalize_path(Path::new(&format!("{base}{rest}")))?;
-                        continue 'restart;
-                    }
-                    // Missing or non-link: keep walking. A missing component
-                    // makes the caller's own lookup fail with NotFound.
-                    _ => resolved = candidate,
-                }
+        loop {
+            match self
+                .walk_components(&current, follow_final, &mut hops)
+                .await?
+            {
+                Walk::Resolved(resolved) => return Ok(resolved),
+                Walk::Restart(next) => current = next,
             }
-
-            return Ok(resolved);
         }
+    }
+
+    /// One pass over the components of `current`, following the symlinks in them.
+    /// A symlink ends the pass with the path the walk must restart from.
+    async fn walk_components(
+        &self,
+        current: &str,
+        follow_final: bool,
+        hops: &mut usize,
+    ) -> VfsResult<Walk> {
+        let components: Vec<&str> = components(current).collect();
+        let mut resolved = String::from("/");
+        for (i, name) in components.iter().enumerate() {
+            let candidate = join(&resolved, name);
+            let is_final = i + 1 == components.len();
+            if is_final && !follow_final {
+                return Ok(Walk::Resolved(candidate));
+            }
+            match self.kind(&candidate).await? {
+                Some(Kind::Symlink(target)) => {
+                    *hops += 1;
+                    if *hops > MAX_SYMLINK_HOPS {
+                        return Err(VfsError::InvalidPath(format!(
+                            "too many levels of symbolic links: {current}"
+                        )));
+                    }
+                    // Relative targets resolve against the link's parent.
+                    let base = if target.starts_with('/') {
+                        target
+                    } else {
+                        format!("{resolved}/{target}")
+                    };
+                    let rest: String = components[i + 1..]
+                        .iter()
+                        .map(|c| format!("/{c}"))
+                        .collect();
+                    let next = self.normalize_path(Path::new(&format!("{base}{rest}")))?;
+                    return Ok(Walk::Restart(next));
+                }
+                // Missing or non-link: keep walking. A missing component
+                // makes the caller's own lookup fail with NotFound.
+                _ => resolved = candidate,
+            }
+        }
+        Ok(Walk::Resolved(resolved))
     }
 
     fn overlay_node(&self, path: &str) -> Option<Node> {
@@ -387,10 +408,12 @@ impl Vfs {
         let mut out = BTreeSet::new();
         {
             let overlay = self.overlay.read();
-            for key in overlay.nodes.range(prefix.clone()..).map(|(k, _)| k) {
-                if !key.starts_with(&prefix) {
-                    break;
-                }
+            for key in overlay
+                .nodes
+                .range(prefix.clone()..)
+                .map(|(k, _)| k)
+                .take_while(|key| key.starts_with(&prefix))
+            {
                 out.insert(key.clone());
             }
         }
@@ -401,11 +424,10 @@ impl Vfs {
         while let Some(dir) = stack.pop() {
             for name in self.committed_entries(&dir).await?.keys() {
                 let child = join(&dir, name);
-                if self.is_whiteout(&child) {
-                    continue;
+                if !self.is_whiteout(&child) {
+                    out.insert(child.clone());
+                    stack.push(child);
                 }
-                out.insert(child.clone());
-                stack.push(child);
             }
         }
         Ok(out)
@@ -753,10 +775,11 @@ impl SessionFs for Vfs {
         // direct children are always explicit entries.
         {
             let overlay = self.overlay.read();
-            for (key, node) in overlay.nodes.range(prefix.clone()..) {
-                if !key.starts_with(&prefix) {
-                    break;
-                }
+            for (key, node) in overlay
+                .nodes
+                .range(prefix.clone()..)
+                .take_while(|(key, _)| key.starts_with(&prefix))
+            {
                 if let Some(name) = direct_child(key, &prefix) {
                     children.insert(name.to_string(), kind_of_node(node));
                 }
@@ -766,13 +789,12 @@ impl SessionFs for Vfs {
         // Committed children that the overlay has not shadowed.
         for (name, hash) in self.committed_entries(&path).await? {
             let child = join(&path, &name);
-            if self.is_shadowed(&child) {
-                continue;
+            if !self.is_shadowed(&child) {
+                let stored = self.load_stored(&hash).await?;
+                children
+                    .entry(name)
+                    .or_insert_with(|| kind_of_stored(&stored));
             }
-            let stored = self.load_stored(&hash).await?;
-            children
-                .entry(name)
-                .or_insert_with(|| kind_of_stored(&stored));
         }
 
         Ok(children
@@ -1029,15 +1051,18 @@ impl Vfs {
             let stored = match node {
                 Node::File(data) => {
                     let content = self.store.put(data, PutOptions::default()).await?;
-                    Stored::File {
+                    Some(Stored::File {
                         content,
                         size: data.len() as u64,
-                    }
+                    })
                 }
-                Node::Symlink(target) => Stored::Symlink(target.clone()),
-                Node::Directory => continue,
+                Node::Symlink(target) => Some(Stored::Symlink(target.clone())),
+                // Directories are rebuilt from their children, so they have no leaf.
+                Node::Directory => None,
             };
-            leaf.insert(path.clone(), self.put_node(&stored).await?);
+            if let Some(stored) = stored {
+                leaf.insert(path.clone(), self.put_node(&stored).await?);
+            }
         }
 
         // Directories deepest first, so each child's hash is known before its parent.
@@ -1050,38 +1075,40 @@ impl Vfs {
             let overlay_dir = matches!(overlay_nodes.get(dir), Some(Node::Directory));
             if replaced_or_removed && !overlay_dir {
                 dir_hash.insert(dir.clone(), None);
-                continue;
-            }
-
-            // A deleted-then-recreated directory hides its committed children.
-            let mut entries = if replaced_or_removed {
-                BTreeMap::new()
             } else {
-                self.committed_entries(dir).await?
-            };
-
-            for name in changed_children.get(dir).into_iter().flatten() {
-                let child = join(dir, name);
-                let new_hash = if let Some(Node::Directory) = overlay_nodes.get(&child) {
-                    dir_hash.get(&child).copied().flatten()
-                } else if overlay_nodes.contains_key(&child) {
-                    leaf.get(&child).copied()
-                } else if dirty.contains(&child) {
-                    dir_hash.get(&child).copied().flatten()
-                } else if whiteouts.contains(&child) {
-                    None
+                // A deleted-then-recreated directory hides its committed children.
+                let mut entries = if replaced_or_removed {
+                    BTreeMap::new()
                 } else {
-                    // Untouched committed child: keep its entry.
-                    continue;
+                    self.committed_entries(dir).await?
                 };
-                match new_hash {
-                    Some(hash) => entries.insert(name.clone(), hash),
-                    None => entries.remove(name),
-                };
-            }
 
-            let hash = self.put_node(&Stored::Directory { entries }).await?;
-            dir_hash.insert(dir.clone(), Some(hash));
+                for name in changed_children.get(dir).into_iter().flatten() {
+                    let child = join(dir, name);
+                    // `Some(None)` removes the entry. `None` keeps an untouched committed child.
+                    let change: Option<Option<ContentHash>> =
+                        if let Some(Node::Directory) = overlay_nodes.get(&child) {
+                            Some(dir_hash.get(&child).copied().flatten())
+                        } else if overlay_nodes.contains_key(&child) {
+                            Some(leaf.get(&child).copied())
+                        } else if dirty.contains(&child) {
+                            Some(dir_hash.get(&child).copied().flatten())
+                        } else if whiteouts.contains(&child) {
+                            Some(None)
+                        } else {
+                            None
+                        };
+                    if let Some(new_hash) = change {
+                        match new_hash {
+                            Some(hash) => entries.insert(name.clone(), hash),
+                            None => entries.remove(name),
+                        };
+                    }
+                }
+
+                let hash = self.put_node(&Stored::Directory { entries }).await?;
+                dir_hash.insert(dir.clone(), Some(hash));
+            }
         }
 
         let root = dir_hash

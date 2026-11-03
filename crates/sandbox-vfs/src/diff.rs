@@ -53,18 +53,17 @@ pub async fn diff_trees(
     }];
 
     while let Some(pending) = stack.pop() {
-        if pending.before == pending.after {
-            continue;
+        if pending.before != pending.after {
+            let before = match pending.before {
+                Some(hash) => Some(load(store, hash).await?),
+                None => None,
+            };
+            let after = match pending.after {
+                Some(hash) => Some(load(store, hash).await?),
+                None => None,
+            };
+            compare(&pending, before, after, &mut changes, &mut stack);
         }
-        let before = match pending.before {
-            Some(hash) => Some(load(store, hash).await?),
-            None => None,
-        };
-        let after = match pending.after {
-            Some(hash) => Some(load(store, hash).await?),
-            None => None,
-        };
-        compare(&pending, before, after, &mut changes, &mut stack);
     }
 
     // The stack visits siblings in reverse. Sorting makes the order depend on
@@ -211,15 +210,14 @@ pub async fn reachable_blobs(
     let mut live = HashSet::new();
     let mut pending: Vec<ContentHash> = roots.to_vec();
     while let Some(hash) = pending.pop() {
-        if hash == ContentHash::nil() || !live.insert(hash) {
-            continue;
-        }
-        match load(store, hash).await? {
-            Stored::Directory { entries } => pending.extend(entries.values().copied()),
-            Stored::File { content, .. } => {
-                live.insert(content);
+        if hash != ContentHash::nil() && live.insert(hash) {
+            match load(store, hash).await? {
+                Stored::Directory { entries } => pending.extend(entries.values().copied()),
+                Stored::File { content, .. } => {
+                    live.insert(content);
+                }
+                Stored::Symlink(_) => {}
             }
-            Stored::Symlink(_) => {}
         }
     }
     Ok(live)
