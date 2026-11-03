@@ -126,7 +126,7 @@ Last reviewed against the source tree on 2026-10-19.
 - [ ] **Partial.** `sandbox-guest`: agent and protocol scaffolding
 - [ ] Base + browser rootfs images
 - [ ] `export_ext4` for promotion
-- [ ] `sandbox-promote`: stub. Needs a Linux host with KVM (see plans/PLAN.md M4).
+- [ ] `sandbox-promote`: stub. Needs a Linux host with KVM (see M4).
 - [ ] VM warm pool, Firecracker snapshots
 
 ### Acceptance Criteria
