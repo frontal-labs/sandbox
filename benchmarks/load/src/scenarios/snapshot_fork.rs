@@ -30,22 +30,18 @@ impl SnapshotForkScenario {
             let start = Instant::now();
             let root = session.snapshot().await?;
             let mut outcome: Result<(), String> = Ok(());
-            for _ in 0..FORKS {
+            let mut restored = 0;
+            while restored < FORKS && outcome.is_ok() {
+                restored += 1;
                 let fork = sandbox_session::restore(root).await?;
-                match read_file(fork.fs(), SEED_PATH).await {
-                    Ok(bytes) if bytes == SEED => {}
-                    Ok(bytes) => {
-                        outcome = Err(format!(
-                            "fork read {} bytes, expected the seed",
-                            bytes.len()
-                        ));
-                        break;
-                    }
-                    Err(e) => {
-                        outcome = Err(e.to_string());
-                        break;
-                    }
-                }
+                outcome = match read_file(fork.fs(), SEED_PATH).await {
+                    Ok(bytes) if bytes == SEED => Ok(()),
+                    Ok(bytes) => Err(format!(
+                        "fork read {} bytes, expected the seed",
+                        bytes.len()
+                    )),
+                    Err(e) => Err(e.to_string()),
+                };
             }
             let duration: Duration = start.elapsed();
             let (success, error) = match outcome {
