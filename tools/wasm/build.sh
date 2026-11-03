@@ -12,7 +12,7 @@ FIXTURES="$ROOT/../../crates/sandbox-wasm/fixtures"
 cd "$ROOT"
 # One package per build: building them together unifies their features, which changes
 # the bytes of each module and so its pinned hash.
-for tool in jq rg; do
+for tool in jq rg git; do
   cargo build --release --target wasm32-wasip1 -p "${tool}_tool"
   src="$ROOT/target/wasm32-wasip1/release/${tool}_tool.wasm"
   dst="$FIXTURES/${tool}_tool.wasm"

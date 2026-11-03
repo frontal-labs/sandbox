@@ -2,7 +2,7 @@
 # for wasm32-wasip1 with `build.sh`, which pins the hash the tool registry checks.
 [workspace]
 resolver = "2"
-members = ["jq", "rg"]
+members = ["jq", "rg", "git"]
 
 [profile.release]
 opt-level = "s"

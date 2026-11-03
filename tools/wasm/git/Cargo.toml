@@ -1,0 +1,15 @@
+[package]
+name = "git_tool"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "A git subset for the WASI tool registry: loose objects, the index, and the porcelain used by agents"
+publish = false
+
+[dependencies]
+flate2 = "1"
+sha1 = "0.10"
+
+[[bin]]
+name = "git_tool"
+path = "src/main.rs"

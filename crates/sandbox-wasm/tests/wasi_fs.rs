@@ -307,10 +307,10 @@ async fn git_tool_basic_commands() {
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
     assert!(text(&out.stdout).contains("On branch main"));
 
-    // Test log
+    // A repository with no commits has no log. Real git refuses, and so does this tool.
     let out = git_tool(&vfs, "/work", &["log", "--oneline"], b"").await;
-    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
-    assert!(text(&out.stdout).contains("Initial commit"));
+    assert_eq!(out.exit_code, 128, "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("does not have any commits yet"));
 }
 
 #[tokio::test]
@@ -328,17 +328,21 @@ async fn git_tool_commit_flow() {
     let out = git_tool(&vfs, "/work", &["add", "hello.txt"], b"").await;
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
 
-    // Commit
-    let out = git_tool(&vfs, "/work", &["commit", "-m", "Add hello"], b"").await;
+    // Commit. The guest has no environment, so the identity comes from -c, as git accepts.
+    let out = git_tool(
+        &vfs,
+        "/work",
+        &["-c", "user.name=Tester", "-c", "user.email=t@example.com", "commit", "-m", "Add hello"],
+        b"",
+    )
+    .await;
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
-    assert!(text(&out.stdout).contains("Created commit"));
+    assert!(text(&out.stdout).contains("[main (root-commit) "), "{}", text(&out.stdout));
 
     // Log
     let out = git_tool(&vfs, "/work", &["log"], b"").await;
-    eprintln!("git_tool log stdout: {}", text(&out.stdout));
-    eprintln!("git_tool log stderr: {}", text(&out.stderr));
     assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
-    assert!(text(&out.stdout).contains("Initial commit"));
+    assert!(text(&out.stdout).contains("    Add hello"), "{}", text(&out.stdout));
 }
 
 #[tokio::test]
@@ -348,5 +352,5 @@ async fn git_tool_unknown_command() {
 
     let out = git_tool(&vfs, "/work", &["unknown"], b"").await;
     assert_eq!(out.exit_code, 1, "{}", text(&out.stderr));
-    assert!(text(&out.stderr).contains("unknown command"));
+    assert!(text(&out.stderr).contains("is not a git command"));
 }
