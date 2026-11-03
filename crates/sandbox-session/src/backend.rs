@@ -8,6 +8,7 @@ use sandbox_types::{
     ErrorCode, ExecRequest, ExecResult, SandboxError, SessionConfig, SessionId, Tier,
 };
 use sandbox_vfs::Vfs;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -176,7 +177,9 @@ impl IsolateBackend {
         }
 
         let started = Instant::now();
-        let mut shell = self.shell.lock().await;
+        let mut shell = DetachOnDrop {
+            shell: self.shell.lock().await,
+        };
         for (key, value) in req.env {
             shell.set_env(key, value);
         }
@@ -190,12 +193,36 @@ impl IsolateBackend {
         // command budget, so dropping the command at its next await is safe.
         // Its partial writes stay in the filesystem, as they would after a kill.
         let out = tokio::time::timeout(limit, run).await;
-        // A command cut short by the timeout never clears its observer. Clearing it
-        // here releases the observer's channel, so a stream can end.
-        shell.detach_observer();
         let out =
             out.map_err(|_| SandboxError::timeout(format!("command exceeded {reason}")))??;
         Ok(to_result(out, started))
+    }
+}
+
+/// The shell lock, held for one command. It drops the command's output observer when it
+/// goes, so a run that ends early, by timeout or by cancellation, cannot leave the
+/// observer's channel open. Without this, a stream waiting for its end would never close.
+struct DetachOnDrop<'a> {
+    shell: tokio::sync::MutexGuard<'a, Shell>,
+}
+
+impl Deref for DetachOnDrop<'_> {
+    type Target = Shell;
+
+    fn deref(&self) -> &Shell {
+        &self.shell
+    }
+}
+
+impl DerefMut for DetachOnDrop<'_> {
+    fn deref_mut(&mut self) -> &mut Shell {
+        &mut self.shell
+    }
+}
+
+impl Drop for DetachOnDrop<'_> {
+    fn drop(&mut self) {
+        self.shell.detach_observer();
     }
 }
 
