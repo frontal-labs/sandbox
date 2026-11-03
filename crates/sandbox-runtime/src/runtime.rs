@@ -339,15 +339,15 @@ struct HeapGuard {
 ///
 /// # Safety
 ///
-/// `data` must point to a live `HeapGuard`. `run_isolate` guarantees this:
-/// it drops the isolate before freeing the guard.
+/// `data` must point to a live `HeapGuard`. `Built` guarantees this: its runtime
+/// is declared before its guard, so the isolate is gone before the guard is freed.
 unsafe extern "C" fn on_near_heap_limit(
     data: *mut std::ffi::c_void,
     current: usize,
     _initial: usize,
 ) -> usize {
-    // SAFETY: see the function's safety contract; `data` is the pointer
-    // created from `Box::into_raw` in `run_isolate`.
+    // SAFETY: see the function's safety contract; `data` points into the `Box`
+    // owned by the `Built` that installed this callback.
     let guard = unsafe { &*(data as *const HeapGuard) };
     guard.hit.store(true, std::sync::atomic::Ordering::SeqCst);
     guard.handle.terminate_execution();
@@ -377,20 +377,13 @@ fn run_isolate(
 
 /// An isolate with its bootstrap done and its heap guard installed, ready for one script.
 /// It lives on the thread that built it, because V8 isolates are not `Send`.
+///
+/// Fields drop in declaration order, so the isolate goes before the guard that its
+/// near-heap-limit callback reads through a raw pointer.
 struct Built {
-    /// Taken when the isolate is dropped, so the guard can outlive it.
-    runtime: Option<JsRuntime>,
-    guard: *mut HeapGuard,
-}
-
-impl Drop for Built {
-    fn drop(&mut self) {
-        // The isolate goes first. Once it is gone, no callback can use the guard.
-        drop(self.runtime.take());
-        // SAFETY: the isolate is gone, so nothing refers to the guard. It came from
-        // `Box::into_raw` in `build`, and this is its only reclaim.
-        drop(unsafe { Box::from_raw(self.guard) });
-    }
+    runtime: JsRuntime,
+    /// A `Box` keeps the guard at a fixed address when `Built` moves.
+    guard: Box<HeapGuard>,
 }
 
 /// Builds an isolate with the heap limit of `limits`, the heap guard, and the bootstrap.
@@ -403,26 +396,25 @@ fn build(limits: ScriptLimits, vfs: Option<Arc<Vfs>>) -> Result<Built, String> {
         ..RuntimeOptions::default()
     });
 
-    let guard = Box::into_raw(Box::new(HeapGuard {
+    let guard = Box::new(HeapGuard {
         handle: runtime.v8_isolate().thread_safe_handle(),
         hit: std::sync::atomic::AtomicBool::new(false),
         grants: std::sync::atomic::AtomicUsize::new(0),
-    }));
-    // SAFETY: `guard` is a valid pointer to a live HeapGuard. `Built::drop` frees it
-    // only after the isolate is gone.
+    });
+    let guard_ptr = std::ptr::from_ref::<HeapGuard>(&guard)
+        .cast_mut()
+        .cast::<std::ffi::c_void>();
     runtime
         .v8_isolate()
-        .add_near_heap_limit_callback(on_near_heap_limit, guard as *mut std::ffi::c_void);
-    let mut built = Built {
-        runtime: Some(runtime),
-        guard,
-    };
-    let runtime = built.runtime.as_mut().expect("set just above");
+        .add_near_heap_limit_callback(on_near_heap_limit, guard_ptr);
+    let mut built = Built { runtime, guard };
     if let Some(vfs) = vfs {
-        runtime.op_state().borrow_mut().put(vfs);
+        built.runtime.op_state().borrow_mut().put(vfs);
     }
-    if let Err(e) = runtime.execute_script("[sandbox:bootstrap]", BOOTSTRAP) {
-        // Dropping `built` frees the isolate, then the guard.
+    if let Err(e) = built
+        .runtime
+        .execute_script("[sandbox:bootstrap]", BOOTSTRAP)
+    {
         return Err(format!("bootstrap failed: {e}"));
     }
     Ok(built)
@@ -436,11 +428,7 @@ fn run_built(
     observer: Option<StreamObserver>,
     vfs: Option<Arc<Vfs>>,
 ) -> ScriptOutcome {
-    let guard = built.guard;
-    let runtime = built
-        .runtime
-        .as_mut()
-        .expect("a built isolate holds its runtime until it is dropped");
+    let runtime = &mut built.runtime;
     runtime.op_state().borrow_mut().put(ScriptOutput {
         limit: limits.max_output_bytes,
         observer,
@@ -469,10 +457,7 @@ fn run_built(
     let _ = watchdog.join();
 
     let output = runtime.op_state().borrow_mut().take::<ScriptOutput>();
-    let heap_hit = {
-        // SAFETY: the guard is alive until `built` is dropped below.
-        unsafe { (*guard).hit.load(std::sync::atomic::Ordering::SeqCst) }
-    };
+    let heap_hit = built.guard.hit.load(std::sync::atomic::Ordering::SeqCst);
     drop(built);
     let (stdout, truncated) = (output.stdout, output.truncated);
 
