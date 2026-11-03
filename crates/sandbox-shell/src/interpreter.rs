@@ -435,10 +435,9 @@ impl Shell {
         Box::pin(async move {
             let mut result = ExecutionResult::default();
             let mut previous = Connector::Seq;
-            for item in &script.items {
-                if self.flow.is_some() {
-                    break;
-                }
+            let mut items = script.items.iter();
+            // Once a flow such as `break` is pending, the rest of the script does not run.
+            while let Some(item) = items.next().filter(|_| self.flow.is_none()) {
                 let should_run = match previous {
                     Connector::Seq => true,
                     Connector::And => self.status == 0,
@@ -565,16 +564,22 @@ impl Shell {
 
     async fn run_if(&mut self, clause: &IfClause) -> ExecutionResult {
         let mut out = ExecutionResult::default();
-        for (condition, body) in &clause.branches {
+        // The first branch whose condition succeeds is chosen. A pending flow ends the search.
+        let mut chosen = None;
+        let mut branches = clause.branches.iter();
+        while let Some((condition, body)) = branches
+            .next()
+            .filter(|_| self.flow.is_none() && chosen.is_none())
+        {
             merge(&mut out, self.run_script(condition).await);
-            if self.flow.is_some() {
-                break;
+            if self.flow.is_none() && self.status == 0 {
+                chosen = Some(body);
             }
-            if self.status == 0 {
-                merge(&mut out, self.run_script(body).await);
-                out.exit_code = self.status;
-                return out;
-            }
+        }
+        if let Some(body) = chosen {
+            merge(&mut out, self.run_script(body).await);
+            out.exit_code = self.status;
+            return out;
         }
         match &clause.otherwise {
             Some(body) if self.flow.is_none() => merge(&mut out, self.run_script(body).await),
@@ -588,24 +593,26 @@ impl Shell {
     async fn run_while(&mut self, clause: &WhileClause) -> ExecutionResult {
         let mut out = ExecutionResult::default();
         let mut status = 0;
-        loop {
-            merge(&mut out, self.run_script(&clause.condition).await);
-            if self.flow.is_some() {
-                break;
-            }
-            let succeeded = self.status == 0;
-            if succeeded == clause.until {
-                break;
-            }
+        let mut stopped = false;
+        while !stopped && self.while_condition_holds(clause, &mut out).await {
             let body = self.run_script(&clause.body).await;
             status = body.exit_code;
             merge(&mut out, body);
-            if self.loop_should_stop() {
-                break;
-            }
+            stopped = self.loop_should_stop();
         }
         out.exit_code = status;
         out
+    }
+
+    /// Runs the condition of a `while` or `until` loop and says whether its body runs
+    /// next. A pending flow, or a status that `until` does not allow, ends the loop.
+    async fn while_condition_holds(
+        &mut self,
+        clause: &WhileClause,
+        out: &mut ExecutionResult,
+    ) -> bool {
+        merge(out, self.run_script(&clause.condition).await);
+        self.flow.is_none() && (self.status == 0) != clause.until
     }
 
     async fn run_for(&mut self, clause: &ForClause) -> ExecutionResult {
@@ -619,14 +626,14 @@ impl Shell {
         // A loop with no iterations has status 0. Otherwise the status is that of
         // its last body command.
         let mut status = 0;
-        for value in values {
+        let mut stopped = false;
+        let mut values = values.into_iter();
+        while let Some(value) = values.next().filter(|_| !stopped) {
             self.env.insert(clause.variable.clone(), value);
             let body = self.run_script(&clause.body).await;
             status = body.exit_code;
             merge(&mut out, body);
-            if self.loop_should_stop() {
-                break;
-            }
+            stopped = self.loop_should_stop();
         }
         out.exit_code = status;
         out
@@ -727,16 +734,11 @@ impl Shell {
         self.subst_status = None;
         let mut assignments = Vec::new();
         let mut index = 0;
-        while let Some(word) = command.words.get(index) {
-            match split_assignment(word) {
-                Some((name, value)) => {
-                    let (chars, subst_err) = self.expand_chars(&value).await;
-                    stderr.extend(subst_err);
-                    assignments.push((name, text(&chars)));
-                    index += 1;
-                }
-                None => break,
-            }
+        while let Some((name, value)) = command.words.get(index).and_then(split_assignment) {
+            let (chars, subst_err) = self.expand_chars(&value).await;
+            stderr.extend(subst_err);
+            assignments.push((name, text(&chars)));
+            index += 1;
         }
         // An assignment that runs a substitution has the substitution's status.
         let assignment_status = self.subst_status.take();
@@ -873,11 +875,8 @@ impl Shell {
         redirects: &[(u8, RedirectKind, String)],
     ) -> Result<(Sink, Sink), String> {
         let mut sinks = [Sink::Null, Sink::Stdout, Sink::Stderr];
-        for (fd, kind, target) in redirects {
+        for (fd, kind, target) in redirects.iter().filter(|(fd, _, _)| *fd != 0) {
             let fd = usize::from(*fd);
-            if fd == 0 {
-                continue;
-            }
             match kind {
                 RedirectKind::Input => {}
                 RedirectKind::Output | RedirectKind::Append => {
@@ -911,10 +910,10 @@ impl Shell {
             exit_code: out.exit_code,
             ..ExecutionResult::default()
         };
-        for (data, sink) in [(out.stdout, &sinks.0), (out.stderr, &sinks.1)] {
-            if data.is_empty() {
-                continue;
-            }
+        for (data, sink) in [(out.stdout, &sinks.0), (out.stderr, &sinks.1)]
+            .into_iter()
+            .filter(|(data, _)| !data.is_empty())
+        {
             match sink {
                 Sink::Stdout => result.stdout.extend(data),
                 Sink::Stderr => result.stderr.extend(data),
@@ -1172,14 +1171,17 @@ impl Shell {
         let (chars, stderr) = self.expand_chars(word).await;
         let mut words = Vec::new();
         for field in split_fields(&chars, word_quoted(word)) {
-            if has_glob(&field) {
-                let matches = self.glob(&field).await;
-                if !matches.is_empty() {
-                    words.extend(matches);
-                    continue;
-                }
+            // A pattern that matches nothing stays as it was written.
+            let matches = if has_glob(&field) {
+                self.glob(&field).await
+            } else {
+                Vec::new()
+            };
+            if matches.is_empty() {
+                words.push(text(&field));
+            } else {
+                words.extend(matches);
             }
-            words.push(text(&field));
         }
         (words, stderr)
     }
@@ -1412,38 +1414,42 @@ impl Shell {
         for segment in segments {
             let mut next = Vec::new();
             for base in &current {
-                if has_glob(segment) {
-                    let dir = self.resolve(if base.is_empty() { "." } else { base });
-                    let Ok(entries) = self.fs.readdir(Path::new(&dir)).await else {
-                        continue;
-                    };
-                    let explicit_dot = segment.first().is_some_and(|c| c.c == '.');
-                    for entry in entries {
-                        if entry.name.starts_with('.') && !explicit_dot {
-                            continue;
-                        }
-                        let name: Vec<char> = entry.name.chars().collect();
-                        if glob_match(segment, &name) {
-                            next.push(join_path(base, &entry.name));
-                        }
-                    }
-                } else {
-                    let candidate = join_path(base, &text(segment));
-                    if self
-                        .fs
-                        .stat(Path::new(&self.resolve(&candidate)))
-                        .await
-                        .is_ok()
-                    {
-                        next.push(candidate);
-                    }
-                }
+                next.extend(self.glob_step(segment, base).await);
             }
             current = next;
         }
         current.sort();
         current.retain(|p| !p.is_empty());
         current
+    }
+
+    /// The paths that extend `base` by one segment of a pattern. A segment with glob
+    /// characters matches the entries of the directory, and a literal segment is
+    /// kept when it exists.
+    async fn glob_step(&self, segment: &[Ch], base: &str) -> Vec<String> {
+        if !has_glob(segment) {
+            let candidate = join_path(base, &text(segment));
+            let exists = self
+                .fs
+                .stat(Path::new(&self.resolve(&candidate)))
+                .await
+                .is_ok();
+            return if exists { vec![candidate] } else { Vec::new() };
+        }
+        let dir = self.resolve(if base.is_empty() { "." } else { base });
+        let Ok(entries) = self.fs.readdir(Path::new(&dir)).await else {
+            return Vec::new();
+        };
+        // A leading dot must be matched by a dot in the pattern, as in POSIX sh.
+        let explicit_dot = segment.first().is_some_and(|c| c.c == '.');
+        entries
+            .into_iter()
+            .filter(|entry| explicit_dot || !entry.name.starts_with('.'))
+            .filter_map(|entry| {
+                let name: Vec<char> = entry.name.chars().collect();
+                glob_match(segment, &name).then(|| join_path(base, &entry.name))
+            })
+            .collect()
     }
 
     /// Absolute, normalized form of `path` relative to the current directory.
