@@ -46,7 +46,7 @@ The skills are designed to be sourced directly:
 
 ```bash
 # In your script or shell
-source "/Volumes/Frontal Labs IP/repos/sandbox/.claude/skills/sandbox/skills.sh"
+source "/path/to/sandbox/skills/skills.sh"
 sandbox_skills_load_all
 ```
 
@@ -133,4 +133,4 @@ To add a new skill:
 
 ## License
 
-Part of the Frontal Sandbox project.
+Apache-2.0
