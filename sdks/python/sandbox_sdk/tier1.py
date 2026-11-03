@@ -39,15 +39,20 @@ class Tier1Client:
 
     async def checkpoint(self, session_id: str) -> dict[str, Any]:
         """Pins the session's current state. Returns the root and the checkpoint usage."""
-        return await self._call("POST", f"/v1/sessions/{session_id}/checkpoint")
+        body: dict[str, Any] = await self._call("POST", f"/v1/sessions/{session_id}/checkpoint")
+        return body
 
     async def undo(self, session_id: str, steps: int = 1) -> dict[str, Any]:
         """Restores the filesystem from `steps` checkpoints ago."""
-        return await self._call("POST", f"/v1/sessions/{session_id}/undo", {"steps": steps})
+        body: dict[str, Any] = await self._call(
+            "POST", f"/v1/sessions/{session_id}/undo", {"steps": steps}
+        )
+        return body
 
     async def info(self, session_id: str) -> dict[str, Any]:
         """The session's environment, as /etc/agent/env.json."""
-        return await self._call("GET", f"/v1/sessions/{session_id}/info")
+        body: dict[str, Any] = await self._call("GET", f"/v1/sessions/{session_id}/info")
+        return body
 
     async def fork_command(
         self, session_id: str, count: int, argv: list[str]
@@ -56,7 +61,8 @@ class Tier1Client:
         body = await self._call(
             "POST", f"/v1/sessions/{session_id}/fork", {"count": count, "argv": argv}
         )
-        return body["children"]
+        children: list[dict[str, Any]] = body["children"]
+        return children
 
     async def _call(self, method: str, path: str, body: Any = None) -> Any:
         response = await self._client.request(method, path, json=body)

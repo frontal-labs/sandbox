@@ -7,11 +7,13 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass, is_dataclass
+from typing import Any, TypeAlias, cast, get_args
 from urllib.parse import quote
 
 import httpx
 
 from .errors import (
+    ErrorCode,
     Result,
     SandboxError,
     internal,
@@ -27,6 +29,12 @@ from .types import (
     SessionState,
     Snapshot,
 )
+
+# Every error code the SDK knows, as the ErrorCode literal lists them.
+KNOWN_ERROR_CODES: frozenset[str] = frozenset(get_args(ErrorCode))
+
+# A decoded JSON response: an object, an array, or no body (HTTP 204).
+JsonValue: TypeAlias = dict[str, Any] | list[Any] | None
 
 
 def _encode_path(path: str) -> str:
@@ -48,7 +56,7 @@ class ClientConfig:
     api_key: str | None = None
 
 
-def _wire(value: object) -> object:
+def _wire(value: object) -> Any:
     """Converts a dataclass tree to JSON-ready values. Bytes become integer
     arrays, which is how the server encodes byte fields. Nested dataclasses
     are converted too, so no field is left as a Python object."""
@@ -63,7 +71,7 @@ def _wire(value: object) -> object:
     return value
 
 
-def _exec_result(result: dict) -> ExecResult:
+def _exec_result(result: dict[str, Any]) -> ExecResult:
     return ExecResult(
         exit_code=result["exit_code"],
         stdout=bytes(result.get("stdout", [])),
@@ -104,8 +112,8 @@ class Client:
         method: str,
         path: str,
         *,
-        json_body: dict | None = None,
-    ) -> Result[dict | list | None]:
+        json_body: dict[str, Any] | None = None,
+    ) -> Result[JsonValue]:
         url = f"{self.base_url}{path}"
         try:
             response = await self._client.request(
@@ -114,12 +122,9 @@ class Client:
             if response.is_success:
                 if response.status_code == 204:
                     return None
-                return response.json()
-            # The server sends {"code", "message"} with every error, so keep its code.
-            error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
-            code = error_data.get("code") if isinstance(error_data, dict) else None
-            message = error_data.get("message", f"HTTP {response.status_code}: {response.reason_phrase}")
-            return SandboxError(code or "INTERNAL", message)
+                body: JsonValue = response.json()
+                return body
+            return await self._error_from_response(response)
         except httpx.RequestError as e:
             return network_error(str(e), e)
         except Exception as e:
@@ -135,8 +140,9 @@ class Client:
         )
         if is_sandbox_error(result):
             return result
-        if isinstance(result, dict) and isinstance(result.get("session_id"), str):
-            return result["session_id"]
+        session_id = result.get("session_id") if isinstance(result, dict) else None
+        if isinstance(session_id, str):
+            return session_id
         return internal("Invalid response")
 
     async def get_session(self, session_id: str) -> Result[SessionState]:
@@ -146,7 +152,10 @@ class Client:
         return SessionState(**result) if isinstance(result, dict) else internal("Invalid response")
 
     async def destroy_session(self, session_id: str) -> Result[None]:
-        return await self._request("DELETE", f"/v1/sessions/{quote(session_id, safe='')}")
+        result = await self._request("DELETE", f"/v1/sessions/{quote(session_id, safe='')}")
+        if is_sandbox_error(result):
+            return result
+        return None
 
     async def exec(self, session_id: str, request: ExecRequest) -> Result[ExecResult]:
         result = await self._request(
@@ -178,8 +187,9 @@ class Client:
         result = await self._request("POST", f"/v1/sessions/{quote(session_id, safe='')}/sleep")
         if is_sandbox_error(result):
             return result
-        if isinstance(result, dict) and isinstance(result.get("snapshot_id"), str):
-            return result["snapshot_id"]
+        snapshot_id = result.get("snapshot_id") if isinstance(result, dict) else None
+        if isinstance(snapshot_id, str):
+            return snapshot_id
         return internal("Invalid response")
 
     async def wake(self, session_id: str) -> Result[SessionState]:
@@ -210,8 +220,9 @@ class Client:
         )
         if is_sandbox_error(result):
             return result
-        if isinstance(result, dict) and isinstance(result.get("session_ids"), list):
-            return result["session_ids"]
+        session_ids = result.get("session_ids") if isinstance(result, dict) else None
+        if isinstance(session_ids, list) and all(isinstance(i, str) for i in session_ids):
+            return cast(list[str], session_ids)
         return internal("Invalid response")
 
     async def read_file(self, session_id: str, path: str) -> Result[bytes]:
@@ -267,15 +278,19 @@ class Client:
             return internal(f"Request failed: {e}", e)
 
     async def _error_from_response(self, response: httpx.Response) -> SandboxError:
-        error_data = (
+        # The server sends {"code", "message"} with every error, so keep its code.
+        error_data: Any = (
             response.json()
             if response.headers.get("content-type", "").startswith("application/json")
             else {}
         )
         code = error_data.get("code") if isinstance(error_data, dict) else None
-        message = (
-            error_data.get("message")
-            if isinstance(error_data, dict)
-            else f"HTTP {response.status_code}: {response.reason_phrase}"
+        # A code this SDK does not know is reported as INTERNAL, so the code type stays exact.
+        error_code: ErrorCode = (
+            cast(ErrorCode, code) if isinstance(code, str) and code in KNOWN_ERROR_CODES else "INTERNAL"
         )
-        return SandboxError(code or "INTERNAL", message)
+        message = error_data.get("message") if isinstance(error_data, dict) else None
+        return SandboxError(
+            error_code,
+            message if isinstance(message, str) else f"HTTP {response.status_code}: {response.reason_phrase}",
+        )

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import httpx
 
 from .client import Client
-from .errors import Result, invalid_state, is_sandbox_error, unavailable
+from .errors import Result, SandboxError, invalid_state, unavailable
 from .types import ExecResult, SessionConfig, Snapshot
 
 
@@ -22,8 +22,8 @@ class EmbeddedSandboxConfig(SessionConfig):
 class EmbeddedSandbox:
     def __init__(self, client: Client, session_id: str) -> None:
         self._client = client
-        self._session_id = session_id
-        self._server_process: subprocess.Popen | None = None
+        self._session_id: str | None = session_id
+        self._server_process: subprocess.Popen[bytes] | None = None
 
     @classmethod
     async def new(cls, config: EmbeddedSandboxConfig) -> Result[EmbeddedSandbox]:
@@ -51,7 +51,7 @@ class EmbeddedSandbox:
                 )
 
         session_result = await client.create_session(session_config)
-        if is_sandbox_error(session_result):
+        if isinstance(session_result, SandboxError):
             return session_result
 
         return cls(client, session_result)

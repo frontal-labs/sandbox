@@ -5,7 +5,7 @@ Error definitions for the sandbox SDK.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias, TypeVar
+from typing import Literal, TypeAlias, TypeGuard, TypeVar
 
 ErrorCode = Literal[
     "INTERNAL",
@@ -126,7 +126,7 @@ def wasm_error(message: str, cause: Exception | None = None) -> SandboxError:
     return SandboxError("WASM_ERROR", message, cause)
 
 
-def is_sandbox_error(error: BaseException) -> bool:
+def is_sandbox_error(error: object) -> TypeGuard[SandboxError]:
     return isinstance(error, SandboxError)
 
 
