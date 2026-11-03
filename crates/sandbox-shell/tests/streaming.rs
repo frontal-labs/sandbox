@@ -214,3 +214,27 @@ async fn node_output_inside_a_pipe_is_not_streamed() {
     );
     assert_eq!(result.stdout, b"a\nb\n");
 }
+
+#[tokio::test]
+async fn a_shell_started_by_argv_reports_its_output_once() {
+    // `sh -c` runs its script in a child that streams as it goes. Its output must
+    // be reported once, and the chunks must still add up to the result.
+    let chunks = Arc::new(Mutex::new(Vec::new()));
+    let sink = chunks.clone();
+    let observer: OutputObserver = Arc::new(move |chunk| sink.lock().unwrap().push(chunk));
+    let mut shell = shell_with(ShellConfig::default());
+    let argv = [
+        "sh".to_string(),
+        "-c".to_string(),
+        "echo one; echo two >&2; echo three".to_string(),
+    ];
+    let out = shell
+        .run_argv_streamed(&argv, b"", Some(observer))
+        .await
+        .unwrap();
+    let chunks = chunks.lock().unwrap().clone();
+    assert_eq!(out.stdout, b"one\nthree\n");
+    assert_eq!(out.stderr, b"two\n");
+    assert_eq!(joined(&chunks, 1), out.stdout, "stdout is reported once");
+    assert_eq!(joined(&chunks, 2), out.stderr, "stderr is reported once");
+}

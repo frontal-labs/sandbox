@@ -182,6 +182,9 @@ pub struct Shell {
     /// Bytes of stdout a tool streamed while the simple command being run was
     /// running. `None` when that command's output is not streamed. See `tool_stdout`.
     stream_count: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    /// Set when a forked child already reported the output of the command being run,
+    /// so that output is not reported again when the command finishes.
+    reported_by_child: bool,
     /// The status of the last command substitution, for an assignment that
     /// has no command, such as `x=$(false)`.
     subst_status: Option<i32>,
@@ -229,6 +232,7 @@ impl Shell {
             observer: None,
             capturing: false,
             stream_count: None,
+            reported_by_child: false,
             steps: 0,
             depth: 0,
             max_steps: config.max_steps,
@@ -420,6 +424,7 @@ impl Shell {
             observer: self.observer.clone(),
             capturing: self.capturing,
             stream_count: None,
+            reported_by_child: false,
             steps: self.steps,
             depth: self.depth,
             max_steps: self.max_steps,
@@ -672,7 +677,10 @@ impl Shell {
             .stream_count
             .take()
             .map_or(0, |count| count.load(std::sync::atomic::Ordering::SeqCst));
-        self.emit_after(&out, streamed);
+        // A child shell that ran in this command already reported its output.
+        if !std::mem::take(&mut self.reported_by_child) {
+            self.emit_after(&out, streamed);
+        }
         out
     }
 
@@ -1374,11 +1382,15 @@ impl Shell {
             Ok(parsed) => parsed,
             Err(e) => return failure_with(format!("sh: {}", e.message), 2),
         };
+        // A child that is not captured reports its output to the same observer as it
+        // runs, so the command that started it must not report that output again.
+        let child_reports = self.observer.is_some() && !self.capturing;
         let mut child = self.fork();
         child.positional = rest.iter().skip(1).cloned().collect();
         child.pending_stdin = Some(stdin);
         let out = child.run_script(&parsed).await;
         self.absorb(&child);
+        self.reported_by_child |= child_reports;
         out
     }
 
