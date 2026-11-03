@@ -47,3 +47,7 @@ infrastructure/scripts/smoke.sh http://127.0.0.1:8080
 - M5: Kubernetes manifests, Prometheus/Grafana, backup/restore
 
 See [PLAN.md](PLAN.md) section 10 for acceptance criteria.
+
+## License
+
+Apache-2.0

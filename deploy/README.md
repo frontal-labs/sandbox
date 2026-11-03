@@ -1,4 +1,4 @@
-# deploy/
+# Frontal Sandbox Deploy
 
 Concrete, installable deployment artifacts for Frontal Sandbox.
 
