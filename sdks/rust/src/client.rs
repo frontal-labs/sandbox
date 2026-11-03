@@ -421,11 +421,7 @@ fn ndjson_events(
             return None;
         }
         loop {
-            if let Some(end) = lines.buffer.iter().position(|b| *b == b'\n') {
-                let line: Vec<u8> = lines.buffer.drain(..=end).collect();
-                if line.len() == 1 {
-                    continue;
-                }
+            if let Some(line) = take_line(&mut lines.buffer) {
                 let item = decode_event(&line[..line.len() - 1]);
                 lines.finished = match &item {
                     Ok(ExecEvent::Exit { .. } | ExecEvent::Error { .. }) | Err(_) => true,
@@ -516,6 +512,18 @@ fn percent_encode(segment: &str) -> String {
         }
     }
     out
+}
+
+/// Removes the next line that has content from `buffer`, keeping its newline. Blank
+/// lines are dropped. Returns `None` when no complete line is buffered.
+fn take_line(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
+    while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
+        let line: Vec<u8> = buffer.drain(..=end).collect();
+        if line.len() > 1 {
+            return Some(line);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
