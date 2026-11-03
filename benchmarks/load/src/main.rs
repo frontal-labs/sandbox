@@ -133,13 +133,10 @@ async fn run_scenario(
     let scenario = scenarios::get_scenario(&scenario_name, config.clone())?;
 
     let progress = ProgressBar::new(duration);
-    progress.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}s ({eta})",
-            )
-            .unwrap(),
-    );
+    let style = ProgressStyle::default_bar().template(
+        "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len}s ({eta})",
+    )?;
+    progress.set_style(style);
 
     let start_time = Instant::now();
     let mut interval = tokio::time::interval(Duration::from_secs(1));

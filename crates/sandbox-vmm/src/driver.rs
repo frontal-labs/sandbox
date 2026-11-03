@@ -161,7 +161,7 @@ impl VmmDriver {
 
         Ok(VmHandle {
             id: vm_id,
-            vsock_addr: "127.0.0.1:0".parse().unwrap(), // Would be actual vsock address
+            vsock_addr: SocketAddr::from(([127, 0, 0, 1], 0)), // Would be actual vsock address
             pid: None,
             rootfs: self.rootfs_image.clone(),
         })
@@ -245,7 +245,7 @@ impl VmmDriver {
 
         Ok(VmHandle {
             id: vm_id,
-            vsock_addr: "127.0.0.1:0".parse().unwrap(),
+            vsock_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
             pid: Some(pid),
             rootfs: self.rootfs_image.clone(),
         })

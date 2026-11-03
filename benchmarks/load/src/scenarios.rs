@@ -94,7 +94,7 @@ where
                 sleep(delay).await;
             }
 
-            let _permit = sem.acquire().await.unwrap();
+            let _permit = sem.acquire().await?;
             let worker_start = Instant::now();
 
             let mut results = Vec::new();

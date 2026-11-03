@@ -82,8 +82,10 @@ fn main() {
     }
     println!("cargo:rerun-if-changed={}", proto_root.display());
 
-    let descriptor_path = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by cargo"))
-        .join("descriptor.bin");
+    let descriptor_path = PathBuf::from(
+        std::env::var("OUT_DIR").unwrap_or_else(|e| panic!("OUT_DIR is set by cargo: {e}")),
+    )
+    .join("descriptor.bin");
 
     tonic_prost_build::configure()
         .build_server(true)
