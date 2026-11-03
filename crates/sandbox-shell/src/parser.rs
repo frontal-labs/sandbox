@@ -144,41 +144,11 @@ fn tokenize_with(input: &str, word_mode: bool) -> Result<Vec<Token>, SandboxErro
         match c {
             '\'' => {
                 word.start();
-                loop {
-                    match chars.next() {
-                        Some('\'') => break,
-                        Some(ch) => word.push(ch, Mode::Literal),
-                        None => return Err(syntax("unterminated single quote")),
-                    }
-                }
+                read_single_quoted(&mut chars, &mut word)?;
             }
             '"' => {
                 word.start();
-                loop {
-                    match chars.next() {
-                        Some('"') => break,
-                        Some('\\') => match chars.peek().copied() {
-                            Some('\n') => {
-                                chars.next();
-                            }
-                            Some(next @ ('"' | '\\' | '$' | '`')) => {
-                                chars.next();
-                                word.push(next, Mode::Double);
-                            }
-                            _ => word.push('\\', Mode::Double),
-                        },
-                        Some('$') => match read_dollar(&mut chars, true)? {
-                            Some(piece) => word.push_piece(piece),
-                            None => word.push('$', Mode::Double),
-                        },
-                        Some('`') => word.push_piece(Piece::Subst {
-                            script: read_backticks(&mut chars)?,
-                            quoted: true,
-                        }),
-                        Some(ch) => word.push(ch, Mode::Double),
-                        None => return Err(syntax("unterminated double quote")),
-                    }
-                }
+                read_double_quoted(&mut chars, &mut word)?;
             }
             '\\' => match chars.next() {
                 // A backslash before a newline joins the two lines.
@@ -202,12 +172,8 @@ fn tokenize_with(input: &str, word_mode: bool) -> Result<Vec<Token>, SandboxErro
                 quoted: false,
             }),
             '#' if !word.started && !word_mode => {
-                while let Some(&ch) = chars.peek() {
-                    if ch == '\n' {
-                        break;
-                    }
-                    chars.next();
-                }
+                // The newline is left in place, so it still ends the command.
+                while chars.next_if(|&ch| ch != '\n').is_some() {}
             }
             c if word_mode => word.push(c, Mode::Bare),
             '\n' => {
@@ -295,6 +261,52 @@ fn piece_char(piece: &Piece) -> Option<char> {
 }
 
 /// Reads what follows a `$`: a parameter reference, a substitution, or arithmetic.
+/// Reads a single-quoted body into `word`, up to and including the closing quote.
+fn read_single_quoted(
+    chars: &mut Peekable<Chars<'_>>,
+    word: &mut WordBuf,
+) -> Result<(), SandboxError> {
+    loop {
+        match chars.next() {
+            Some('\'') => return Ok(()),
+            Some(ch) => word.push(ch, Mode::Literal),
+            None => return Err(syntax("unterminated single quote")),
+        }
+    }
+}
+
+/// Reads a double-quoted body into `word`, up to and including the closing quote.
+fn read_double_quoted(
+    chars: &mut Peekable<Chars<'_>>,
+    word: &mut WordBuf,
+) -> Result<(), SandboxError> {
+    loop {
+        match chars.next() {
+            Some('"') => return Ok(()),
+            Some('\\') => match chars.peek().copied() {
+                Some('\n') => {
+                    chars.next();
+                }
+                Some(next @ ('"' | '\\' | '$' | '`')) => {
+                    chars.next();
+                    word.push(next, Mode::Double);
+                }
+                _ => word.push('\\', Mode::Double),
+            },
+            Some('$') => match read_dollar(chars, true)? {
+                Some(piece) => word.push_piece(piece),
+                None => word.push('$', Mode::Double),
+            },
+            Some('`') => word.push_piece(Piece::Subst {
+                script: read_backticks(chars)?,
+                quoted: true,
+            }),
+            Some(ch) => word.push(ch, Mode::Double),
+            None => return Err(syntax("unterminated double quote")),
+        }
+    }
+}
+
 /// Returns `None` when the `$` stands alone, so the caller keeps it as a literal.
 fn read_dollar(
     chars: &mut Peekable<Chars<'_>>,
@@ -304,13 +316,8 @@ fn read_dollar(
         // `$name`, `$N` (one digit, as in POSIX), and the special parameters.
         Some(c) if c == '_' || c.is_ascii_alphabetic() => {
             let mut name = String::new();
-            while let Some(&c) = chars.peek() {
-                if c == '_' || c.is_ascii_alphanumeric() {
-                    name.push(c);
-                    chars.next();
-                } else {
-                    break;
-                }
+            while let Some(c) = chars.next_if(|c| *c == '_' || c.is_ascii_alphanumeric()) {
+                name.push(c);
             }
             Ok(Some(plain_param(name, quoted)))
         }
@@ -516,45 +523,26 @@ fn read_substitution(chars: &mut Peekable<Chars<'_>>) -> Result<Script, SandboxE
         let Some(c) = chars.next() else {
             return Err(syntax("unterminated $("));
         };
-        match quote {
-            Some('\'') => {
-                if c == '\'' {
-                    quote = None;
-                }
-            }
-            Some('"') => match c {
-                '"' => quote = None,
-                '\\' => {
-                    inner.push(c);
-                    if let Some(next) = chars.next() {
-                        inner.push(next);
-                    }
-                    continue;
-                }
-                _ => {}
-            },
-            _ => match c {
-                '\\' => {
-                    inner.push(c);
-                    if let Some(next) = chars.next() {
-                        inner.push(next);
-                    }
-                    continue;
-                }
-                '\'' | '"' => quote = Some(c),
-                '(' => depth += 1,
-                ')' => {
+        if c == '\\' && quote != Some('\'') {
+            // A backslash keeps the next character as it is, outside single quotes.
+            inner.push(c);
+            inner.extend(chars.next());
+        } else {
+            match (quote, c) {
+                (None, ')') => {
                     depth -= 1;
                     if depth == 0 {
-                        break;
+                        return parse(&inner);
                     }
                 }
+                (None, '(') => depth += 1,
+                (None, '\'' | '"') => quote = Some(c),
+                (Some('\''), '\'') | (Some('"'), '"') => quote = None,
                 _ => {}
-            },
+            }
+            inner.push(c);
         }
-        inner.push(c);
     }
-    parse(&inner)
 }
 
 /// Reads a backtick substitution up to the closing backtick and parses it.
@@ -562,17 +550,12 @@ fn read_backticks(chars: &mut Peekable<Chars<'_>>) -> Result<Script, SandboxErro
     let mut inner = String::new();
     loop {
         match chars.next() {
-            Some('`') => break,
-            Some('\\') => {
-                if let Some(next) = chars.next() {
-                    inner.push(next);
-                }
-            }
+            Some('`') => return parse(&inner),
+            Some('\\') => inner.extend(chars.next()),
             Some(c) => inner.push(c),
             None => return Err(syntax("unterminated backtick substitution")),
         }
     }
-    parse(&inner)
 }
 
 struct Parser {
@@ -639,14 +622,8 @@ impl Parser {
                 return Err(syntax("syntax error near unexpected token ';'"));
             }
             self.skip_separators();
-            match self.peek() {
-                None | Some(Token::RParen | Token::DoubleSemi) => break,
-                _ => {}
-            }
-            if let Some(keyword) = self.keyword() {
-                if stops.contains(&keyword.as_str()) {
-                    break;
-                }
+            if self.at_list_end(stops) {
+                return Ok(Script { items });
             }
 
             let pipeline = self.pipeline()?;
@@ -683,7 +660,15 @@ impl Parser {
                 connector,
             });
         }
-        Ok(Script { items })
+    }
+
+    /// True at the end of a list: the input ends, a `)` or `;;` follows, or a reserved
+    /// word in `stops` comes next.
+    fn at_list_end(&self, stops: &[&str]) -> bool {
+        matches!(self.peek(), None | Some(Token::RParen | Token::DoubleSemi))
+            || self
+                .keyword()
+                .is_some_and(|keyword| stops.contains(&keyword.as_str()))
     }
 
     fn pipeline(&mut self) -> Result<Pipeline, SandboxError> {
@@ -840,7 +825,18 @@ impl Parser {
         let body = self.list(&["elif", "else", "fi"])?;
         branches.push((condition, body));
 
-        let mut otherwise = None;
+        let otherwise = self.elif_chain(&mut branches)?;
+        Ok(Command::If(IfClause {
+            branches,
+            otherwise,
+        }))
+    }
+
+    /// Reads the `elif` branches up to `else` or `fi`, and returns the `else` body.
+    fn elif_chain(
+        &mut self,
+        branches: &mut Vec<(Script, Script)>,
+    ) -> Result<Option<Script>, SandboxError> {
         loop {
             match self.keyword().as_deref() {
                 Some("elif") => {
@@ -852,21 +848,17 @@ impl Parser {
                 }
                 Some("else") => {
                     self.pos += 1;
-                    otherwise = Some(self.list(&["fi"])?);
+                    let otherwise = self.list(&["fi"])?;
                     self.expect_keyword("fi")?;
-                    break;
+                    return Ok(Some(otherwise));
                 }
                 Some("fi") => {
                     self.pos += 1;
-                    break;
+                    return Ok(None);
                 }
                 _ => return Err(syntax("syntax error: expected 'fi'")),
             }
         }
-        Ok(Command::If(IfClause {
-            branches,
-            otherwise,
-        }))
     }
 
     fn while_clause(&mut self, keyword: &str) -> Result<Command, SandboxError> {
