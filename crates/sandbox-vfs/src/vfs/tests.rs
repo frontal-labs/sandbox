@@ -324,13 +324,13 @@ async fn a_watcher_that_falls_behind_gets_overflow() {
     // After the overflow, later changes are delivered again.
     vfs.rm(Path::new("/f"), false).await.unwrap();
     let mut seen_removal = false;
-    while let Some(event) = watch.next().await {
-        if event == WatchEvent::Removed("/f".into()) {
-            seen_removal = true;
-            break;
+    while !seen_removal {
+        match watch.next().await {
+            Some(WatchEvent::Removed(path)) if path == "/f" => seen_removal = true,
+            Some(_) => {}
+            None => panic!("the watch ended before the removal"),
         }
     }
-    assert!(seen_removal);
 }
 
 #[tokio::test]
