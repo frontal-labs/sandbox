@@ -54,7 +54,8 @@ crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 
 crate.from_cargo(
     name = "crates",
-    cargo_lockfile = "//:Cargo.lock",
+    # Bazel keeps its own lock, so Cargo.lock stays the one cargo maintains.
+    cargo_lockfile = "//:Cargo.Bazel.lock",
     manifests = ["//:Cargo.toml"],
     supported_platform_triples = [
         "aarch64-apple-darwin",
@@ -69,9 +70,19 @@ crate.from_cargo(
 # sandbox-guest. Their Bazel targets depend on them.
 crate.spec(
     package = "sqlx",
-    version = "0.8.6",
+    version = "0.9.0",
     default_features = False,
     features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"],
+)
+
+# The universe builds sqlx-core with `offline`, which makes its Executor trait require
+# `describe`. sqlx-postgres implements that method only under the same feature, so it
+# must be built with it too. Cargo does not enable it, and nothing in the workspace
+# relies on the feature's behaviour; this matches the Bazel build to the trait.
+crate.annotation(
+    crate = "sqlx-postgres",
+    version = "0.9.0",
+    crate_features = ["offline"],
 )
 
 crate.spec(
