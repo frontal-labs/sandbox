@@ -1,6 +1,6 @@
 # Milestones
 
-Based on [plans/PLAN.md](../plans/PLAN.md) section 9. A box is ticked only when the code
+Based on the project specification section 9. A box is ticked only when the code
 clearly implements the item and a test exists for it. Items that are scaffolded
 but not working, or implemented without tests, stay unticked and are marked
 **Partial**. Acceptance criteria are not ticked unless they were demonstrated,

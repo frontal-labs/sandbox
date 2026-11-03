@@ -59,8 +59,7 @@ benchmarks/                 Criterion benches and load tests
 docs/                       Architecture, security model, API, and limits
 ```
 
-Most crates are early scaffolds or stubs. The server runs session, exec, filesystem, snapshot, and fork routes against in-memory sessions; snapshot and fork also run against in-memory sessions. `frontal-sandbox run` and `frontal-sandbox shell` are not yet implemented. See [plans/PLAN.md](plans/PLAN.md) for the milestone status,
-the complete design specification, and target behavior.
+Most crates are early scaffolds or stubs. The server runs session, exec, filesystem, snapshot, and fork routes against in-memory sessions; snapshot and fork also run against in-memory sessions. `frontal-sandbox run` and `frontal-sandbox shell` are not yet implemented. See [MILESTONES.md](docs/MILESTONES.md) for the milestone status, the complete design specification, and target behavior.
 
 ## Development
 
