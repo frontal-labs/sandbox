@@ -115,10 +115,10 @@ impl Evaluator<'_> {
 
     fn compare(&mut self) -> Result<i64, String> {
         let mut value = self.sum()?;
-        while let Some(op) = self.peek_op() {
-            if !matches!(op, "<" | ">" | "<=" | ">=" | "==" | "!=") {
-                break;
-            }
+        while let Some(op) = self
+            .peek_op()
+            .filter(|op| matches!(*op, "<" | ">" | "<=" | ">=" | "==" | "!="))
+        {
             self.pos += 1;
             let rhs = self.sum()?;
             value = i64::from(match op {
@@ -135,10 +135,7 @@ impl Evaluator<'_> {
 
     fn sum(&mut self) -> Result<i64, String> {
         let mut value = self.product()?;
-        while let Some(op) = self.peek_op() {
-            if !matches!(op, "+" | "-") {
-                break;
-            }
+        while let Some(op) = self.peek_op().filter(|op| matches!(*op, "+" | "-")) {
             self.pos += 1;
             let rhs = self.product()?;
             value = if op == "+" {
@@ -153,10 +150,7 @@ impl Evaluator<'_> {
 
     fn product(&mut self) -> Result<i64, String> {
         let mut value = self.unary()?;
-        while let Some(op) = self.peek_op() {
-            if !matches!(op, "*" | "/" | "%") {
-                break;
-            }
+        while let Some(op) = self.peek_op().filter(|op| matches!(*op, "*" | "/" | "%")) {
             self.pos += 1;
             let rhs = self.unary()?;
             value = match op {

@@ -29,10 +29,9 @@ pub fn format(format: &str, args: &[String]) -> Result<Formatted, String> {
         // Reuse the format while arguments remain, but stop after one pass that
         // used none, so a format without directives prints once.
         if next_arg >= args.len() || !consumed {
-            break;
+            return Ok(Formatted { output: out, error });
         }
     }
-    Ok(Formatted { output: out, error })
 }
 
 /// One pass over the format. Returns whether any argument was used.
@@ -58,19 +57,19 @@ fn render_once(
                 if chars.get(i) == Some(&'%') {
                     out.push(b'%');
                     i += 1;
-                    continue;
-                }
-                let (spec, advance) = read_spec(&chars[i..])?;
-                i += advance;
-                let arg = args.get(*next_arg).cloned();
-                if arg.is_some() {
-                    used = true;
-                }
-                *next_arg += usize::from(arg.is_some());
-                let (bytes, problem) = render(&spec, arg.as_deref());
-                out.extend(bytes);
-                if error.is_none() {
-                    *error = problem;
+                } else {
+                    let (spec, advance) = read_spec(&chars[i..])?;
+                    i += advance;
+                    let arg = args.get(*next_arg).cloned();
+                    if arg.is_some() {
+                        used = true;
+                    }
+                    *next_arg += usize::from(arg.is_some());
+                    let (bytes, problem) = render(&spec, arg.as_deref());
+                    out.extend(bytes);
+                    if error.is_none() {
+                        *error = problem;
+                    }
                 }
             }
             c => {
@@ -95,17 +94,18 @@ struct Spec {
 /// Reads `[flags][width]conversion` after a `%`. Returns the spec and how many
 /// characters it used.
 fn read_spec(chars: &[char]) -> Result<(Spec, usize), String> {
-    let mut i = 0;
-    let (mut left, mut zero, mut plus) = (false, false, false);
-    while let Some(&c) = chars.get(i) {
-        match c {
-            '-' => left = true,
-            '0' => zero = true,
-            '+' => plus = true,
-            _ => break,
-        }
-        i += 1;
-    }
+    // Flags are the run of `-`, `0`, and `+` at the start.
+    let flags_end = chars
+        .iter()
+        .position(|c| !matches!(c, '-' | '0' | '+'))
+        .unwrap_or(chars.len());
+    let flags = &chars[..flags_end];
+    let (left, zero, plus) = (
+        flags.contains(&'-'),
+        flags.contains(&'0'),
+        flags.contains(&'+'),
+    );
+    let mut i = flags_end;
     let mut width = 0usize;
     while let Some(d) = chars.get(i).and_then(|c| c.to_digit(10)) {
         width = width * 10 + d as usize;
@@ -224,15 +224,14 @@ fn escape(chars: &[char]) -> (Vec<u8>, usize) {
         let mut i = if next == '0' { 2 } else { 1 };
         let mut value = 0u32;
         let mut count = 0;
-        while count < 3 {
-            match chars.get(i).and_then(|c| c.to_digit(8)) {
-                Some(d) => {
-                    value = value * 8 + d;
-                    i += 1;
-                    count += 1;
-                }
-                None => break,
-            }
+        while let Some(d) = chars
+            .get(i)
+            .and_then(|c| c.to_digit(8))
+            .filter(|_| count < 3)
+        {
+            value = value * 8 + d;
+            i += 1;
+            count += 1;
         }
         return (vec![value as u8], i);
     }
