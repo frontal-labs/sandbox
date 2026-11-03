@@ -47,12 +47,11 @@ pub mod fs {
                 .await
                 .map_err(vfs_error_to_js)?;
             if chunk.is_empty() {
-                break;
+                vfs.close(&handle);
+                return Ok(buf);
             }
             buf.extend_from_slice(&chunk);
         }
-        vfs.close(&handle);
-        Ok(buf)
     }
 
     /// Writes a file to the VFS.

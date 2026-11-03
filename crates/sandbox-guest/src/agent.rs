@@ -121,13 +121,11 @@ impl GuestService for GuestServiceImpl {
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
             if chunk.is_empty() {
-                break;
+                self.vfs.close(&handle);
+                return Ok(Response::new(ReadFileResponse { data }));
             }
             data.extend_from_slice(&chunk);
         }
-        self.vfs.close(&handle);
-
-        Ok(Response::new(ReadFileResponse { data }))
     }
 
     async fn write_file(&self, request: Request<WriteFileRequest>) -> Result<Response<()>, Status> {
