@@ -5,7 +5,6 @@ edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frontal-labs/sandbox"
 authors = ["Frontal Labs"]
-title = "Sandbox Sdk"
 description = "Rust SDK for the sandbox system"
 
 [dependencies]
