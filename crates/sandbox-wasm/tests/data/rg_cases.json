@@ -1,0 +1,146 @@
+[
+ {
+  "flags": [
+   "alpha"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "alpha\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-n",
+   "alpha"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "1:alpha\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-i",
+   "alpha"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "alpha\nAlpha two\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-c",
+   "alpha"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "1\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-o",
+   "gam"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "gam\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-v",
+   "alpha"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "beta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-F",
+   "o.b"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "foo.bar baz\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-n",
+   "-v",
+   "-i",
+   "a"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "4:\n5:the end 42\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "[0-9]+"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "the end 42\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-o",
+   "[0-9]+"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "42\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-l",
+   "alpha"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "<stdin>\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "nomatch"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "",
+  "status": 1
+ },
+ {
+  "flags": [
+   "-c",
+   "zzz"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "",
+  "status": 1
+ },
+ {
+  "flags": [
+   "-o",
+   "\\w+"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "alpha\nbeta\ngamma\nAlpha\ntwo\nthe\nend\n42\nfoo\nbar\nbaz\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-n",
+   "^$"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "4:\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-F",
+   "-o",
+   "a"
+  ],
+  "input": "alpha\nbeta gamma\nAlpha two\n\nthe end 42\nfoo.bar baz\n",
+  "expected": "a\na\na\na\na\na\na\na\n",
+  "status": 0
+ }
+]

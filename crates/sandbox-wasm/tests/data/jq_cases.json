@@ -1,0 +1,329 @@
+[
+ {
+  "filter": ".",
+  "input": "{\"name\":\"test\",\"value\":42,\"tags\":[\"a\",\"b\"]}",
+  "flags": [],
+  "expected": "{\n  \"name\": \"test\",\n  \"value\": 42,\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ]\n}\n",
+  "status": 0
+ },
+ {
+  "filter": ".name",
+  "input": "{\"name\":\"test\"}",
+  "flags": [],
+  "expected": "\"test\"\n",
+  "status": 0
+ },
+ {
+  "filter": ".tags[1]",
+  "input": "{\"tags\":[\"a\",\"b\"]}",
+  "flags": [],
+  "expected": "\"b\"\n",
+  "status": 0
+ },
+ {
+  "filter": ".a.b.c",
+  "input": "{\"a\":{\"b\":{\"c\":null}}}",
+  "flags": [],
+  "expected": "null\n",
+  "status": 0
+ },
+ {
+  "filter": ".[] | . * 2",
+  "input": "[1,2,3]",
+  "flags": [],
+  "expected": "2\n4\n6\n",
+  "status": 0
+ },
+ {
+  "filter": "map(select(. > 1))",
+  "input": "[1,2,3]",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[2,3]\n",
+  "status": 0
+ },
+ {
+  "filter": "{a: .x, b: (.y + 1)}",
+  "input": "{\"x\":\"hi\",\"y\":1}",
+  "flags": [
+   "-c"
+  ],
+  "expected": "{\"a\":\"hi\",\"b\":2}\n",
+  "status": 0
+ },
+ {
+  "filter": "keys",
+  "input": "{\"b\":1,\"a\":2}",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[\"a\",\"b\"]\n",
+  "status": 0
+ },
+ {
+  "filter": "length",
+  "input": "[1,2,3,4]",
+  "flags": [],
+  "expected": "4\n",
+  "status": 0
+ },
+ {
+  "filter": "add",
+  "input": "[1,2,3]",
+  "flags": [],
+  "expected": "6\n",
+  "status": 0
+ },
+ {
+  "filter": "to_entries",
+  "input": "{\"a\":1}",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[{\"key\":\"a\",\"value\":1}]\n",
+  "status": 0
+ },
+ {
+  "filter": "[.[] | tostring]",
+  "input": "[1,\"x\",null]",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[\"1\",\"x\",\"null\"]\n",
+  "status": 0
+ },
+ {
+  "filter": "sort_by(.n)",
+  "input": "[{\"n\":2},{\"n\":1}]",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[{\"n\":1},{\"n\":2}]\n",
+  "status": 0
+ },
+ {
+  "filter": "group_by(.k) | map(length)",
+  "input": "[{\"k\":1},{\"k\":2},{\"k\":1}]",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[2,1]\n",
+  "status": 0
+ },
+ {
+  "filter": "unique",
+  "input": "[3,1,3,2]",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[1,2,3]\n",
+  "status": 0
+ },
+ {
+  "filter": "reduce .[] as $x (0; . + $x)",
+  "input": "[1,2,3]",
+  "flags": [],
+  "expected": "6\n",
+  "status": 0
+ },
+ {
+  "filter": "[.[] | select(type == \"number\")]",
+  "input": "[1,\"a\",2]",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[1,2]\n",
+  "status": 0
+ },
+ {
+  "filter": ".a // \"default\"",
+  "input": "{}",
+  "flags": [],
+  "expected": "\"default\"\n",
+  "status": 0
+ },
+ {
+  "filter": "if .x > 1 then \"big\" else \"small\" end",
+  "input": "{\"x\":2}",
+  "flags": [],
+  "expected": "\"big\"\n",
+  "status": 0
+ },
+ {
+  "filter": "try error(\"boom\") catch .",
+  "input": "null",
+  "flags": [],
+  "expected": "\"boom\"\n",
+  "status": 0
+ },
+ {
+  "filter": "[range(0;5)]",
+  "input": "null",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[0,1,2,3,4]\n",
+  "status": 0
+ },
+ {
+  "filter": "split(\",\")",
+  "input": "\"a,b,c\"",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[\"a\",\"b\",\"c\"]\n",
+  "status": 0
+ },
+ {
+  "filter": "join(\"-\")",
+  "input": "[\"a\",\"b\"]",
+  "flags": [],
+  "expected": "\"a-b\"\n",
+  "status": 0
+ },
+ {
+  "filter": "ascii_downcase",
+  "input": "\"HeLLo\"",
+  "flags": [],
+  "expected": "\"hello\"\n",
+  "status": 0
+ },
+ {
+  "filter": "test(\"^a\")",
+  "input": "\"abc\"",
+  "flags": [],
+  "expected": "true\n",
+  "status": 0
+ },
+ {
+  "filter": "[paths]",
+  "input": "{\"a\":{\"b\":1}}",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[[\"a\"],[\"a\",\"b\"]]\n",
+  "status": 0
+ },
+ {
+  "filter": "del(.a)",
+  "input": "{\"a\":1,\"b\":2}",
+  "flags": [
+   "-c"
+  ],
+  "expected": "{\"b\":2}\n",
+  "status": 0
+ },
+ {
+  "filter": ".a += 1",
+  "input": "{\"a\":1}",
+  "flags": [
+   "-c"
+  ],
+  "expected": "{\"a\":2}\n",
+  "status": 0
+ },
+ {
+  "filter": "with_entries(.value += 1)",
+  "input": "{\"a\":1}",
+  "flags": [
+   "-c"
+  ],
+  "expected": "{\"a\":2}\n",
+  "status": 0
+ },
+ {
+  "filter": ".msg",
+  "input": "{\"msg\":\"hello\\nworld\"}",
+  "flags": [
+   "-r"
+  ],
+  "expected": "hello\nworld\n",
+  "status": 0
+ },
+ {
+  "filter": ".",
+  "input": "3.5",
+  "flags": [],
+  "expected": "3.5\n",
+  "status": 0
+ },
+ {
+  "filter": "1 + 2",
+  "input": "null",
+  "flags": [
+   "-n"
+  ],
+  "expected": "3\n",
+  "status": 0
+ },
+ {
+  "filter": "@base64",
+  "input": "\"hi\"",
+  "flags": [],
+  "expected": "\"aGk=\"\n",
+  "status": 0
+ },
+ {
+  "filter": "tojson",
+  "input": "{\"a\":[1,true,null]}",
+  "flags": [],
+  "expected": "\"{\\\"a\\\":[1,true,null]}\"\n",
+  "status": 0
+ },
+ {
+  "filter": "fromjson",
+  "input": "\"[1,2]\"",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[1,2]\n",
+  "status": 0
+ },
+ {
+  "filter": "first(.[])",
+  "input": "[7,8]",
+  "flags": [],
+  "expected": "7\n",
+  "status": 0
+ },
+ {
+  "filter": "limit(2; .[])",
+  "input": "[7,8,9]",
+  "flags": [
+   "-c"
+  ],
+  "expected": "7\n8\n",
+  "status": 0
+ },
+ {
+  "filter": "getpath([\"a\",0])",
+  "input": "{\"a\":[5]}",
+  "flags": [],
+  "expected": "5\n",
+  "status": 0
+ },
+ {
+  "filter": "any",
+  "input": "[true,false]",
+  "flags": [],
+  "expected": "true\n",
+  "status": 0
+ },
+ {
+  "filter": "indices(\"b\")",
+  "input": "\"abcb\"",
+  "flags": [
+   "-c"
+  ],
+  "expected": "[1,3]\n",
+  "status": 0
+ },
+ {
+  "filter": "ltrimstr(\"ab\")",
+  "input": "\"abc\"",
+  "flags": [],
+  "expected": "\"c\"\n",
+  "status": 0
+ }
+]

@@ -1,0 +1,12 @@
+# WASI tools that the sandbox installs into its VFS (PLAN §4.6). Each member builds
+# for wasm32-wasip1 with `build.sh`, which pins the hash the tool registry checks.
+[workspace]
+resolver = "2"
+members = ["jq", "rg"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

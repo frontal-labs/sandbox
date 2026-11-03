@@ -1,0 +1,10 @@
+[package]
+name = "jq_tool"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+jaq-core = "3.1.2"
+jaq-std = "3.0.4"
+jaq-json = "2.0.3"

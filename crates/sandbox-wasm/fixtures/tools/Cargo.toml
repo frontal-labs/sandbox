@@ -22,13 +22,5 @@ codegen-units = 1
 panic = "abort"
 
 [[bin]]
-name = "jq_tool"
-path = "jq_tool.rs"
-
-[[bin]]
-name = "rg_tool"
-path = "rg_tool.rs"
-
-[[bin]]
 name = "fd_tool"
 path = "fd_tool.rs"
