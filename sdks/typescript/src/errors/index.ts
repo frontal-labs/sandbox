@@ -65,8 +65,7 @@ export const SandboxErrorCodes = {
     createSandboxError("NETWORK_ERROR", message, cause),
   casError: (message: string, cause?: Error) => createSandboxError("CAS_ERROR", message, cause),
   vfsError: (message: string, cause?: Error) => createSandboxError("VFS_ERROR", message, cause),
-  shellError: (message: string, cause?: Error) =>
-    createSandboxError("SHELL_ERROR", message, cause),
+  shellError: (message: string, cause?: Error) => createSandboxError("SHELL_ERROR", message, cause),
   runtimeError: (message: string, cause?: Error) =>
     createSandboxError("RUNTIME_ERROR", message, cause),
   wasmError: (message: string, cause?: Error) => createSandboxError("WASM_ERROR", message, cause),
@@ -74,7 +73,7 @@ export const SandboxErrorCodes = {
 
 export type Result<T> = T | SandboxError
 
-export function isSandboxError(error: any): error is SandboxError {
+export function isSandboxError(error: unknown): error is SandboxError {
   if (!(error instanceof Error)) {
     return false
   }

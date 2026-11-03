@@ -1,10 +1,10 @@
 import { Client } from "../client/index.js"
-import type { Result, SandboxError } from "../errors/index.js"
+import type { Result } from "../errors/index.js"
 import { isSandboxError, SandboxErrorCodes } from "../errors/index.js"
 import {
-  SessionConfigSchema,
   type ExecResult,
   type SessionConfig,
+  SessionConfigSchema,
   type Snapshot,
 } from "../types/index.js"
 
@@ -71,7 +71,8 @@ export class EmbeddedSandbox {
     if (argv.length === 0) {
       return SandboxErrorCodes.invalidArgument("command is empty")
     }
-    return this.client.exec(this.sessionId, { argv, env: {}, stream: false })
+    const result = await this.client.exec(this.sessionId, { argv, env: {}, stream: false })
+    return result
   }
 
   async snapshot(): Promise<Result<Snapshot>> {
@@ -79,7 +80,8 @@ export class EmbeddedSandbox {
       return SandboxErrorCodes.invalidState("No active session")
     }
 
-    return this.client.snapshot(this.sessionId)
+    const result = await this.client.snapshot(this.sessionId)
+    return result
   }
 
   async destroy(): Promise<Result<void>> {

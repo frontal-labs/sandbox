@@ -1,16 +1,15 @@
-import type { Result, SandboxError } from "../errors/index.js"
-import { createSandboxError, isSandboxError, SandboxErrorCodes } from "../errors/index.js"
-import type { ErrorCode } from "../errors/index.js"
 import * as z from "zod"
+import type { ErrorCode, Result, SandboxError } from "../errors/index.js"
+import { createSandboxError, isSandboxError, SandboxErrorCodes } from "../errors/index.js"
 import {
-  SessionConfigSchema,
   type ExecRequest,
   type ExecResult,
   type SessionConfig,
+  SessionConfigSchema,
   type SessionState,
   type Snapshot,
-  wireSchemas,
   wireResponseSchemas,
+  wireSchemas,
 } from "../types/index.js"
 
 export interface ClientConfig {
@@ -52,7 +51,7 @@ export class Client {
     return headers
   }
 
-private async request<T>(
+  private async request<T>(
     path: string,
     options: RequestInit = {},
     responseSchema?: z.ZodType<T>,
@@ -61,7 +60,10 @@ private async request<T>(
     try {
       const response = await fetch(url, {
         ...options,
-        headers: { ...this.headers(options.body !== undefined), ...(options.headers as Record<string, string>) },
+        headers: {
+          ...this.headers(options.body !== undefined),
+          ...(options.headers as Record<string, string>),
+        },
       })
 
       if (!response.ok) {
@@ -116,7 +118,7 @@ private async request<T>(
     return created.sessionId
   }
 
-  async getSession(sessionId: string): Promise<Result<SessionState>> {
+  getSession(sessionId: string): Promise<Result<SessionState>> {
     return this.request<SessionState>(
       `/v1/sessions/${encodeURIComponent(sessionId)}`,
       {},
@@ -124,7 +126,7 @@ private async request<T>(
     )
   }
 
-  async destroySession(sessionId: string): Promise<Result<void>> {
+  destroySession(sessionId: string): Promise<Result<void>> {
     return this.request<void>(`/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
     })
@@ -133,21 +135,21 @@ private async request<T>(
   async exec(sessionId: string, request: ExecRequest): Promise<Result<ExecResult>> {
     const parseResult = wireSchemas.ExecRequest.safeParse(request)
     if (!parseResult.success) {
-      return SandboxErrorCodes.invalidArgument(
-        `Invalid exec request: ${parseResult.error.message}`,
-      )
+      return SandboxErrorCodes.invalidArgument(`Invalid exec request: ${parseResult.error.message}`)
     }
 
     const wire = parseResult.data
-    return this.request<ExecResult>(
+    const result = await this.request<ExecResult>(
       `/v1/sessions/${encodeURIComponent(sessionId)}/exec`,
       { method: "POST", body: JSON.stringify(wire) },
       wireResponseSchemas.ExecResult,
     )
+    return result
   }
 
   /// Streaming exec is not implemented on the server, so this yields one
   /// `UNSUPPORTED` error and does not send a request.
+  // biome-ignore lint/suspicious/useAwait: the stream yields its error without awaiting anything
   async *execStream(
     _sessionId: string,
     _request: ExecRequest,
@@ -181,7 +183,7 @@ private async request<T>(
   }
 
   /** Wakes a sleeping session. Its files come back; shell state starts fresh. */
-  async wake(sessionId: string): Promise<Result<SessionState>> {
+  wake(sessionId: string): Promise<Result<SessionState>> {
     return this.request<SessionState>(
       `/v1/sessions/${encodeURIComponent(sessionId)}/wake`,
       { method: "POST" },
@@ -189,7 +191,7 @@ private async request<T>(
     )
   }
 
-  async listSnapshots(sessionId: string): Promise<Result<Snapshot[]>> {
+  listSnapshots(sessionId: string): Promise<Result<Snapshot[]>> {
     return this.request<Snapshot[]>(
       `/v1/sessions/${encodeURIComponent(sessionId)}/snapshots`,
       {},
@@ -197,7 +199,7 @@ private async request<T>(
     )
   }
 
-  async getSnapshot(sessionId: string, snapshotId: string): Promise<Result<Snapshot>> {
+  getSnapshot(sessionId: string, snapshotId: string): Promise<Result<Snapshot>> {
     return this.request<Snapshot>(
       `/v1/sessions/${encodeURIComponent(sessionId)}/snapshots/${snapshotId}`,
       {},
@@ -231,11 +233,7 @@ private async request<T>(
   }
 
   /// Writes a file, creating it or replacing it.
-  async writeFile(
-    sessionId: string,
-    path: string,
-    bytes: Uint8Array,
-  ): Promise<Result<void>> {
+  async writeFile(sessionId: string, path: string, bytes: Uint8Array): Promise<Result<void>> {
     const encoded = encodeFsPath(path)
     if (isSandboxError(encoded)) return encoded
     const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
@@ -244,7 +242,7 @@ private async request<T>(
       headers: { "Content-Type": "application/octet-stream" },
       body: bytes as BodyInit,
     })
-    return isSandboxError(response) ? response : (undefined as void)
+    return isSandboxError(response) ? response : undefined
   }
 
   /// Deletes a file or an empty directory.
@@ -253,7 +251,7 @@ private async request<T>(
     if (isSandboxError(encoded)) return encoded
     const url = `/v1/sessions/${encodeURIComponent(sessionId)}/fs/${encoded}`
     const response = await this.fetch(url, { method: "DELETE" })
-    return isSandboxError(response) ? response : (undefined as void)
+    return isSandboxError(response) ? response : undefined
   }
 
   private async fetch(url: string, init: RequestInit = {}): Promise<Result<Response>> {

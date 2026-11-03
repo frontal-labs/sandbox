@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { snakeToCamel, camelToSnake, toCamelCase, toSnakeCase } from "./convert.js"
+import { toCamelCase, toSnakeCase } from "./convert.js"
 
 export const TierSchema = z.enum(["isolate", "vm"])
 export type Tier = z.infer<typeof TierSchema>

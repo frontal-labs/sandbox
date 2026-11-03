@@ -2,8 +2,8 @@
 // Kept apart from `Client` so each call is one request to the /v1 API. The server
 // routes are documented in docs/tier1-agent-interfaces.md.
 
-import { createSandboxError } from "../errors/index.js"
 import type { ErrorCode } from "../errors/index.js"
+import { createSandboxError } from "../errors/index.js"
 import { toCamelCase } from "../types/convert.js"
 
 export interface Tier1Config {
