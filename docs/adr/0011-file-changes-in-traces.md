@@ -16,7 +16,7 @@ Committed trees are Merkle objects (PLAN.md §4.3). A directory's hash covers it
 ## Decision
 - `sandbox_vfs::diff_trees(store, from, to)` walks two committed roots and returns every path that differs, sorted by path. Directories whose hashes match are skipped without being read. A missing node is an error, not an empty tree, so a damaged store cannot report a whole tree as deleted.
 - Each change has an operation (`FileOp`: `create`, `write`, `delete`, `mkdir`, `symlink`), and for regular files the content hashes before and after. Directories and symlinks carry no content hash.
-- A command's changes are the diff between the committed root before it runs and the committed root after it. `sandbox-session` exposes `committed_root` and `changed_since`. Both the server exec handler and `sandbox run`/`sandbox shell` use them.
+- A command's changes are the diff between the committed root before it runs and the committed root after it. `sandbox-session` exposes `committed_root` and `changed_since`. Both the server exec handler and `frontal-sandbox run`/`frontal-sandbox shell` use them.
 - Each `RunRecord` gains an optional `files` list. The line format writes it only when it is non-empty, so existing traces parse unchanged and the format version stays 1. Replay still compares outputs and exit codes only. File state depends on the starting state, which replay does not restore.
 - If a root cannot be read, the run is kept with an empty file list, and the trace is marked incomplete (`X-Trace-Complete: false`). A trace never claims a complete file list it does not have.
 - Known limits, which are reported rather than hidden:

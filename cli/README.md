@@ -1,4 +1,4 @@
-# sandbox CLI
+# Frontal Sandbox CLI
 
 The `frontal-sandbox` binary, built from the `cli` crate. It runs commands in the local isolate runtime, drives a running server, and records and replays traces.
 

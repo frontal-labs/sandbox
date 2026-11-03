@@ -1,6 +1,6 @@
 # Docker
 
-Container setup for the Frontal Sandbox server. The image runs `sandbox serve`,
+Container setup for the Frontal Sandbox server. The image runs `frontal-sandbox serve`,
 the CLI subcommand that starts the HTTP API in `crates/sandbox-server`.
 
 > **Status: local and development use.** The API has no TLS, no rate limiting,
@@ -81,7 +81,7 @@ The server's flags (`--addr`, `--data-dir`) are fixed in the image's `CMD`. To
 run without persistence, override the command:
 
 ```bash
-docker compose -f docker/compose.yaml run --rm sandbox serve --addr 0.0.0.0:8080
+docker compose -f docker/compose.yaml run --rm frontal-sandbox serve --addr 0.0.0.0:8080
 ```
 
 That mode keeps everything in memory, and a new key is printed on each start.

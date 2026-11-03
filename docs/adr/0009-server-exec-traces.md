@@ -20,7 +20,7 @@ Traces (ADR 0007) were recorded only by the local CLI. The server ran commands, 
 
 ## Consequences
 ### Positive
-- A server session can be replayed with `sandbox replay`, using the same tool as local traces.
+- A server session can be replayed with `frontal-sandbox replay`, using the same tool as local traces.
 - The trace format is unchanged.
 
 ### Negative

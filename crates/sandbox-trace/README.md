@@ -1,8 +1,8 @@
-# sandbox-trace
+# Sandbox Trace
 
 Trace files and replay for the sandbox system. See [ADR 0007](../../docs/adr/0007-trace-format-and-replay.md).
 
-**Status: implemented for the isolate runtime, locally and on the server.** `sandbox run --trace` and `sandbox shell --trace` record scripts, their outcomes, and the files each script changed. The server records each exec the same way (ADRs 0009, 0011). `sandbox replay` re-runs a trace and compares outputs and exit codes.
+**Status: implemented for the isolate runtime, locally and on the server.** `frontal-sandbox run --trace` and `frontal-sandbox shell --trace` record scripts, their outcomes, and the files each script changed. The server records each exec the same way (ADRs 0009, 0011). `frontal-sandbox replay` re-runs a trace and compares outputs and exit codes.
 
 ## Public API
 

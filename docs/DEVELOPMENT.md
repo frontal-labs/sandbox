@@ -37,7 +37,7 @@ cd sandbox
 # rustup installs the pinned toolchain from rust-toolchain.toml
 cargo build --workspace
 cargo test --workspace      # runs the tests that exist; see TESTING.md
-cargo run --bin sandbox -- --help
+cargo run --bin frontal-sandbox -- --help
 ```
 
 The `frontal-sandbox` binary comes from the `cli` crate (`cli/Cargo.toml`). The crate
@@ -258,8 +258,8 @@ the GitHub release for each `v*` tag, with `SHA256SUMS` attached.
 
 ```bash
 # Run the CLI (run and shell work; the other subcommands are not implemented)
-cargo run --bin sandbox -- --help
-cargo run --bin sandbox -- run "echo hello"
+cargo run --bin frontal-sandbox -- --help
+cargo run --bin frontal-sandbox -- run "echo hello"
 ```
 
 There is no server binary yet. `crates/sandbox-server` is a library
@@ -274,7 +274,7 @@ The `cli` crate depends on `tracing-subscriber`. Use `RUST_LOG` with the
 standard `tracing` filter syntax if the binary initializes a subscriber:
 
 ```bash
-RUST_LOG=debug cargo run --bin sandbox -- run "ls"
+RUST_LOG=debug cargo run --bin frontal-sandbox -- run "ls"
 RUST_LOG=sandbox_vfs=trace cargo test -p sandbox-vfs
 ```
 
