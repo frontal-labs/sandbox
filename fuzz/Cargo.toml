@@ -13,7 +13,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-prost = "0.13"
+prost = "0.14"
 sandbox-cas = { path = "../crates/sandbox-cas" }
 sandbox-proto = { path = "../crates/sandbox-proto" }
 sandbox-shell = { path = "../crates/sandbox-shell" }
