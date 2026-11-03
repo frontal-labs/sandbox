@@ -13,6 +13,11 @@ rust_library(
         "@crates//:serde",
         "@crates//:prost",
         "@crates//:prost-types",
+        "//crates/sandbox-proto:sandbox_proto",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-shell:sandbox_shell",
+        "@crates//:tokio-stream",
+        "@crates//:tonic",
     ],
     proc_macro_deps = [
     ],
@@ -34,6 +39,11 @@ rust_library(
         "@crates//:prost",
         "@crates//:prost-types",
         "@crates//:vsock",
+        "//crates/sandbox-proto:sandbox_proto",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-shell:sandbox_shell",
+        "@crates//:tokio-stream",
+        "@crates//:tonic",
     ],
     proc_macro_deps = [
     ],

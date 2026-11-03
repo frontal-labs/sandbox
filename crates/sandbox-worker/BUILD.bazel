@@ -23,6 +23,7 @@ rust_library(
         "@crates//:tower",
         "@crates//:nix",
         "@crates//:rustix",
+        "//crates/sandbox-vfs:sandbox_vfs",
     ] + select({
         # Namespaces, seccomp, and cgroups exist only on Linux (PLAN §4.13, ADR 0022).
         "@platforms//os:linux": [

@@ -20,7 +20,9 @@ rust_library(
         "@crates//:deno_url",
         "@crates//:deno_webidl",
         "@crates//:swc_core",
-],
+        "@crates//:serde_json",
+        "@crates//:deno_error",
+    ],
     proc_macro_deps = [
         "@crates//:async-trait",
     ],
@@ -48,6 +50,8 @@ rust_test(
         "@crates//:tracing",
         ":sandbox_runtime",
         "@crates//:tokio",
+        "@crates//:serde_json",
+        "@crates//:deno_error",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
@@ -65,6 +69,8 @@ rust_test(
         "//crates/sandbox-types:sandbox_types",
         ":sandbox_runtime",
         "@crates//:tokio",
+        "@crates//:serde_json",
+        "@crates//:deno_error",
     ],
     visibility = ["//visibility:public"],
 )

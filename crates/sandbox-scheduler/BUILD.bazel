@@ -13,6 +13,9 @@ rust_library(
         "@crates//:serde",
         "@crates//:redb",
         "@crates//:tonic",
+        "@crates//:serde_json",
+        "@crates//:prost",
+        "@crates//:uuid",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
@@ -38,6 +41,9 @@ rust_library(
         "@crates//:redb",
         "@crates//:tonic",
         "@crates//:sqlx",
+        "@crates//:serde_json",
+        "@crates//:prost",
+        "@crates//:uuid",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
