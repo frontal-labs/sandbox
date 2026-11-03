@@ -504,6 +504,9 @@ impl Shell {
                 self.flow = Some(Flow::Abort);
                 return failure_with("sandbox: step limit exceeded".to_string(), 1);
             }
+            // Each command is a point where the caller can cancel the run or serve other
+            // tasks. A long loop would otherwise hold its runtime worker until it ends.
+            tokio::task::yield_now().await;
             // Every recursive path runs through here: function calls, subshells,
             // substitutions, and loop bodies. The step budget alone is too late, because
             // a recursive call overflows the stack before it runs out (ADR 0018).
