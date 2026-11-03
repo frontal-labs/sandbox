@@ -186,7 +186,8 @@ impl IsolateBackend {
             shell.chdir(cwd).await?;
         }
         let stdin = req.stdin.unwrap_or_default();
-        let run = CpuMeter::new(shell.run_argv_streamed(&req.argv, &stdin, observer));
+        let run =
+            sandbox_shell::cpu::CpuMeter::new(shell.run_argv_streamed(&req.argv, &stdin, observer));
         let (limit, reason) = effective_timeout(req.timeout_ms, session_wall_secs(&self.limits));
         // The shell runs no background tasks, and its loops are bounded by a
         // command budget, so dropping the command at its next await is safe.
@@ -196,51 +197,6 @@ impl IsolateBackend {
             .map_err(|_| SandboxError::timeout(format!("command exceeded {reason}")))?;
         let (out, cpu) = timed;
         Ok(to_result(out?, started, cpu))
-    }
-}
-
-/// The CPU time of the calling thread, from the thread CPU clock.
-fn thread_cpu() -> Duration {
-    let time = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
-    Duration::new(
-        u64::try_from(time.tv_sec).unwrap_or(0),
-        u32::try_from(time.tv_nsec).unwrap_or(0),
-    )
-}
-
-/// Runs a future and totals the CPU time spent in its `poll` calls. A command is polled
-/// on whichever thread the runtime picks, so the total is taken per poll, not from one
-/// thread's clock at the start and the end. Time spent waiting, such as on the
-/// scheduler, is not CPU time and is not counted.
-struct CpuMeter<F> {
-    inner: std::pin::Pin<Box<F>>,
-    cpu: Duration,
-}
-
-impl<F: std::future::Future> CpuMeter<F> {
-    fn new(inner: F) -> Self {
-        CpuMeter {
-            inner: Box::pin(inner),
-            cpu: Duration::ZERO,
-        }
-    }
-}
-
-impl<F: std::future::Future> std::future::Future for CpuMeter<F> {
-    type Output = (F::Output, Duration);
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.get_mut();
-        let before = thread_cpu();
-        let polled = this.inner.as_mut().poll(cx);
-        this.cpu += thread_cpu().saturating_sub(before);
-        match polled {
-            std::task::Poll::Ready(output) => std::task::Poll::Ready((output, this.cpu)),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
     }
 }
 
@@ -301,7 +257,7 @@ impl Session for IsolateBackend {
     async fn run_script(&self, script: &str) -> Result<ExecResult, SandboxError> {
         let started = Instant::now();
         let mut shell = self.shell.lock().await;
-        let (out, cpu) = CpuMeter::new(shell.run(script)).await;
+        let (out, cpu) = sandbox_shell::cpu::CpuMeter::new(shell.run(script)).await;
         Ok(to_result(out?, started, cpu))
     }
 

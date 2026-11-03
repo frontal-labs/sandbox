@@ -108,17 +108,21 @@ impl GuestService for GuestServiceImpl {
                 .map_err(|e| Status::internal(e.to_string()))?;
         }
 
-        let out = shell
-            .run_argv_streamed(&argv, &stdin.unwrap_or_default(), None)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let started = std::time::Instant::now();
+        let (out, cpu) = sandbox_shell::cpu::CpuMeter::new(shell.run_argv_streamed(
+            &argv,
+            &stdin.unwrap_or_default(),
+            None,
+        ))
+        .await;
+        let out = out.map_err(|e| Status::internal(e.to_string()))?;
 
         let exec_result = sandbox_types::ExecResult {
             exit_code: out.exit_code,
             stdout: out.stdout,
             stderr: out.stderr,
-            cpu_ms: 0,
-            wall_ms: 0,
+            cpu_ms: u64::try_from(cpu.as_millis()).unwrap_or(u64::MAX),
+            wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         };
 
         Ok(Response::new(exec_result.into()))

@@ -4154,6 +4154,7 @@ dependencies = [
  "flate2",
  "parking_lot",
  "regex",
+ "rustix 0.38.44",
  "sandbox-cas",
  "sandbox-runtime",
  "sandbox-types",

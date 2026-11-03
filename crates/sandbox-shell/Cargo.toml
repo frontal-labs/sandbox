@@ -13,6 +13,7 @@ sandbox-vfs = { path = "../sandbox-vfs" }
 sandbox-runtime = { path = "../sandbox-runtime" }
 sandbox-wasm = { path = "../sandbox-wasm" }
 tokio = { workspace = true }
+rustix = { workspace = true }
 regex = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }

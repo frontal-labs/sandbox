@@ -17,6 +17,7 @@
 
 pub mod ast;
 pub mod builtins;
+pub mod cpu;
 pub mod expand;
 pub mod interpreter;
 pub mod parser;

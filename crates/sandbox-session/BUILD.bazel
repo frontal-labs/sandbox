@@ -13,6 +13,7 @@ rust_library(
         "//crates/sandbox-shell:sandbox_shell",
         "//crates/sandbox-policy:sandbox_policy",
         "@crates//:tokio",
+        "@crates//:rustix",
         "@crates//:bytes",
         "@crates//:tracing",
         "@crates//:thiserror",

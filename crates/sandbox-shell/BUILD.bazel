@@ -10,6 +10,7 @@ rust_library(
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-wasm:sandbox_wasm",
         "@crates//:tokio",
+        "@crates//:rustix",
         "@crates//:bytes",
         "@crates//:tracing",
         "@crates//:thiserror",
