@@ -33,7 +33,9 @@ rust_library(
         "//crates/sandbox-trace:sandbox_trace",
         "//crates/sandbox-cas:sandbox_cas",
         "@crates//:tokio-stream",
-],
+        "@crates//:tokio-util",
+        "@crates//:futures",
+    ],
     proc_macro_deps = [
     ],
     visibility = ["//visibility:public"],

@@ -17,6 +17,8 @@ sandbox-trace = { path = "../sandbox-trace" }
 tokio = { workspace = true }
 sqlx = { workspace = true, optional = true }
 tokio-stream = { workspace = true }
+futures = { workspace = true }
+tokio-util = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }

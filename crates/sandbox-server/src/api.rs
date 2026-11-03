@@ -37,6 +37,7 @@ use std::time::SystemTime;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::RwLock;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 /// What one key has used. Counts since the server started, and held in memory,
@@ -1156,7 +1157,7 @@ async fn exec_streaming(
     }
     let own = owned(&state, &owner, &id).await?;
     let gate = own.gate.clone().lock_owned().await;
-    let lines = start_exec(state, owner, own, request, gate);
+    let lines = start_exec(state, owner, own, request, gate, CancellationToken::new());
     let body = UnboundedReceiverStream::new(lines).map(|event| {
         // An event that cannot be encoded ends the stream with an error, so the
         // client sees a truncated response rather than a silent gap.
@@ -1173,14 +1174,17 @@ async fn exec_streaming(
 }
 
 /// Runs `request` in the background and returns the stream of its events. The stream
-/// ends with an `Exit` or an `Error`. The command keeps `gate` until it ends, so no
-/// other command or checkpoint runs on the session meanwhile.
+/// ends with an `Exit`, an `Error`, or, when `cancel` fires first, a `CANCELLED` error.
+/// The command keeps `gate` until it ends, so no other command or checkpoint runs on
+/// the session meanwhile. A cancelled run is dropped at its next await, as a timed-out
+/// one is, so its partial writes stay in the filesystem.
 fn start_exec(
     state: AppState,
     owner: KeyId,
     own: Owned,
     request: ExecRequest,
     gate: tokio::sync::OwnedMutexGuard<()>,
+    cancel: CancellationToken,
 ) -> UnboundedReceiver<ExecEvent> {
     let (events, lines) = tokio::sync::mpsc::unbounded_channel::<ExecEvent>();
     let output = events.clone();
@@ -1190,15 +1194,21 @@ fn start_exec(
     });
     tokio::spawn(async move {
         let _gate = gate;
-        let last = match run_exec(&state, &owner, &own, request, Some(observer)).await {
-            Ok((result, _)) => ExecEvent::Exit {
-                exit_code: result.exit_code,
-                cpu_ms: result.cpu_ms,
-                wall_ms: result.wall_ms,
+        let last = tokio::select! {
+            outcome = run_exec(&state, &owner, &own, request, Some(observer)) => match outcome {
+                Ok((result, _)) => ExecEvent::Exit {
+                    exit_code: result.exit_code,
+                    cpu_ms: result.cpu_ms,
+                    wall_ms: result.wall_ms,
+                },
+                Err(ApiError(error)) => ExecEvent::Error {
+                    code: error.code,
+                    message: error.message,
+                },
             },
-            Err(ApiError(error)) => ExecEvent::Error {
-                code: error.code,
-                message: error.message,
+            () = cancel.cancelled() => ExecEvent::Error {
+                code: ErrorCode::Cancelled,
+                message: "the command was cancelled".to_string(),
             },
         };
         let _ = events.send(last);
@@ -1206,10 +1216,15 @@ fn start_exec(
     lines
 }
 
+/// The read half of a WebSocket, and the write half.
+type SocketRx = futures::stream::SplitStream<WebSocket>;
+type SocketTx = futures::stream::SplitSink<WebSocket, Message>;
+
 /// Runs commands over a WebSocket at `/v1/sessions/{id}/ws`. The client's first
-/// message is the JSON `ExecRequest`. The server then sends each `ExecEvent` as a
-/// text message, and closes the connection after the final `Exit` or `Error`.
-/// Later client messages are not read (ADR 0030).
+/// message is the JSON `ExecRequest`. The server sends each `ExecEvent` as a text
+/// message and closes the connection after the final event. While the command runs,
+/// the client may send `{"type":"cancel"}` to stop it. Closing the connection also
+/// cancels it, because nothing is left to read its output (ADR 0030).
 async fn exec_websocket(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -1220,46 +1235,67 @@ async fn exec_websocket(
     Ok(ws.on_upgrade(move |socket: WebSocket| serve_exec_socket(socket, state, owner, own)))
 }
 
-async fn serve_exec_socket(mut socket: WebSocket, state: AppState, owner: KeyId, own: Owned) {
-    run_exec_socket(&mut socket, state, owner, own).await;
-    // A close frame tells the client that the stream is complete, not dropped.
-    let _ = socket.send(Message::Close(None)).await;
-}
-
-async fn run_exec_socket(socket: &mut WebSocket, state: AppState, owner: KeyId, own: Owned) {
-    let request = match read_exec_request(socket).await {
+async fn serve_exec_socket(socket: WebSocket, state: AppState, owner: KeyId, own: Owned) {
+    let (mut tx, mut rx) = futures::StreamExt::split(socket);
+    let request = match read_exec_request(&mut rx).await {
         Ok(request) => request,
         Err(error) => {
-            send_event(
-                socket,
-                &ExecEvent::Error {
-                    code: error.code,
-                    message: error.message,
-                },
-            )
-            .await;
+            send_event(&mut tx, &error_event(error)).await;
+            close(&mut tx).await;
             return;
         }
     };
     if request.argv.is_empty() {
-        send_event(
-            socket,
-            &ExecEvent::Error {
-                code: ErrorCode::InvalidArgument,
-                message: "argv is empty".to_string(),
-            },
-        )
-        .await;
+        let error = SandboxError::invalid_argument("argv is empty");
+        send_event(&mut tx, &error_event(error)).await;
+        close(&mut tx).await;
         return;
     }
     let gate = own.gate.clone().lock_owned().await;
-    let mut lines = start_exec(state, owner, own, request, gate);
-    forward_events(socket, &mut lines).await;
+    let cancel = CancellationToken::new();
+    let mut lines = start_exec(state, owner, own, request, gate, cancel.clone());
+    let watcher = tokio::spawn(watch_client(rx, cancel));
+    forward_events(&mut tx, &mut lines).await;
+    watcher.abort();
+    close(&mut tx).await;
+}
+
+fn error_event(error: SandboxError) -> ExecEvent {
+    ExecEvent::Error {
+        code: error.code,
+        message: error.message,
+    }
+}
+
+/// A message the client sends while a command runs.
+#[derive(Deserialize)]
+struct ClientMessage {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+/// Watches the client during a command. A cancel message cancels it, and so does the
+/// end of the connection, whether a close frame, an error, or the stream ending.
+async fn watch_client(mut rx: SocketRx, cancel: CancellationToken) {
+    loop {
+        match futures::StreamExt::next(&mut rx).await {
+            Some(Ok(Message::Text(text)))
+                if serde_json::from_str::<ClientMessage>(&text)
+                    .is_ok_and(|message| message.kind == "cancel") =>
+            {
+                return cancel.cancel();
+            }
+            Some(Ok(
+                Message::Text(_) | Message::Binary(_) | Message::Ping(_) | Message::Pong(_),
+            )) => {}
+            _ => return cancel.cancel(),
+        }
+    }
 }
 
 /// Reads the exec request that must be the connection's first message.
-async fn read_exec_request(socket: &mut WebSocket) -> Result<ExecRequest, SandboxError> {
-    match socket.recv().await {
+async fn read_exec_request(rx: &mut SocketRx) -> Result<ExecRequest, SandboxError> {
+    match futures::StreamExt::next(rx).await {
         Some(Ok(Message::Text(text))) => serde_json::from_str(&text).map_err(|e| {
             SandboxError::invalid_argument(format!("the first message is not an exec request: {e}"))
         }),
@@ -1271,17 +1307,24 @@ async fn read_exec_request(socket: &mut WebSocket) -> Result<ExecRequest, Sandbo
 
 /// Sends one event as a text message. False when the event cannot be sent or the
 /// client has gone away.
-async fn send_event(socket: &mut WebSocket, event: &ExecEvent) -> bool {
+async fn send_event(tx: &mut SocketTx, event: &ExecEvent) -> bool {
     let Ok(json) = serde_json::to_string(event) else {
         return false;
     };
-    socket.send(Message::Text(json)).await.is_ok()
+    futures::SinkExt::send(tx, Message::Text(json))
+        .await
+        .is_ok()
+}
+
+/// A close frame, so the client can tell that the stream is complete rather than dropped.
+async fn close(tx: &mut SocketTx) {
+    let _ = futures::SinkExt::send(tx, Message::Close(None)).await;
 }
 
 /// Sends each event as a text message until the command ends or the client leaves.
-async fn forward_events(socket: &mut WebSocket, lines: &mut UnboundedReceiver<ExecEvent>) {
+async fn forward_events(tx: &mut SocketTx, lines: &mut UnboundedReceiver<ExecEvent>) {
     while let Some(event) = lines.recv().await {
-        if !send_event(socket, &event).await {
+        if !send_event(tx, &event).await {
             return;
         }
     }

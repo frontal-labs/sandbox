@@ -1,7 +1,7 @@
 # 0030: WebSocket exec route
 
 ## Status
-Accepted
+Accepted. The cancellation decision below is superseded by ADR 0032.
 
 ## Date
 2026-11-03
@@ -15,7 +15,7 @@ PLAN §4.15 places the interactive WebSocket at `GET /v1/sessions/{id}/ws`. The 
 - A first message that is not a valid request, or an empty `argv`, is answered with an `error` event (`INVALID_ARGUMENT`) and a close frame. Nothing runs.
 - The session gate is taken after the request is read, so an idle connection does not hold the session.
 - The command runs in the background, as in the NDJSON path. Both handlers now share one starter, `start_exec`.
-- Stdin beyond the request's `stdin` field and signals are not part of this route yet. Later client messages are not read. Closing the socket does not cancel the command. Cancellation needs the shell to accept a cancel token, and that is future work.
+- Stdin beyond the request's `stdin` field and signals are not part of this route yet. Later client messages are not read in this decision. Closing the socket does not cancel the command. Superseded by ADR 0032, which adds `cancel` and cancellation on disconnect.
 
 ## Consequences
 ### Positive
@@ -27,7 +27,7 @@ PLAN §4.15 places the interactive WebSocket at `GET /v1/sessions/{id}/ws`. The 
 - Interactive stdin and signals are still missing, so the route covers exec and streaming only.
 
 ### Risks
-- A client that disconnects leaves its command running to completion or its timeout, as before. That is not a containment issue, because the session's limits still apply.
+- A client that disconnects leaves its command running to completion or its timeout. Superseded by ADR 0032.
 
 ## Alternatives Considered
 - Keep the JSON body on the GET upgrade. Rejected: it cannot be used from browsers.

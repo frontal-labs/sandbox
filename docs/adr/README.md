@@ -73,6 +73,7 @@ What is the change that we're proposing and/or doing?
 | [0028](0028-per-byte-streaming-builtins.md) | Per-byte streaming for shell builtins | Accepted | 2026-11-01 |
 | [0029](0029-trace-encoding-returns-errors.md) | Trace encoding returns errors | Accepted | 2026-11-03 |
 | [0030](0030-websocket-exec-route.md) | WebSocket exec route | Accepted | 2026-11-03 |
+| [0032](0032-websocket-cancel.md) | Cancelling a WebSocket command | Accepted | 2026-11-03 |
 | [0031](0031-bazel-resolves-from-its-own-lock.md) | Bazel resolves crates from its own lock | Accepted | 2026-11-03 |
 
 Add rows here as `NNNN-title.md` files are created.

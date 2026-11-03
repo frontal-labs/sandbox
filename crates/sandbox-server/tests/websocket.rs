@@ -180,3 +180,96 @@ async fn the_upgrade_is_refused_without_a_valid_key_or_session() {
     let missing = connect(addr, "01ARZ3NDEKTSV4RRFFQ69G5FAV", &key).await;
     assert!(missing.is_err(), "an unknown session must not upgrade");
 }
+
+/// A command that prints once, then loops far longer than any test waits.
+fn long_running_request() -> String {
+    json!({
+        "argv": ["sh", "-c", "echo start; i=0; while [ $i -lt 100000000 ]; do i=$((i+1)); done"],
+        "env": {},
+        "stream": true,
+    })
+    .to_string()
+}
+
+/// Reads until the command has printed, so that it is known to be running.
+async fn until_first_output(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) {
+    while let Some(message) = socket.next().await {
+        if let Message::Text(text) = message.unwrap() {
+            let event: Value = serde_json::from_str(&text).unwrap();
+            if event["type"] == "output" {
+                return;
+            }
+        }
+    }
+    panic!("the connection closed before the command printed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancel_message_stops_the_command_with_a_cancelled_error() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await.unwrap();
+    socket
+        .send(Message::Text(long_running_request()))
+        .await
+        .unwrap();
+    until_first_output(&mut socket).await;
+    socket
+        .send(Message::Text(json!({"type": "cancel"}).to_string()))
+        .await
+        .unwrap();
+
+    let events = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        events_until_close(&mut socket),
+    )
+    .await
+    .expect("a cancelled command must end promptly");
+    let last = events.last().expect("the stream ends with an event");
+    assert_eq!(last["type"], "error", "{events:?}");
+    assert_eq!(last["code"], "CANCELLED", "{events:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_the_connection_cancels_the_command_and_frees_the_session() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app.clone()).await;
+
+    let mut socket = connect(addr, &session, &key).await.unwrap();
+    socket
+        .send(Message::Text(long_running_request()))
+        .await
+        .unwrap();
+    until_first_output(&mut socket).await;
+    drop(socket);
+
+    // The session's gate is held by the running command. A REST exec on the same
+    // session can only finish once the disconnect has cancelled that command.
+    let exec = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/v1/sessions/{session}/exec"))
+            .header(header::AUTHORIZATION, format!("Bearer {key}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({"argv": ["sh", "-c", "echo after"], "env": {}, "stream": false}).to_string(),
+            ))
+            .unwrap(),
+    );
+    let response = tokio::time::timeout(std::time::Duration::from_secs(20), exec)
+        .await
+        .expect("the disconnect must free the session")
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
