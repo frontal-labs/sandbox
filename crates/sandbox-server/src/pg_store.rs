@@ -91,10 +91,10 @@ impl PgStore {
     pub async fn save<F, Fut>(&self, capture: F) -> Result<(), SandboxError>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Saved>,
+        Fut: std::future::Future<Output = Result<Saved, SandboxError>>,
     {
         let mut revision = self.revision.lock().await;
-        let saved = capture().await;
+        let saved = capture().await?;
         let body = serde_json::to_value(&saved)
             .map_err(|e| SandboxError::internal(format!("cannot encode the state: {e}")))?;
         let written = if *revision == 0 {

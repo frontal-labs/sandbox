@@ -282,10 +282,10 @@ impl Store {
     pub async fn save<F, Fut>(&self, capture: F) -> Result<(), SandboxError>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Saved>,
+        Fut: std::future::Future<Output = Result<Saved, SandboxError>>,
     {
         let mut state = self.state.lock().await;
-        let saved = capture().await;
+        let saved = capture().await?;
         let current = canonical(&saved)?;
 
         let mut lines = Vec::new();
@@ -580,7 +580,7 @@ impl Persistence {
     pub async fn save<F, Fut>(&self, capture: F) -> Result<(), SandboxError>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Saved>,
+        Fut: std::future::Future<Output = Result<Saved, SandboxError>>,
     {
         match self {
             Self::Files(store) => store.save(capture).await,
@@ -744,7 +744,7 @@ mod tests {
     }
 
     async fn save(store: &Store, saved: Saved) {
-        store.save(move || async move { saved }).await.unwrap();
+        store.save(move || async move { Ok(saved) }).await.unwrap();
     }
 
     fn label_of(session: &SavedSession) -> &str {

@@ -428,7 +428,10 @@ fn record(
 }
 
 fn write_trace(path: &Path, runs: Vec<RunRecord>) -> Result<(), SandboxError> {
-    std::fs::write(path, Trace { runs }.to_jsonl())
+    let text = Trace { runs }
+        .to_jsonl()
+        .map_err(|e| SandboxError::internal(format!("cannot encode the trace: {e}")))?;
+    std::fs::write(path, text)
         .map_err(|e| SandboxError::internal(format!("cannot write trace {}: {e}", path.display())))
 }
 

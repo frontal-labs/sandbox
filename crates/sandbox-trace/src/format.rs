@@ -143,13 +143,13 @@ struct LineFile {
 
 impl Trace {
     /// Renders the trace, header first, with a newline after every line.
-    pub fn to_jsonl(&self) -> String {
+    pub fn to_jsonl(&self) -> Result<String, serde_json::Error> {
         let header = Header {
             format: FORMAT.to_string(),
             version: VERSION,
         };
         let mut out = String::new();
-        out.push_str(&serde_json::to_string(&header).expect("header serializes"));
+        out.push_str(&serde_json::to_string(&header)?);
         out.push('\n');
         for run in &self.runs {
             let files = run
@@ -200,10 +200,10 @@ impl Trace {
                     random: run.random_state,
                 },
             };
-            out.push_str(&serde_json::to_string(&line).expect("run line serializes"));
+            out.push_str(&serde_json::to_string(&line)?);
             out.push('\n');
         }
-        out
+        Ok(out)
     }
 
     /// Parses a trace. Blank lines after the header are ignored.
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn a_trace_round_trips_through_its_text_form() {
         let trace = sample();
-        assert_eq!(Trace::parse(&trace.to_jsonl()).unwrap(), trace);
+        assert_eq!(Trace::parse(&trace.to_jsonl().unwrap()).unwrap(), trace);
     }
 
     #[test]
@@ -369,7 +369,7 @@ mod tests {
                 fs: None,
             }],
         };
-        assert_eq!(Trace::parse(&trace.to_jsonl()).unwrap(), trace);
+        assert_eq!(Trace::parse(&trace.to_jsonl().unwrap()).unwrap(), trace);
     }
 
     #[test]
@@ -414,7 +414,7 @@ mod tests {
                 fs: None,
             }],
         };
-        let text = trace.to_jsonl();
+        let text = trace.to_jsonl().unwrap();
         assert!(text.contains(r#""files""#));
         assert_eq!(Trace::parse(&text).unwrap(), trace);
     }
@@ -463,7 +463,7 @@ mod tests {
                 },
             ],
         };
-        let text = trace.to_jsonl();
+        let text = trace.to_jsonl().unwrap();
         assert!(text.contains(r#""fs":{"op":"write""#));
         assert_eq!(Trace::parse(&text).unwrap(), trace);
     }
@@ -483,7 +483,7 @@ mod tests {
     #[test]
     fn a_run_with_no_changes_writes_no_file_list() {
         let trace = sample();
-        assert!(!trace.to_jsonl().contains(r#""files""#));
+        assert!(!trace.to_jsonl().unwrap().contains(r#""files""#));
     }
 
     #[test]
@@ -545,7 +545,7 @@ mod random_state_tests {
                 },
             ],
         };
-        let text = trace.to_jsonl();
+        let text = trace.to_jsonl().unwrap();
         assert!(text.contains("\"random\":18446744073709551612"), "{text}");
         let parsed = Trace::parse(&text).unwrap();
         assert_eq!(parsed, trace);

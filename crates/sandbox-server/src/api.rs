@@ -31,10 +31,10 @@ use sandbox_types::{
 use sandbox_vfs::OpenFlags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::RwLock;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use utoipa::ToSchema;
@@ -646,7 +646,7 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
 }
 
 /// The durable state as it is now.
-async fn capture(state: &AppState) -> crate::persist::Saved {
+async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError> {
     use crate::persist::{Saved, SavedKey, SavedSession, SavedSnapshot};
     let keys = state
         .auth
@@ -676,7 +676,11 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
             .filter_map(|e| {
                 // An entry without a checkpoint has no state to bring back.
                 let checkpoint = e.checkpoint.as_ref()?;
-                Some(SavedSession {
+                let saved = Trace {
+                    runs: e.trace.clone(),
+                }
+                .to_jsonl()
+                .map(|trace| SavedSession {
                     owner: e.owner.as_str().to_string(),
                     state: e.state.clone(),
                     root: checkpoint.root,
@@ -686,20 +690,21 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
                     env: HashMap::new(),
                     sleeping: e.session.is_none(),
                     limits: e.limits.clone(),
-                    trace: Trace {
-                        runs: e.trace.clone(),
-                    }
-                    .to_jsonl(),
+                    trace,
                     trace_complete: e.trace_complete,
                     checkpoint_policy: e.checkpoint_policy,
                     checkpoint_retain: e.checkpoint_retain,
                     roots: e.roots.clone(),
                     spilled: e.spilled.clone(),
                 })
+                .map_err(|err| {
+                    SandboxError::internal(format!("cannot encode the trace of a session: {err}"))
+                });
+                Some(saved)
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?
     };
-    Saved {
+    Ok(Saved {
         version: crate::persist::VERSION,
         keys,
         snapshots,
@@ -707,7 +712,7 @@ async fn capture(state: &AppState) -> crate::persist::Saved {
         sessions,
         // The store sets the epoch when it writes the base file.
         log_epoch: 0,
-    }
+    })
 }
 
 /// Records the session's checkpoint on its entry, so the entry can be saved and
@@ -1173,14 +1178,18 @@ async fn exec_streaming(
         let _ = events.send(last);
     });
     let body = UnboundedReceiverStream::new(lines).map(|event| {
-        let mut line = serde_json::to_vec(&event).expect("an exec event serializes");
+        // An event that cannot be encoded ends the stream with an error, so the
+        // client sees a truncated response rather than a silent gap.
+        let mut line = serde_json::to_vec(&event).map_err(std::io::Error::other)?;
         line.push(b'\n');
-        Ok::<_, Infallible>(Bytes::from(line))
+        Ok::<Bytes, std::io::Error>(Bytes::from(line))
     });
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, "application/x-ndjson")
-        .body(Body::from_stream(body))
-        .expect("the content type is a valid header"))
+    let mut response = Response::new(Body::from_stream(body));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/x-ndjson"),
+    );
+    Ok(response)
 }
 
 /// Runs a command and streams its output over WebSocket. Each message is a
@@ -1220,17 +1229,20 @@ async fn exec_websocket(
         let _ = events.send(last);
     });
     Ok(ws.on_upgrade(move |mut socket: WebSocket| async move {
-        while let Some(event) = lines.recv().await {
-            let json = serde_json::to_vec(&event).expect("an exec event serializes");
-            if socket
-                .send(Message::Text(String::from_utf8(json).unwrap()))
-                .await
-                .is_err()
-            {
-                break;
-            }
-        }
+        forward_events(&mut socket, &mut lines).await;
     }))
+}
+
+/// Sends each event as a text message until the command ends or the client leaves.
+async fn forward_events(socket: &mut WebSocket, lines: &mut UnboundedReceiver<ExecEvent>) {
+    while let Some(event) = lines.recv().await {
+        let Ok(json) = serde_json::to_string(&event) else {
+            return;
+        };
+        if socket.send(Message::Text(json)).await.is_err() {
+            return;
+        }
+    }
 }
 
 /// Most runs one session's trace holds. Runs past this are not recorded, and the
@@ -1509,7 +1521,9 @@ pub async fn get_trace(
             .ok_or_else(|| SandboxError::not_found(format!("session {id} not found")))?;
         (entry.trace.clone(), entry.trace_complete)
     };
-    let body = Trace { runs }.to_jsonl();
+    let body = Trace { runs }
+        .to_jsonl()
+        .map_err(|e| SandboxError::internal(format!("cannot encode the trace: {e}")))?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/x-ndjson"),
