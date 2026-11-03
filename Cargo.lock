@@ -4127,6 +4127,7 @@ dependencies = [
  "bytes",
  "futures",
  "parking_lot",
+ "rustix 0.38.44",
  "sandbox-cas",
  "sandbox-policy",
  "sandbox-runtime",

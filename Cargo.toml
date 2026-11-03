@@ -99,7 +99,7 @@ argon2 = { version = "0.6", features = ["rand_core"] }
 rustls = { version = "0.23", features = ["std"] }
 ipnet = "2"
 seccompiler = "0.5"
-rustix = { version = "0.38", features = ["process", "fs", "net", "mount"] }
+rustix = { version = "0.38", features = ["process", "fs", "net", "mount", "time"] }
 nix = { version = "0.28", features = ["fs"] }
 brush-parser = "0.2"
 uutils_core = { version = "0.0.25", features = ["fs"] }

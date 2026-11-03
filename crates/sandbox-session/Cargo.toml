@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 futures = { workspace = true }
+rustix = { workspace = true }
 
 [features]
 default = []

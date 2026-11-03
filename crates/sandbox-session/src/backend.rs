@@ -118,13 +118,12 @@ fn session_wall_secs(limits: &ResourceLimits) -> u64 {
         .unwrap_or_else(|| ResourceLimits::default().wall_timeout_secs.unwrap_or(300))
 }
 
-fn to_result(out: ExecutionResult, started: Instant) -> ExecResult {
+fn to_result(out: ExecutionResult, started: Instant, cpu: Duration) -> ExecResult {
     ExecResult {
         exit_code: out.exit_code,
         stdout: out.stdout,
         stderr: out.stderr,
-        // CPU accounting is not implemented; this is wall time only.
-        cpu_ms: 0,
+        cpu_ms: u64::try_from(cpu.as_millis()).unwrap_or(u64::MAX),
         wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     }
 }
@@ -187,15 +186,61 @@ impl IsolateBackend {
             shell.chdir(cwd).await?;
         }
         let stdin = req.stdin.unwrap_or_default();
-        let run = shell.run_argv_streamed(&req.argv, &stdin, observer);
+        let run = CpuMeter::new(shell.run_argv_streamed(&req.argv, &stdin, observer));
         let (limit, reason) = effective_timeout(req.timeout_ms, session_wall_secs(&self.limits));
         // The shell runs no background tasks, and its loops are bounded by a
         // command budget, so dropping the command at its next await is safe.
         // Its partial writes stay in the filesystem, as they would after a kill.
-        let out = tokio::time::timeout(limit, run).await;
-        let out =
-            out.map_err(|_| SandboxError::timeout(format!("command exceeded {reason}")))??;
-        Ok(to_result(out, started))
+        let timed = tokio::time::timeout(limit, run)
+            .await
+            .map_err(|_| SandboxError::timeout(format!("command exceeded {reason}")))?;
+        let (out, cpu) = timed;
+        Ok(to_result(out?, started, cpu))
+    }
+}
+
+/// The CPU time of the calling thread, from the thread CPU clock.
+fn thread_cpu() -> Duration {
+    let time = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
+    Duration::new(
+        u64::try_from(time.tv_sec).unwrap_or(0),
+        u32::try_from(time.tv_nsec).unwrap_or(0),
+    )
+}
+
+/// Runs a future and totals the CPU time spent in its `poll` calls. A command is polled
+/// on whichever thread the runtime picks, so the total is taken per poll, not from one
+/// thread's clock at the start and the end. Time spent waiting, such as on the
+/// scheduler, is not CPU time and is not counted.
+struct CpuMeter<F> {
+    inner: std::pin::Pin<Box<F>>,
+    cpu: Duration,
+}
+
+impl<F: std::future::Future> CpuMeter<F> {
+    fn new(inner: F) -> Self {
+        CpuMeter {
+            inner: Box::pin(inner),
+            cpu: Duration::ZERO,
+        }
+    }
+}
+
+impl<F: std::future::Future> std::future::Future for CpuMeter<F> {
+    type Output = (F::Output, Duration);
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        let before = thread_cpu();
+        let polled = this.inner.as_mut().poll(cx);
+        this.cpu += thread_cpu().saturating_sub(before);
+        match polled {
+            std::task::Poll::Ready(output) => std::task::Poll::Ready((output, this.cpu)),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
     }
 }
 
@@ -256,8 +301,8 @@ impl Session for IsolateBackend {
     async fn run_script(&self, script: &str) -> Result<ExecResult, SandboxError> {
         let started = Instant::now();
         let mut shell = self.shell.lock().await;
-        let out = shell.run(script).await?;
-        Ok(to_result(out, started))
+        let (out, cpu) = CpuMeter::new(shell.run(script)).await;
+        Ok(to_result(out?, started, cpu))
     }
 
     fn fs(&self) -> &dyn SessionFs {
@@ -549,6 +594,20 @@ mod tests {
         req.timeout_ms = Some(5_000);
         let out = backend.exec(req).await.unwrap();
         assert_eq!(out.stdout, b"quick\n".to_vec());
+    }
+
+    #[tokio::test]
+    async fn cpu_ms_counts_the_cpu_a_busy_command_uses() {
+        let backend = new_backend().await;
+        let busy = argv(&[
+            "sh",
+            "-c",
+            "i=0; while [ $i -lt 200000 ]; do i=$((i+1)); done",
+        ]);
+        let out = backend.exec(busy).await.unwrap();
+        assert!(out.cpu_ms > 0, "a busy loop must report CPU time: {out:?}");
+        // One command runs on one thread at a time, so its CPU cannot exceed its wall time.
+        assert!(out.cpu_ms <= out.wall_ms + 1, "{out:?}");
     }
 
     #[tokio::test]
