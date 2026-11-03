@@ -11,6 +11,7 @@ fn module(name: &str) -> Option<&'static [u8]> {
     match name {
         "jq" => Some(include_bytes!("../fixtures/jq_tool.wasm")),
         "rg" => Some(include_bytes!("../fixtures/rg_tool.wasm")),
+        "sqlite3" => Some(include_bytes!("../fixtures/sqlite3_tool.wasm")),
         _ => None,
     }
 }
@@ -18,7 +19,7 @@ fn module(name: &str) -> Option<&'static [u8]> {
 #[test]
 fn the_pinned_hashes_match_the_shipped_modules() {
     let registry = Registry::parse(MANIFEST).unwrap();
-    for name in ["jq", "rg"] {
+    for name in ["jq", "rg", "sqlite3"] {
         let spec = registry.find(name).unwrap_or_else(|| panic!("{name} is not in the manifest"));
         let bytes = module(name).unwrap();
         spec.verify(bytes)

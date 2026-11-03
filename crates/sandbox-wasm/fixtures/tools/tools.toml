@@ -45,3 +45,11 @@ version = "0.1.0"
 hash = "ce9843ca6c00dd73595c9644567a5b7b47e34c9ef90a7864e14c336a1daf6749"
 # Compiling the Unicode word class costs about 10^8 instructions on wasm.
 fuel = 1000000000
+
+[[tool]]
+name = "sqlite3"
+path = "/opt/sqlite3_tool.wasm"
+version = "3.51.3"
+hash = "2f1f95f876baab13f93b1b2b1652011234486cbe0573c663acffc9f695070e86"
+# SQLite's own page cache and parser are instruction-heavy on wasm.
+fuel = 1000000000

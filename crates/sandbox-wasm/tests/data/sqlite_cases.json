@@ -1,0 +1,60 @@
+[
+ {
+  "flags": [
+   "-header"
+  ],
+  "sql": "create table t(x,y); insert into t values(1,'one'),(2,NULL); select * from t;",
+  "expected": "x|y\n1|one\n2|\n",
+  "status": 0
+ },
+ {
+  "flags": [],
+  "sql": "select 1+2, 'a' || 'b', null;",
+  "expected": "3|ab|\n",
+  "status": 0
+ },
+ {
+  "flags": [],
+  "sql": "select 7*6;",
+  "expected": "42\n",
+  "status": 0
+ },
+ {
+  "flags": [],
+  "sql": "select typeof(1.5), 3/2, 3.0*2;",
+  "expected": "real|1|6.0\n",
+  "status": 0
+ },
+ {
+  "flags": [],
+  "sql": "create table n(id integer primary key, name text); insert into n(name) values('a'),('b'); select id, name from n order by id desc;",
+  "expected": "2|b\n1|a\n",
+  "status": 0
+ },
+ {
+  "flags": [],
+  "sql": "select count(*) from (select 1 union all select 2 union all select 3);",
+  "expected": "3\n",
+  "status": 0
+ },
+ {
+  "flags": [
+   "-header"
+  ],
+  "sql": "select 'x' as label, 10 as n;",
+  "expected": "label|n\nx|10\n",
+  "status": 0
+ },
+ {
+  "flags": [],
+  "sql": "select group_concat(v, ',') from (select 'p' v union all select 'q');",
+  "expected": "p,q\n",
+  "status": 0
+ },
+ {
+  "flags": [],
+  "sql": "select abs(-4), upper('ab'), length('h\u00e9llo');",
+  "expected": "4|AB|5\n",
+  "status": 0
+ }
+]
