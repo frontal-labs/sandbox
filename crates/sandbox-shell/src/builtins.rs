@@ -162,10 +162,13 @@ impl Shell {
         let mut newline = true;
         let mut escapes = false;
         let mut index = 0;
-        while let Some(flags) = args.get(index).and_then(|arg| arg.strip_prefix('-')) {
-            if flags.is_empty() || !flags.chars().all(|c| matches!(c, 'n' | 'e' | 'E')) {
-                break;
-            }
+        while let Some(flags) = args
+            .get(index)
+            .and_then(|arg| arg.strip_prefix('-'))
+            .filter(|flags| {
+                !flags.is_empty() && flags.chars().all(|c| matches!(c, 'n' | 'e' | 'E'))
+            })
+        {
             for flag in flags.chars() {
                 match flag {
                     'n' => newline = false,
@@ -339,23 +342,25 @@ impl Shell {
         for (name, data) in &inputs {
             let text = String::from_utf8_lossy(data);
             let mut count = 0usize;
-            for (number, line) in text.lines().enumerate() {
-                if regex.is_match(line) == flags.contains(&'v') {
-                    continue;
-                }
+            let print_lines =
+                !(flags.contains(&'q') || flags.contains(&'l') || flags.contains(&'c'));
+            let selected = text
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| regex.is_match(line) != flags.contains(&'v'));
+            for (number, line) in selected {
                 count += 1;
-                if flags.contains(&'q') || flags.contains(&'l') || flags.contains(&'c') {
-                    continue;
+                if print_lines {
+                    if label {
+                        stdout.push_str(name.as_deref().unwrap_or("(standard input)"));
+                        stdout.push(':');
+                    }
+                    if flags.contains(&'n') {
+                        stdout.push_str(&format!("{}:", number + 1));
+                    }
+                    stdout.push_str(line);
+                    stdout.push('\n');
                 }
-                if label {
-                    stdout.push_str(name.as_deref().unwrap_or("(standard input)"));
-                    stdout.push(':');
-                }
-                if flags.contains(&'n') {
-                    stdout.push_str(&format!("{}:", number + 1));
-                }
-                stdout.push_str(line);
-                stdout.push('\n');
             }
             any |= count > 0;
             if flags.contains(&'c') {
@@ -436,11 +441,11 @@ impl Shell {
         for arg in args {
             if arg == "-" {
                 out.extend(stdin.take().unwrap_or_default());
-                continue;
-            }
-            match self.read_file(arg).await {
-                Ok(data) => out.extend(data),
-                Err(e) => errors.push(format!("cat: {arg}: {}", describe(&e))),
+            } else {
+                match self.read_file(arg).await {
+                    Ok(data) => out.extend(data),
+                    Err(e) => errors.push(format!("cat: {arg}: {}", describe(&e))),
+                }
             }
         }
         ExecutionResult {
@@ -468,34 +473,9 @@ impl Shell {
         let mut out = String::new();
         let mut errors = Vec::new();
         for (i, operand) in operands.iter().enumerate() {
-            let resolved = self.resolve(operand);
-            let stat = match self.fs().stat(Path::new(&resolved)).await {
-                Ok(stat) => stat,
-                Err(e) => {
-                    errors.push(format!("ls: {operand}: {}", describe(&e)));
-                    continue;
-                }
-            };
-            if !stat.is_dir {
-                out.push_str(&format!("{operand}\n"));
-                continue;
-            }
-            let entries = match self.fs().readdir(Path::new(&resolved)).await {
-                Ok(entries) => entries,
-                Err(e) => {
-                    errors.push(format!("ls: {operand}: {}", describe(&e)));
-                    continue;
-                }
-            };
-            if multiple {
-                if i > 0 {
-                    out.push('\n');
-                }
-                out.push_str(&format!("{operand}:\n"));
-            }
-            for entry in entries {
-                out.push_str(&entry.name);
-                out.push('\n');
+            match self.ls_operand(operand, multiple, i > 0).await {
+                Ok(text) => out.push_str(&text),
+                Err(message) => errors.push(message),
             }
         }
         ExecutionResult {
@@ -506,6 +486,43 @@ impl Shell {
                 .flat_map(|l| format!("{l}\n").into_bytes())
                 .collect(),
         }
+    }
+
+    /// Lists one operand of `ls`. A file prints its name. A directory prints its
+    /// entries, under a header when several operands are listed. `separate` puts a
+    /// blank line before the header.
+    async fn ls_operand(
+        &self,
+        operand: &str,
+        multiple: bool,
+        separate: bool,
+    ) -> Result<String, String> {
+        let resolved = self.resolve(operand);
+        let stat = self
+            .fs()
+            .stat(Path::new(&resolved))
+            .await
+            .map_err(|e| format!("ls: {operand}: {}", describe(&e)))?;
+        if !stat.is_dir {
+            return Ok(format!("{operand}\n"));
+        }
+        let entries = self
+            .fs()
+            .readdir(Path::new(&resolved))
+            .await
+            .map_err(|e| format!("ls: {operand}: {}", describe(&e)))?;
+        let mut out = String::new();
+        if multiple {
+            if separate {
+                out.push('\n');
+            }
+            out.push_str(&format!("{operand}:\n"));
+        }
+        for entry in entries {
+            out.push_str(&entry.name);
+            out.push('\n');
+        }
+        Ok(out)
     }
 
     async fn mkdir(&self, args: &[String]) -> ExecutionResult {
@@ -555,19 +572,24 @@ impl Shell {
         let force = flags.contains(&'f');
         for operand in operands {
             let resolved = self.resolve(operand);
-            if !recursive {
+            // Without -r a directory is refused, and under -f a missing file is skipped.
+            let skip = if recursive {
+                false
+            } else {
                 match self.fs().stat(Path::new(&resolved)).await {
                     Ok(stat) if stat.is_dir => {
                         return failure(format!("rm: {operand}: is a directory"));
                     }
-                    Err(VfsError::NotFound(_)) if force => continue,
-                    _ => {}
+                    Err(VfsError::NotFound(_)) => force,
+                    _ => false,
                 }
-            }
-            match self.fs().rm(Path::new(&resolved), recursive).await {
-                Ok(()) => {}
-                Err(VfsError::NotFound(_)) if force => {}
-                Err(e) => return failure(format!("rm: {operand}: {}", describe(&e))),
+            };
+            if !skip {
+                match self.fs().rm(Path::new(&resolved), recursive).await {
+                    Ok(()) => {}
+                    Err(VfsError::NotFound(_)) if force => {}
+                    Err(e) => return failure(format!("rm: {operand}: {}", describe(&e))),
+                }
             }
         }
         ok(Vec::new())
