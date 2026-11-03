@@ -30,7 +30,6 @@ __pycache__/
 
 # Per-machine Bazel settings (see bazel/config/user.bazelrc.example)
 bazel/config/user.bazelrc
-fuzz/
 
 # Local Kilo tooling, not part of the project
 .kilo/
