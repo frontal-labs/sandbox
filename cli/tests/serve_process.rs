@@ -33,13 +33,19 @@ fn start(dir: &Path, last: &str) -> (Server, Vec<String>) {
         .unwrap();
     let stderr = child.stderr.take().unwrap();
     let server = Server(child);
+    // Reads through the first line that starts with `last`, and no further. The
+    // reader must not be asked for another line after that one, because the
+    // server waits for the test to read.
+    let mut reader = BufReader::new(stderr).lines().map(|line| line.unwrap());
     let mut lines = Vec::new();
-    for line in BufReader::new(stderr).lines() {
-        let line = line.unwrap();
-        let done = line.starts_with(last);
-        lines.push(line);
-        if done {
-            break;
+    let mut done = false;
+    while !done {
+        match reader.next() {
+            Some(line) => {
+                done = line.starts_with(last);
+                lines.push(line);
+            }
+            None => done = true,
         }
     }
     (server, lines)
