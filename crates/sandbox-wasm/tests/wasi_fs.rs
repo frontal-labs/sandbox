@@ -9,10 +9,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 const TOOL: &[u8] = include_bytes!("../fixtures/wasi_tool.wasm");
-const JQ_TOOL: &[u8] =
-    include_bytes!("../fixtures/tools/target/wasm32-wasip1/release/jq_tool.wasm");
-const GIT_TOOL: &[u8] =
-    include_bytes!("../fixtures/tools/target/wasm32-wasip1/release/git_tool.wasm");
+const JQ_TOOL: &[u8] = include_bytes!("../fixtures/jq_tool.wasm");
+const GIT_TOOL: &[u8] = include_bytes!("../fixtures/git_tool.wasm");
 
 fn vfs() -> Arc<Vfs> {
     Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())))
