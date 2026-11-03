@@ -219,11 +219,8 @@ impl Trace {
         }
 
         let mut runs = Vec::new();
-        for (index, text) in lines {
+        for (index, text) in lines.filter(|(_, text)| !text.trim().is_empty()) {
             let line_no = index + 1;
-            if text.trim().is_empty() {
-                continue;
-            }
             let bad = |message: String| TraceError::BadLine {
                 line: line_no,
                 message,
