@@ -59,11 +59,11 @@ async fn write_all(
     data: &[u8],
 ) -> Result<(), VfsError> {
     let mut offset = 0usize;
-    while offset < data.len() {
+    // A write that takes no bytes ends the loop, so a stalled file cannot spin it.
+    let mut progressed = true;
+    while progressed && offset < data.len() {
         let n = fs.write(handle, offset as u64, &data[offset..]).await?;
-        if n == 0 {
-            break;
-        }
+        progressed = n > 0;
         offset += n;
     }
     Ok(())
