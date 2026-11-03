@@ -16,6 +16,21 @@ RUN apt-get update \
 
 RUN rustup component add rustfmt clippy
 
+# The WASI SDK builds CPython for wasm32-wasip1 (tools/wasm/python). Pinned by version and
+# checksum, for x86_64 hosts only: the arm64 release is not pinned yet, so other
+# architectures fail here rather than fetching an unverified archive.
+ARG WASI_SDK_VERSION=25
+ARG WASI_SDK_SHA256=52640dde13599bf127a95499e61d6d640256119456d1af8897ab6725bcf3d89c
+RUN set -eu; \
+    [ "$(dpkg --print-architecture)" = amd64 ] || { echo "WASI SDK is pinned for amd64 only" >&2; exit 1; }; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/wasi-sdk.tgz \
+      "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz"; \
+    echo "${WASI_SDK_SHA256}  /tmp/wasi-sdk.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/wasi-sdk.tgz -C /opt; \
+    mv "/opt/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux" /opt/wasi-sdk; \
+    rm /tmp/wasi-sdk.tgz
+ENV WASI_SDK_PATH=/opt/wasi-sdk
+
 # The image runs as an unprivileged user by default. docker/run-linux.sh starts the
 # container as root explicitly, because the isolation tests need root.
 RUN useradd -m -u 1000 dev
