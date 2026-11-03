@@ -7,6 +7,6 @@ pub mod wasi;
 pub use registry::{Registry, ToolSpec};
 
 pub use wasi::{
-    is_cached, run_module, run_module_with_mount, run_module_with_mount_streamed, Mount,
-    StreamObserver, WasiLimits, WasiOutcome,
+    is_cached, run_module, run_module_with_mount, run_module_with_mount_streamed,
+    run_module_with_preopens_streamed, Mount, Preopen, StreamObserver, WasiLimits, WasiOutcome,
 };

@@ -41,6 +41,7 @@ mod errno {
     pub const PERM: i32 = 63;
     pub const SPIPE: i32 = 70;
     pub const NOTCAPABLE: i32 = 76;
+    pub const ROFS: i32 = 69;
 }
 
 /// WASI rights bits the host checks when a file is opened.
@@ -86,6 +87,20 @@ pub struct Mount {
     pub vfs: Arc<Vfs>,
     /// Absolute VFS path of the directory.
     pub root: String,
+}
+
+/// A further read-only or read-write directory the guest sees, beside the work
+/// directory. It is named by its absolute guest path, so a guest's `/usr/lib/...` resolves
+/// into it, as WASI libc resolves absolute paths against the preopen with the longest name.
+/// It shares the work directory's VFS.
+#[derive(Clone, Debug)]
+pub struct Preopen {
+    /// The guest path the directory is opened as, such as `/usr`.
+    pub guest_path: String,
+    /// Absolute VFS path of the directory.
+    pub root: String,
+    /// Whether the guest may change anything under `root`.
+    pub readonly: bool,
 }
 
 /// Exit requested by `proc_exit`. Travels as a trap and is caught by `execute`.
@@ -198,11 +213,31 @@ pub async fn run_module_with_mount_streamed(
     mount: Option<Mount>,
     on_stdout: Option<StreamObserver>,
 ) -> Result<WasiOutcome, SandboxError> {
+    run_module_with_preopens_streamed(wasm, argv, stdin, limits, mount, Vec::new(), on_stdout).await
+}
+
+/// Like [`run_module_with_mount_streamed`], with further preopened directories. They need
+/// a work directory, because they share its VFS.
+pub async fn run_module_with_preopens_streamed(
+    wasm: Vec<u8>,
+    argv: Vec<String>,
+    stdin: Vec<u8>,
+    limits: WasiLimits,
+    mount: Option<Mount>,
+    preopens: Vec<Preopen>,
+    on_stdout: Option<StreamObserver>,
+) -> Result<WasiOutcome, SandboxError> {
+    if !preopens.is_empty() && mount.is_none() {
+        return Err(SandboxError::new(
+            ErrorCode::InvalidArgument,
+            "preopened directories need a work directory, which shares their VFS",
+        ));
+    }
     let runtime = tokio::runtime::Handle::current();
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         let _entered = runtime.enter();
-        let result = execute(&wasm, argv, stdin, limits, mount, on_stdout);
+        let result = execute(&wasm, argv, stdin, limits, mount, preopens, on_stdout);
         // The receiver is only dropped if the caller stopped waiting.
         let _ = tx.send(result);
     });
@@ -228,6 +263,10 @@ struct Host {
     mount: Option<Mount>,
     fds: BTreeMap<u32, Fd>,
     next_fd: u32,
+    /// The guest path of each preopened descriptor, by fd.
+    preopen_names: BTreeMap<u32, String>,
+    /// VFS roots the guest may not change.
+    readonly_roots: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,6 +294,7 @@ fn execute(
     stdin: Vec<u8>,
     limits: WasiLimits,
     mount: Option<Mount>,
+    preopens: Vec<Preopen>,
     on_stdout: Option<StreamObserver>,
 ) -> Result<WasiOutcome, SandboxError> {
     let engine = engine()?;
@@ -264,12 +304,23 @@ fn execute(
     fds.insert(0, Fd::Stdin);
     fds.insert(1, Fd::Stdout);
     fds.insert(2, Fd::Stderr);
-    let next_fd = if let Some(mount) = &mount {
+    let mut preopen_names = BTreeMap::new();
+    let mut readonly_roots = Vec::new();
+    let mut next_fd = if let Some(mount) = &mount {
         fds.insert(PREOPEN_FD, Fd::Dir(mount.root.clone()));
+        preopen_names.insert(PREOPEN_FD, ".".to_string());
         PREOPEN_FD + 1
     } else {
         PREOPEN_FD
     };
+    for preopen in preopens {
+        fds.insert(next_fd, Fd::Dir(preopen.root.clone()));
+        preopen_names.insert(next_fd, preopen.guest_path.clone());
+        if preopen.readonly {
+            readonly_roots.push(preopen.root.clone());
+        }
+        next_fd += 1;
+    }
 
     let host = Host {
         limits: StoreLimitsBuilder::new()
@@ -285,6 +336,8 @@ fn execute(
         mount,
         fds,
         next_fd,
+        preopen_names,
+        readonly_roots,
     };
     let mut store = Store::new(engine, host);
     store.limiter(|host| &mut host.limits);
@@ -423,6 +476,25 @@ fn read_iovecs(
 
 fn mount_of(caller: &Caller<'_, Host>) -> Result<Mount, i32> {
     caller.data().mount.clone().ok_or(errno::NOTCAPABLE)
+}
+
+/// The guest name of a preopened descriptor, or `None` for any other descriptor.
+fn preopen_name(caller: &Caller<'_, Host>, fd: i32) -> Option<String> {
+    let fd = u32::try_from(fd).ok()?;
+    caller.data().preopen_names.get(&fd).cloned()
+}
+
+/// Refuses a change to a read-only preopen. `path` is an absolute VFS path.
+fn refuse_if_readonly(host: &Host, path: &str) -> Result<(), i32> {
+    let inside = host
+        .readonly_roots
+        .iter()
+        .any(|root| path == root || path.starts_with(&format!("{}/", root.trim_end_matches('/'))));
+    if inside {
+        Err(errno::ROFS)
+    } else {
+        Ok(())
+    }
 }
 
 fn fd_entry(caller: &Caller<'_, Host>, fd: i32) -> Result<Fd, i32> {
@@ -906,11 +978,11 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
         WASI,
         "fd_prestat_get",
         |mut c: Caller<'_, Host>, fd: i32, out: i32| -> i32 {
-            let is_preopen = fd == PREOPEN_FD as i32 && c.data().mount.is_some();
-            if !is_preopen {
+            let Some(name) = preopen_name(&c, fd) else {
                 return errno::BADF;
-            }
-            finish(write_u8(&mut c, out, 0).and_then(|()| write_u32(&mut c, out + 4, 1)))
+            };
+            let len = name.len() as u32;
+            finish(write_u8(&mut c, out, 0).and_then(|()| write_u32(&mut c, out + 4, len)))
         },
     ))?;
 
@@ -918,11 +990,10 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
         WASI,
         "fd_prestat_dir_name",
         |mut c: Caller<'_, Host>, fd: i32, buf: i32, len: i32| -> i32 {
-            let is_preopen = fd == PREOPEN_FD as i32 && c.data().mount.is_some();
-            if !is_preopen {
+            let Some(name) = preopen_name(&c, fd) else {
                 return errno::BADF;
-            }
-            let name = b".";
+            };
+            let name = name.as_bytes();
             let n = usize::try_from(len).unwrap_or(0).min(name.len());
             finish(write_bytes(&mut c, buf, &name[..n]))
         },
@@ -954,6 +1025,9 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                 let create = oflags & OFLAG_CREAT != 0;
                 let exclusive = oflags & OFLAG_EXCL != 0;
                 let want_dir = oflags & OFLAG_DIRECTORY != 0;
+                if writable || create || oflags & OFLAG_TRUNC != 0 {
+                    refuse_if_readonly(c.data(), &resolved)?;
+                }
 
                 let existing =
                     futures::executor::block_on(mount.vfs.stat(std::path::Path::new(&resolved)))
@@ -1039,6 +1113,7 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                 let base = dir_path(&c, dirfd)?;
                 let guest = read_string(&mut c, path, path_len)?;
                 let resolved = resolve_guest_path(&base, &guest)?;
+                refuse_if_readonly(c.data(), &resolved)?;
                 let mount = mount_of(&c)?;
                 futures::executor::block_on(mount.vfs.mkdir(std::path::Path::new(&resolved), 0o755))
                     .map_err(|e| errno_of(&e))
@@ -1055,6 +1130,7 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                 let base = dir_path(&c, dirfd)?;
                 let guest = read_string(&mut c, path, path_len)?;
                 let resolved = resolve_guest_path(&base, &guest)?;
+                refuse_if_readonly(c.data(), &resolved)?;
                 let mount = mount_of(&c)?;
                 let stat =
                     futures::executor::block_on(mount.vfs.stat(std::path::Path::new(&resolved)))
@@ -1077,6 +1153,7 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                 let base = dir_path(&c, dirfd)?;
                 let guest = read_string(&mut c, path, path_len)?;
                 let resolved = resolve_guest_path(&base, &guest)?;
+                refuse_if_readonly(c.data(), &resolved)?;
                 let mount = mount_of(&c)?;
                 let stat =
                     futures::executor::block_on(mount.vfs.stat(std::path::Path::new(&resolved)))
@@ -1109,6 +1186,8 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
                 let to_guest = read_string(&mut c, to, to_len)?;
                 let from_path = resolve_guest_path(&from_base, &from_guest)?;
                 let to_path = resolve_guest_path(&to_base, &to_guest)?;
+                refuse_if_readonly(c.data(), &from_path)?;
+                refuse_if_readonly(c.data(), &to_path)?;
                 let mount = mount_of(&c)?;
                 futures::executor::block_on(mount.vfs.rename(
                     std::path::Path::new(&from_path),
@@ -1194,6 +1273,167 @@ fn define_host_functions(linker: &mut Linker<Host>) -> Result<(), SandboxError> 
         |_c: Caller<'_, Host>, _a: i32, _al: i32, _fd: i32, _p: i32, _pl: i32| -> i32 {
             errno::NOTSUP
         },
+    ))?;
+
+    // Positional I/O, as fd_read and fd_write, at an offset the guest gives. It leaves the
+    // file position alone. Only files have positions, so other descriptors are refused.
+    link(linker.func_wrap(
+        WASI,
+        "fd_pread",
+        |mut c: Caller<'_, Host>, fd: i32, iovs: i32, count: i32, offset: i64, out: i32| -> i32 {
+            let result = (|| -> Result<u32, i32> {
+                let vectors = read_iovecs(&mut c, iovs, count)?;
+                let total: usize = vectors.iter().map(|(_, len)| *len).sum();
+                let file = match fd_entry(&c, fd)? {
+                    Fd::File(file) => file,
+                    Fd::Dir(_) => return Err(errno::ISDIR),
+                    Fd::Stdin | Fd::Stdout | Fd::Stderr => return Err(errno::SPIPE),
+                };
+                if !file.readable {
+                    return Err(errno::BADF);
+                }
+                let at = u64::try_from(offset).map_err(|_| errno::INVAL)?;
+                let mount = mount_of(&c)?;
+                let bytes = futures::executor::block_on(mount.vfs.read(&file.handle, at, total))
+                    .map_err(|e| errno_of(&e))?;
+                let mut cursor = 0;
+                let mut vectors = vectors.into_iter();
+                while let Some((buf, len)) = vectors.next().filter(|_| cursor < bytes.len()) {
+                    let n = len.min(bytes.len() - cursor);
+                    write_bytes(&mut c, buf, &bytes[cursor..cursor + n])?;
+                    cursor += n;
+                }
+                Ok(cursor as u32)
+            })();
+            match result {
+                Ok(read) => finish(write_u32(&mut c, out, read)),
+                Err(code) => code,
+            }
+        },
+    ))?;
+
+    link(linker.func_wrap(
+        WASI,
+        "fd_pwrite",
+        |mut c: Caller<'_, Host>, fd: i32, iovs: i32, count: i32, offset: i64, out: i32| -> i32 {
+            let result = (|| -> Result<u32, i32> {
+                let vectors = read_iovecs(&mut c, iovs, count)?;
+                let mut data = Vec::new();
+                for (buf, len) in vectors {
+                    data.extend(read_bytes(&mut c, buf, len)?);
+                }
+                let file = match fd_entry(&c, fd)? {
+                    Fd::File(file) => file,
+                    Fd::Dir(_) => return Err(errno::ISDIR),
+                    Fd::Stdin | Fd::Stdout | Fd::Stderr => return Err(errno::SPIPE),
+                };
+                if !file.writable {
+                    return Err(errno::BADF);
+                }
+                let at = u64::try_from(offset).map_err(|_| errno::INVAL)?;
+                let mount = mount_of(&c)?;
+                let written = futures::executor::block_on(mount.vfs.write(&file.handle, at, &data))
+                    .map_err(|e| errno_of(&e))?;
+                Ok(written as u32)
+            })();
+            match result {
+                Ok(written) => finish(write_u32(&mut c, out, written)),
+                Err(code) => code,
+            }
+        },
+    ))?;
+
+    // Advice is a hint, and the VFS has nothing to tune, so it is accepted for a valid
+    // descriptor and otherwise ignored.
+    link(linker.func_wrap(
+        WASI,
+        "fd_advise",
+        |c: Caller<'_, Host>, fd: i32, _offset: i64, _len: i64, _advice: i32| -> i32 {
+            match fd_entry(&c, fd) {
+                Ok(_) => errno::SUCCESS,
+                Err(code) => code,
+            }
+        },
+    ))?;
+
+    // The host clock is read through SystemTime, which has microsecond resolution on the
+    // platforms we build for. Report that, not the nanosecond unit the field uses.
+    link(linker.func_wrap(
+        WASI,
+        "clock_res_get",
+        |mut c: Caller<'_, Host>, _id: i32, out: i32| -> i32 {
+            finish(write_u64(&mut c, out, 1_000))
+        },
+    ))?;
+
+    // Not supported in the sandbox, so each returns ENOTSUP and the module still
+    // instantiates. Hard links would need inode identity, which the VFS does not have.
+    // Timestamps cannot be set. Sockets are not reachable from the guest at all.
+    link(linker.func_wrap(
+        WASI,
+        "path_link",
+        |_c: Caller<'_, Host>,
+         _old_fd: i32,
+         _old_flags: i32,
+         _old: i32,
+         _old_len: i32,
+         _new_fd: i32,
+         _new: i32,
+         _new_len: i32|
+         -> i32 { errno::NOTSUP },
+    ))?;
+    link(linker.func_wrap(
+        WASI,
+        "fd_filestat_set_times",
+        |_c: Caller<'_, Host>, _fd: i32, _atim: i64, _mtim: i64, _flags: i32| -> i32 {
+            errno::NOTSUP
+        },
+    ))?;
+    link(linker.func_wrap(
+        WASI,
+        "path_filestat_set_times",
+        |_c: Caller<'_, Host>,
+         _fd: i32,
+         _flags: i32,
+         _path: i32,
+         _path_len: i32,
+         _atim: i64,
+         _mtim: i64,
+         _set: i32|
+         -> i32 { errno::NOTSUP },
+    ))?;
+    link(linker.func_wrap(
+        WASI,
+        "sock_accept",
+        |_c: Caller<'_, Host>, _fd: i32, _flags: i32, _out: i32| -> i32 { errno::NOTSUP },
+    ))?;
+    link(linker.func_wrap(
+        WASI,
+        "sock_recv",
+        |_c: Caller<'_, Host>,
+         _fd: i32,
+         _data: i32,
+         _data_len: i32,
+         _flags: i32,
+         _ro_len: i32,
+         _ro_flags: i32|
+         -> i32 { errno::NOTSUP },
+    ))?;
+    link(linker.func_wrap(
+        WASI,
+        "sock_send",
+        |_c: Caller<'_, Host>,
+         _fd: i32,
+         _data: i32,
+         _data_len: i32,
+         _flags: i32,
+         _out: i32|
+         -> i32 { errno::NOTSUP },
+    ))?;
+    link(linker.func_wrap(
+        WASI,
+        "sock_shutdown",
+        |_c: Caller<'_, Host>, _fd: i32, _how: i32| -> i32 { errno::NOTSUP },
     ))?;
 
     Ok(())

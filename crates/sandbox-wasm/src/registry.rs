@@ -10,12 +10,14 @@
 //! fuel = 10000000                        # optional per-tool limits
 //! max_memory_bytes = 16777216
 //! max_output_bytes = 65536
+//! argv0 = "/usr/bin/python"              # optional; replaces the name the shell gives
+//! preopen = ["/usr"]                     # optional; read-only trees, mounted at the same path
 //! ```
 //!
 //! The registry is data, read from the VFS. It does not grant new host
 //! access: each tool runs under the same WASI host as any other module.
 
-use crate::wasi::WasiLimits;
+use crate::wasi::{Preopen, WasiLimits};
 use sandbox_types::hash::ContentHash;
 use sandbox_types::{ErrorCode, SandboxError};
 use serde::Deserialize;
@@ -34,9 +36,37 @@ pub struct ToolSpec {
     pub max_memory_bytes: Option<usize>,
     #[serde(default)]
     pub max_output_bytes: Option<usize>,
+    /// Absolute path the tool's argv[0] is set to. A runtime such as CPython finds its
+    /// home from it, because the guest has no environment to say where it is.
+    #[serde(default)]
+    pub argv0: Option<String>,
+    /// Absolute VFS trees the tool may read, each mounted read-only at the same path.
+    #[serde(default)]
+    pub preopen: Vec<String>,
 }
 
 impl ToolSpec {
+    /// The argv a run gets: the shell's, with argv[0] replaced when the spec sets one.
+    pub fn argv_for(&self, argv: &[String]) -> Vec<String> {
+        let mut out = argv.to_vec();
+        if let (Some(argv0), Some(first)) = (&self.argv0, out.first_mut()) {
+            *first = argv0.clone();
+        }
+        out
+    }
+
+    /// The read-only preopens this tool runs with.
+    pub fn preopens(&self) -> Vec<Preopen> {
+        self.preopen
+            .iter()
+            .map(|path| Preopen {
+                guest_path: path.clone(),
+                root: path.clone(),
+                readonly: true,
+            })
+            .collect()
+    }
+
     /// Limits for this tool: the defaults, with the spec's overrides applied.
     pub fn limits(&self) -> WasiLimits {
         let defaults = WasiLimits::default();
@@ -98,6 +128,26 @@ impl Registry {
                     tool.name
                 )));
             }
+            if let Some(argv0) = &tool.argv0 {
+                if !argv0.starts_with('/') {
+                    return Err(invalid(format!(
+                        "tool {}: argv0 must be absolute",
+                        tool.name
+                    )));
+                }
+            }
+            for tree in &tool.preopen {
+                if !tree.starts_with('/')
+                    || tree.len() < 2
+                    || tree.contains("/../")
+                    || tree.ends_with("/..")
+                {
+                    return Err(invalid(format!(
+                        "tool {}: preopen {tree:?} must be an absolute path",
+                        tool.name
+                    )));
+                }
+            }
             tool.expected_hash()?;
         }
         Ok(registry)
@@ -144,6 +194,32 @@ path = "/bin/plain.wasm"
     }
 
     #[test]
+    fn argv0_and_preopens_come_from_the_spec() {
+        let registry = Registry::parse(
+            "[[tool]]\nname = \"python\"\npath = \"/opt/python.wasm\"\nargv0 = \"/usr/bin/python\"\npreopen = [\"/usr\"]\n",
+        )
+        .unwrap();
+        let python = registry.find("python").unwrap();
+        let argv = vec!["python".to_string(), "-c".to_string(), "1".to_string()];
+        assert_eq!(python.argv_for(&argv)[0], "/usr/bin/python");
+        assert_eq!(python.argv_for(&argv)[1..], argv[1..]);
+        let preopens = python.preopens();
+        assert_eq!(preopens.len(), 1);
+        assert!(preopens[0].readonly && preopens[0].guest_path == "/usr");
+    }
+
+    #[test]
+    fn refuses_a_relative_or_escaping_preopen() {
+        for manifest in [
+            "[[tool]]\nname = \"a\"\npath = \"/x\"\npreopen = [\"usr\"]",
+            "[[tool]]\nname = \"a\"\npath = \"/x\"\npreopen = [\"/usr/../etc\"]",
+            "[[tool]]\nname = \"a\"\npath = \"/x\"\nargv0 = \"python\"",
+        ] {
+            assert!(Registry::parse(manifest).is_err(), "{manifest}");
+        }
+    }
+
+    #[test]
     fn rejects_bad_manifests() {
         let cases = [
             "[[tool]]\nname = \"a/b\"\npath = \"/x\"",
@@ -169,6 +245,8 @@ path = "/bin/plain.wasm"
             fuel: None,
             max_memory_bytes: None,
             max_output_bytes: None,
+            argv0: None,
+            preopen: Vec::new(),
         };
         assert!(spec.verify(module).is_ok());
         let err = spec.verify(b"tampered").unwrap_err();
