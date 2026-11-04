@@ -4017,7 +4017,10 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "sandbox-cas",
+ "sandbox-proto",
  "sandbox-session",
+ "sandbox-shell",
  "sandbox-snapshot",
  "sandbox-types",
  "sandbox-vfs",
@@ -4025,6 +4028,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "tokio",
+ "tonic",
  "tracing",
 ]
 
@@ -4242,6 +4246,7 @@ dependencies = [
  "nix 0.28.0",
  "reqwest",
  "rustix 0.38.44",
+ "sandbox-proto",
  "sandbox-types",
  "seccompiler",
  "serde",
@@ -4249,6 +4254,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "tonic",
  "tracing",
  "uuid",
  "which 5.0.0",
