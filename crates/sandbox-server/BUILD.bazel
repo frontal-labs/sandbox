@@ -14,6 +14,8 @@ rust_library(
     deps = [
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-scheduler:sandbox_scheduler",
+        "//crates/sandbox-vmm:sandbox_vmm",
+        "//crates/sandbox-promote:sandbox_promote",
         "//crates/sandbox-session:sandbox_session",
         "//crates/sandbox-vfs:sandbox_vfs",
         "@crates//:tokio",

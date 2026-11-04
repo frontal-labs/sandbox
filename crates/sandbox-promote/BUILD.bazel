@@ -6,6 +6,9 @@ rust_library(
     srcs = glob(["src/**/*.rs"]),
     deps = [
         "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-proto:sandbox_proto",
+        "//crates/sandbox-shell:sandbox_shell",
+        "@crates//:tonic",
         "//crates/sandbox-vfs:sandbox_vfs",
         "//crates/sandbox-session:sandbox_session",
         "//crates/sandbox-vmm:sandbox_vmm",
