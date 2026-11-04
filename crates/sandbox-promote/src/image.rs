@@ -23,7 +23,11 @@ pub struct ImageReport {
 
 /// Writes `fs` to `image` as an ext4 filesystem, labelled `root`. The image is sized from the
 /// tree's contents plus room for the filesystem's own metadata, and at least 16 MiB.
-pub async fn export_ext4(fs: &dyn SessionFs, image: &Path, scratch: &Path) -> Result<ImageReport, SandboxError> {
+pub async fn export_ext4(
+    fs: &dyn SessionFs,
+    image: &Path,
+    scratch: &Path,
+) -> Result<ImageReport, SandboxError> {
     let _ = std::fs::remove_dir_all(scratch);
     std::fs::create_dir_all(scratch).map_err(io_error)?;
     let mut totals = Totals::default();
@@ -54,7 +58,11 @@ struct Totals {
 }
 
 /// Copies every directory and file under `/` into `root`, parents before children.
-async fn copy_tree(fs: &dyn SessionFs, root: &Path, totals: &mut Totals) -> Result<(), SandboxError> {
+async fn copy_tree(
+    fs: &dyn SessionFs,
+    root: &Path,
+    totals: &mut Totals,
+) -> Result<(), SandboxError> {
     let mut pending = vec!["/".to_string()];
     while let Some(dir) = pending.pop() {
         let mut entries = fs
@@ -71,7 +79,9 @@ async fn copy_tree(fs: &dyn SessionFs, root: &Path, totals: &mut Totals) -> Resu
             if entry.is_symlink {
                 return Err(SandboxError::new(
                     ErrorCode::Unsupported,
-                    format!("cannot export the symlink {path}: links are not carried into an image yet"),
+                    format!(
+                        "cannot export the symlink {path}: links are not carried into an image yet"
+                    ),
                 ));
             }
             let host = root.join(path.trim_start_matches('/'));
@@ -131,7 +141,9 @@ fn run_mkfs(root: &Path, image: &Path, size_mib: u64) -> Result<(), SandboxError
         .arg(image)
         .arg(format!("{size_mib}M"))
         .output()
-        .map_err(|e| SandboxError::new(ErrorCode::Internal, format!("cannot run mkfs.ext4: {e}")))?;
+        .map_err(|e| {
+            SandboxError::new(ErrorCode::Internal, format!("cannot run mkfs.ext4: {e}"))
+        })?;
     if !output.status.success() {
         return Err(SandboxError::new(
             ErrorCode::Internal,

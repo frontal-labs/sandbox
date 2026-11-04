@@ -21,7 +21,7 @@ async fn print_tier2_timings() {
             qemu: PathBuf::from("qemu-system-x86_64"),
             kernel: dir.join("vmlinuz"),
             initrd: dir.join("initrd.gz"),
-            memory_mib: 512,
+            memory_mib: 1024,
             accel: Accel::Tcg,
             console: dir.join("timings-console.log"),
         },

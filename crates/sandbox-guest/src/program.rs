@@ -47,7 +47,9 @@ pub async fn run_program(
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     let outcome = run_in(vfs, &root, argv, env, cwd, stdin).await;
-    // The copy goes whether or not the program succeeded.
+    // The copy goes whether or not the program succeeded, but only once nothing is mounted
+    // in it. Removing a copy with a live bind mount would delete the guest's own files.
+    unmount_system(&root)?;
     let _ = std::fs::remove_dir_all(&root);
     outcome
 }
@@ -65,7 +67,12 @@ async fn run_in(
     std::fs::copy(BUSYBOX, root.join("bin/busybox")).map_err(io)?;
     // The shell that runs the command, and the command's own name, are busybox applets.
     let mut names = vec!["sh".to_string()];
-    names.extend(argv.first().filter(|name| !name.contains('/')).cloned());
+    names.extend(
+        argv.first()
+            .filter(|name| !name.contains('/'))
+            .filter(|name| !Path::new("/usr/bin").join(name).exists())
+            .cloned(),
+    );
     for name in names {
         let link = root.join("bin").join(&name);
         if !link.exists() {
@@ -73,6 +80,7 @@ async fn run_in(
         }
     }
     copy_out(vfs, root).await?;
+    mount_system(root)?;
 
     // busybox's chroot needs root. The guest's init runs as root, so it has it.
     let script = format!("cd {} && exec \"$@\"", quote(cwd));
@@ -106,6 +114,8 @@ async fn run_in(
         SandboxError::new(ErrorCode::Internal, format!("waiting for {}: {e}", argv[0]))
     })?;
 
+    // The system mounts come off before the write-back walks the copy.
+    unmount_system(root)?;
     copy_back(vfs, root).await?;
     Ok(ProgramOutput {
         exit_code: output.status.code().unwrap_or(-1),
@@ -127,9 +137,92 @@ fn join(dir: &str, name: &str) -> String {
     }
 }
 
-/// `/bin` belongs to busybox and its links, so neither the copy nor the write-back touches it.
+/// The guest's system directories. They are bind-mounted read-only into a copy, so programs
+/// from the image run, and the copy and the write-back never treat them as session files.
+const SYSTEM_DIRS: [&str; 5] = ["/bin", "/sbin", "/lib", "/lib64", "/usr"];
+/// The system directories bound from the guest. `/bin` is not one of them: it is the copy's
+/// own, holding busybox and the links that let a command run.
+const MOUNTED_DIRS: [&str; 4] = ["/sbin", "/lib", "/lib64", "/usr"];
+
 fn in_system_dir(path: &str) -> bool {
-    path == "/bin" || path.starts_with("/bin/")
+    SYSTEM_DIRS
+        .iter()
+        .any(|dir| path == *dir || path.starts_with(&format!("{dir}/")))
+}
+
+/// Binds each system directory into the copy, read-only. A failure part way leaves the mounts
+/// it made in place, and `unmount_system` removes them.
+fn mount_system(root: &Path) -> Result<(), SandboxError> {
+    for dir in MOUNTED_DIRS {
+        if !Path::new(dir).is_dir() {
+            continue;
+        }
+        let target = root.join(dir.trim_start_matches('/'));
+        std::fs::create_dir_all(&target).map_err(io_error)?;
+        busybox(&["mount", "--bind", dir, target.to_str().unwrap_or_default()])?;
+        busybox(&[
+            "mount",
+            "-o",
+            "remount,ro,bind",
+            target.to_str().unwrap_or_default(),
+        ])?;
+    }
+    Ok(())
+}
+
+/// Unmounts the system directories from the copy. Returns an error if one stays mounted, so
+/// the caller never removes a copy that still reaches the guest's own files.
+fn unmount_system(root: &Path) -> Result<(), SandboxError> {
+    let mut stuck = Vec::new();
+    for dir in MOUNTED_DIRS.iter().rev() {
+        let target = root.join(dir.trim_start_matches('/'));
+        if !target.exists() || !is_mount_point(&target) {
+            continue;
+        }
+        if busybox(&["umount", target.to_str().unwrap_or_default()]).is_err() {
+            stuck.push(dir.to_string());
+        }
+    }
+    if stuck.is_empty() {
+        Ok(())
+    } else {
+        Err(SandboxError::new(
+            ErrorCode::Internal,
+            format!(
+                "could not unmount {} from the copy; it was kept",
+                stuck.join(", ")
+            ),
+        ))
+    }
+}
+
+/// Whether `path` is a mount point, read from the guest's mount table.
+fn is_mount_point(path: &Path) -> bool {
+    let Some(target) = path.to_str() else {
+        return false;
+    };
+    std::fs::read_to_string("/proc/mounts")
+        .map(|table| {
+            table
+                .lines()
+                .any(|line| line.split_whitespace().nth(1) == Some(target))
+        })
+        .unwrap_or(false)
+}
+
+fn busybox(args: &[&str]) -> Result<(), SandboxError> {
+    let status = std::process::Command::new(BUSYBOX)
+        .args(args)
+        .status()
+        .map_err(io_error)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(SandboxError::new(
+            ErrorCode::Internal,
+            format!("busybox {} failed", args.join(" ")),
+        ))
+    }
 }
 
 fn vfs_error(error: sandbox_vfs::VfsError) -> SandboxError {

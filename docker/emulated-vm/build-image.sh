@@ -25,11 +25,22 @@ done
 # The agent, and the shared libraries it links against.
 # Stripped: the debug build carries its symbols, which would fill the initramfs.
 strip -o "$W/root/sbin/sandbox-guest-agent" "$AGENT"
-ldd "$AGENT" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\//) print $i }' | sort -u |
-  while read -r lib; do
-    mkdir -p "$W/root$(dirname "$lib")"
-    cp -L "$lib" "$W/root$lib"
-  done
+# Programs the image carries beyond busybox, each at its own place under /usr/bin, with the
+# shared libraries it links. GUEST_PROGRAMS names them: the dev image installs them.
+copy_libraries() {
+  ldd "$1" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^\//) print $i }' | sort -u |
+    while read -r lib; do
+      mkdir -p "$W/root$(dirname "$lib")"
+      cp -L "$lib" "$W/root$lib"
+    done
+}
+copy_libraries "$AGENT"
+mkdir -p "$W/root/usr/bin"
+for program in ${GUEST_PROGRAMS:-ffmpeg}; do
+  src=$(command -v "$program") || { echo "guest program $program is not installed" >&2; exit 1; }
+  cp -L "$src" "$W/root/usr/bin/$program"
+  copy_libraries "$src"
+done
 
 # The virtio network driver and its dependencies, decompressed for busybox insmod.
 # modprobe prints only the first name's chain when given several, so each name is resolved

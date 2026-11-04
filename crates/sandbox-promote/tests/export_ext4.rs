@@ -36,19 +36,32 @@ async fn a_tree_exports_to_an_ext4_image_that_checks_clean_and_holds_the_files()
     let dir = std::env::temp_dir().join(format!("export-ext4-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let image = dir.join("root.ext4");
-    let report = export_ext4(&vfs, &image, &dir.join("scratch")).await.unwrap();
+    let report = export_ext4(&vfs, &image, &dir.join("scratch"))
+        .await
+        .unwrap();
     assert_eq!(report.files, 3, "{report:?}");
     assert_eq!(report.directories, 2, "{report:?}");
 
-    let check = Command::new("e2fsck").arg("-fn").arg(&image).output().unwrap();
-    assert!(check.status.success(), "e2fsck: {}", String::from_utf8_lossy(&check.stdout));
+    let check = Command::new("e2fsck")
+        .arg("-fn")
+        .arg(&image)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "e2fsck: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
 
     let cat = Command::new("debugfs")
         .args(["-R", "cat /work/hello.txt"])
         .arg(&image)
         .output()
         .unwrap();
-    assert_eq!(String::from_utf8_lossy(&cat.stdout), "hello from the session\n");
+    assert_eq!(
+        String::from_utf8_lossy(&cat.stdout),
+        "hello from the session\n"
+    );
 
     let size = Command::new("debugfs")
         .args(["-R", "stat /work/deep/big.bin"])

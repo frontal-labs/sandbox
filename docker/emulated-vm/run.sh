@@ -9,7 +9,7 @@ sh /src/docker/emulated-vm/build-image.sh
 
 # The host reaches the agent at 127.0.0.1:7000 in this container.
 qemu-system-x86_64 \
-  -accel tcg -M q35 -m 512 -smp 1 -no-reboot -display none -monitor none \
+  -accel tcg -M q35 -m 1024 -smp 1 -no-reboot -display none -monitor none \
   -kernel "$OUT/vmlinuz" -initrd "$OUT/initrd.gz" \
   -append "console=ttyS0 rdinit=/init panic=-1" \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:7000-:7000 \

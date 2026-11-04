@@ -34,7 +34,7 @@ async fn a_promoted_tree_is_readable_and_runnable_in_the_guest() {
         qemu: PathBuf::from("qemu-system-x86_64"),
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
-        memory_mib: 512,
+        memory_mib: 1024,
         accel: Accel::Tcg,
         console: dir.join("promote-test-console.log"),
     })

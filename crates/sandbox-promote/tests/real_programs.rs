@@ -43,7 +43,7 @@ async fn programs_run_in_the_guest_and_their_changes_come_back() {
         qemu: PathBuf::from("qemu-system-x86_64"),
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
-        memory_mib: 512,
+        memory_mib: 1024,
         accel: Accel::Tcg,
         console: dir.join("real-programs-console.log"),
     })
@@ -117,6 +117,31 @@ async fn programs_run_in_the_guest_and_their_changes_come_back() {
         })
         .await;
     assert!(gone.is_err(), "the removed file is gone from the session");
+
+    // A program from the image's /usr runs, and the copy's system mounts come off afterwards:
+    // the guest still answers, from its own files.
+    let ffmpeg = guest
+        .exec(request(&["ffmpeg", "-version"], b""))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(ffmpeg.exit_code, 0, "{ffmpeg:?}");
+    assert!(
+        String::from_utf8_lossy(&ffmpeg.stdout).starts_with("ffmpeg version"),
+        "{ffmpeg:?}"
+    );
+    let again = guest
+        .exec(request(&["uname", "-r"], b""))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(again.exit_code, 0, "{again:?}");
+    assert!(
+        String::from_utf8_lossy(&again.stdout)
+            .trim()
+            .starts_with("6."),
+        "{again:?}"
+    );
 
     vm.stop().await.unwrap();
 }
