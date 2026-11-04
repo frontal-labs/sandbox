@@ -34,11 +34,11 @@ measured in this pass. Otherwise it says "not measured".
 | Base and browser images | not started | `images/` does not exist. |
 | `export_ext4` | not started | No code. |
 | `sandbox-promote` | not started | The plan says promotion logic is not built. |
-| VM warm pool | partial | Module exists, untested end to end. |
+| VM warm pool | done (emulated) | `VmPool` boots guests ahead of promotions, and the server takes from it. Measured under QEMU TCG: a warm handout takes under 1 ms, against a cold boot of 19.1 s. |
 | Firecracker snapshots | blocked | Needs KVM. This host and the Docker VM have none. |
 | **Accept:** ffmpeg and headless Chromium via auto-promotion | not started | Depends on promotion and images. |
-| **Accept:** promotion under 400 ms | not started | Depends on promotion. |
-| **Accept:** VM resume under 150 ms | blocked | Needs KVM. |
+| **Accept:** promotion under 400 ms | measured, emulated | Promoting a 64 KiB file takes 128 ms under QEMU TCG (`crates/sandbox-promote/tests/timings.rs`). That size is not the ffmpeg-scale promotion the criterion means, and TCG is not the target hardware. |
+| **Accept:** VM resume under 150 ms | not measured | Resume from a snapshot is not built. The 19.1 s cold boot under TCG is the only boot time measured. |
 | **Accept:** guest protocol fuzzed 24 h | partial | `guest_protocol` fuzz target exists. A 90 s run covered 1.5 M inputs with no crash. Not 24 h. |
 
 ## M5: production hardening
