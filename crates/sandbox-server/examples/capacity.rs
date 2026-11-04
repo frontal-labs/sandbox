@@ -13,7 +13,6 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use sandbox_scheduler::Scheduler;
 use sandbox_server::auth::AuthManager;
-use sandbox_server::create_router;
 use sandbox_types::{SessionConfig, TenantId, TierPreference};
 use serde_json::{json, Value};
 use std::process::Command;
