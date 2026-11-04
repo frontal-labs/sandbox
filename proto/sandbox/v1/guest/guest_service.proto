@@ -13,6 +13,7 @@ service GuestService {
   rpc Exec(sandbox.v1.types.ExecRequest) returns (sandbox.v1.types.ExecResult);
   rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
   rpc WriteFile(WriteFileRequest) returns (google.protobuf.Empty);
+  rpc MkDir(MkDirRequest) returns (google.protobuf.Empty);
   rpc ListDir(ListDirRequest) returns (ListDirResponse);
   // Makes the guest's writable tree match the given root, or reports the root it now has.
   rpc Sync(SyncRequest) returns (SyncResponse);
@@ -22,17 +23,30 @@ message PingResponse {
   string agent_version = 1;
 }
 
+// Files move in chunks, so a file of any size fits the transport's message limit.
 message ReadFileRequest {
   string path = 1;
+  // Where the chunk starts. Zero reads from the start.
+  uint64 offset = 2;
+  // Largest chunk wanted. Zero asks for the agent's default, and the agent caps it.
+  uint32 max_bytes = 3;
 }
 
 message ReadFileResponse {
   bytes data = 1;
+  // True when the chunk reaches the end of the file.
+  bool eof = 2;
 }
 
+// A chunk of a file. Offset zero creates the file, or truncates it if it exists.
 message WriteFileRequest {
   string path = 1;
   bytes data = 2;
+  uint64 offset = 3;
+}
+
+message MkDirRequest {
+  string path = 1;
 }
 
 message ListDirRequest {

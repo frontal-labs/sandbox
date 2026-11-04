@@ -6,12 +6,12 @@
 //! The VM is stopped when the value is dropped (`kill_on_drop`), so a session that ends
 //! early cannot leave a QEMU process behind.
 
+use sandbox_proto::v1::guest::guest_service_client::GuestServiceClient;
 use sandbox_types::{ErrorCode, SandboxError};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 
 /// Port the guest agent listens on inside the guest (see docker/emulated-vm/build-image.sh).
@@ -108,10 +108,12 @@ impl QemuVm {
         self.agent
     }
 
-    /// Waits until the agent accepts connections, or fails after `timeout`. QEMU exiting
-    /// first is reported at once, with the reason it gave.
+    /// Waits until the agent answers a `Ping` over the guest protocol, or fails after
+    /// `timeout`. QEMU accepts forwarded connections before the agent listens, so an open
+    /// port is not enough. QEMU exiting first is reported at once, with the reason it gave.
     pub async fn wait_for_agent(&mut self, timeout: Duration) -> Result<(), SandboxError> {
         let deadline = Instant::now() + timeout;
+        let url = format!("http://{}", self.agent);
         loop {
             if let Some(status) = self.child.try_wait().map_err(io_error)? {
                 let stderr = self.stderr_text().await;
@@ -120,8 +122,10 @@ impl QemuVm {
                     format!("QEMU exited with {status} before the agent answered: {stderr}"),
                 ));
             }
-            if TcpStream::connect(self.agent).await.is_ok() {
-                return Ok(());
+            if let Ok(mut client) = GuestServiceClient::connect(url.clone()).await {
+                if client.ping(()).await.is_ok() {
+                    return Ok(());
+                }
             }
             if Instant::now() >= deadline {
                 return Err(SandboxError::new(

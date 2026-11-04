@@ -19,6 +19,12 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+sandbox-proto = { path = "../sandbox-proto" }
+tonic = { workspace = true }
 
 [features]
 default = []
+[dev-dependencies]
+sandbox-cas = { path = "../sandbox-cas" }
+sandbox-proto = { path = "../sandbox-proto" }
+sandbox-vmm = { path = "../sandbox-vmm" }

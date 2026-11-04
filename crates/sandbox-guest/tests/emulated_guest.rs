@@ -45,12 +45,14 @@ async fn the_agent_serves_the_guest_protocol_from_a_booted_kernel() {
         .write_file(WriteFileRequest {
             path: "/hello.txt".to_string(),
             data: b"from the host".to_vec(),
+            offset: 0,
         })
         .await
         .unwrap();
     let read = client
         .read_file(ReadFileRequest {
             path: "/hello.txt".to_string(),
+            ..Default::default()
         })
         .await
         .unwrap()

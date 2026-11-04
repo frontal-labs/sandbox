@@ -1,7 +1,7 @@
 use sandbox_proto::v1::guest::{
     guest_service_server::GuestService, guest_service_server::GuestServiceServer, DirEntry,
-    ListDirRequest, ListDirResponse, PingResponse, ReadFileRequest, ReadFileResponse, SyncRequest,
-    SyncResponse, WriteFileRequest,
+    ListDirRequest, ListDirResponse, MkDirRequest, PingResponse, ReadFileRequest, ReadFileResponse,
+    SyncRequest, SyncResponse, WriteFileRequest,
 };
 use sandbox_types::{ContentHash, SandboxError};
 use sandbox_vfs::{SessionFs, Vfs};
@@ -19,6 +19,11 @@ enum Listener {
     Unix(UnixListener),
     Tcp(TcpListener),
 }
+
+/// A chunk the agent returns when the request names no size.
+const DEFAULT_CHUNK_BYTES: usize = 1024 * 1024;
+/// The largest chunk the agent moves in one message, under the transport's 4 MiB limit.
+const MAX_CHUNK_BYTES: usize = 2 * 1024 * 1024;
 
 pub struct GuestAgent {
     vfs: Arc<Vfs>,
@@ -134,38 +139,43 @@ impl GuestService for GuestServiceImpl {
     ) -> Result<Response<ReadFileResponse>, Status> {
         let req = request.into_inner();
         let path = PathBuf::from(&req.path);
+        let max = match req.max_bytes {
+            0 => DEFAULT_CHUNK_BYTES,
+            n => (n as usize).min(MAX_CHUNK_BYTES),
+        };
 
-        let flags = sandbox_vfs::OpenFlags::default();
         let handle = self
             .vfs
-            .open(&path, flags)
+            .open(&path, sandbox_vfs::OpenFlags::default())
             .await
             .map_err(|e| Status::not_found(format!("File not found: {}", e)))?;
-
-        let mut data = Vec::new();
-        loop {
-            let chunk = self
-                .vfs
-                .read(&handle, data.len() as u64, 65536)
-                .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-            if chunk.is_empty() {
-                self.vfs.close(&handle);
-                return Ok(Response::new(ReadFileResponse { data }));
-            }
-            data.extend_from_slice(&chunk);
-        }
+        let chunk = self
+            .vfs
+            .read(&handle, req.offset, max)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        self.vfs.close(&handle);
+        Ok(Response::new(ReadFileResponse {
+            eof: chunk.len() < max,
+            data: chunk.to_vec(),
+        }))
     }
 
     async fn write_file(&self, request: Request<WriteFileRequest>) -> Result<Response<()>, Status> {
         let req = request.into_inner();
         let path = PathBuf::from(&req.path);
+        if req.data.len() > MAX_CHUNK_BYTES {
+            return Err(Status::invalid_argument(
+                "chunk is larger than the agent accepts",
+            ));
+        }
 
+        // The first chunk creates the file afresh. Later chunks extend it.
         let flags = sandbox_vfs::OpenFlags {
             read: false,
             write: true,
             create: true,
-            truncate: true,
+            truncate: req.offset == 0,
             ..Default::default()
         };
         let handle = self
@@ -173,14 +183,24 @@ impl GuestService for GuestServiceImpl {
             .open(&path, flags)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
-
-        self.vfs
-            .write(&handle, 0, &req.data)
+        let written = self
+            .vfs
+            .write(&handle, req.offset, &req.data)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::internal(e.to_string()));
         self.vfs.close(&handle);
-
+        written?;
         Ok(Response::new(()))
+    }
+
+    async fn mk_dir(&self, request: Request<MkDirRequest>) -> Result<Response<()>, Status> {
+        let path = PathBuf::from(request.into_inner().path);
+        match self.vfs.mkdir(&path, 0o755).await {
+            Ok(()) => Ok(Response::new(())),
+            // Promotion may repeat a directory it already made. That is not an error.
+            Err(_) if self.vfs.stat(&path).await.is_ok_and(|s| s.is_dir) => Ok(Response::new(())),
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn list_dir(
