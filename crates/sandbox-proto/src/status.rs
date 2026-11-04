@@ -97,4 +97,5 @@ pub const ALL_ERROR_CODES: &[ErrorCode] = &[
     ErrorCode::ShellError,
     ErrorCode::RuntimeError,
     ErrorCode::WasmError,
+    ErrorCode::NeedsVm,
 ];

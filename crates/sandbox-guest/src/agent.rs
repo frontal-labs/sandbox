@@ -264,18 +264,25 @@ impl GuestService for GuestServiceImpl {
 
     async fn sync(&self, request: Request<SyncRequest>) -> Result<Response<SyncResponse>, Status> {
         let req = request.into_inner();
-
-        if let Some(expected_hash_pb) = req.expected_root {
-            let _expected = ContentHash::try_from(expected_hash_pb)
+        // The root the guest holds now. The VFS commits its tree to the guest's own store.
+        let root = self
+            .vfs
+            .checkpoint()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if let Some(expected) = req.expected_root {
+            let expected = ContentHash::try_from(expected)
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
-            // Compare with actual root (placeholder)
+            if expected != root {
+                // The caller asked about a different tree. Reporting the root the guest
+                // holds lets the caller decide what to do; nothing here is changed.
+                return Err(Status::failed_precondition(format!(
+                    "the guest holds root {root}, not {expected}"
+                )));
+            }
         }
-
-        let root = ContentHash::nil();
-        let root_pb: sandbox_proto::v1::types::ContentHash = root.into();
-
         Ok(Response::new(SyncResponse {
-            root: Some(root_pb),
+            root: Some(root.into()),
         }))
     }
 }

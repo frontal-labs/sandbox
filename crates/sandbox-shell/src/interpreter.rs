@@ -1160,6 +1160,20 @@ impl Shell {
     }
 
     /// Finds a tool on PATH: a path with a slash, or a name searched on PATH.
+    /// Whether `name` can run in this shell: a function, a builtin, a registered tool, or
+    /// an executable on `PATH`. A command that cannot is one the isolate tier cannot run.
+    pub async fn command_available(&self, name: &str) -> bool {
+        if crate::builtins::is_builtin(name) || self.functions.contains_key(name) {
+            return true;
+        }
+        if let Ok(registry) = self.registry().await {
+            if registry.find(name).is_some() {
+                return true;
+            }
+        }
+        self.find_tool(name).await.is_some()
+    }
+
     async fn find_tool(&self, name: &str) -> Option<String> {
         let candidates: Vec<String> = if name.contains('/') {
             vec![self.resolve(name)]

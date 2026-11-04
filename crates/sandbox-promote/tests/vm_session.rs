@@ -4,7 +4,7 @@
 
 use sandbox_promote::promote_to_vm;
 use sandbox_session::{IsolateBackend, Session};
-use sandbox_types::{ErrorCode, ExecRequest, SessionConfig, TenantId, Tier};
+use sandbox_types::{ExecRequest, SessionConfig, TenantId, Tier};
 use sandbox_vfs::OpenFlags;
 use sandbox_vmm::{Accel, QemuSpec, QemuVm};
 use std::path::{Path, PathBuf};
@@ -108,9 +108,16 @@ async fn a_promoted_session_runs_and_stores_its_files_in_the_guest() {
         .await
         .unwrap();
 
-    // Snapshot and checkpoint are refused, with a reason, rather than faked.
-    let err = promoted.snapshot().await.unwrap_err();
-    assert_eq!(err.code, ErrorCode::Unsupported, "{}", err.message);
+    // The root is the guest's own: it changes when the guest's files change.
+    let before = promoted.snapshot().await.unwrap();
+    promoted
+        .run_script("echo more >> /work/note.txt")
+        .await
+        .unwrap();
+    let after = promoted.snapshot().await.unwrap();
+    assert_ne!(before, after);
+    let checkpoint = promoted.checkpoint().await.unwrap();
+    assert_eq!(checkpoint.root, after);
 
     Box::new(promoted).destroy().await.unwrap();
 }

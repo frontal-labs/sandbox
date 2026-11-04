@@ -65,6 +65,7 @@ impl SnapshotManager {
                 id: SessionId::new(),
                 tenant_id: TenantId::nil(),
                 tier: snapshot.tier,
+                allow_vm: false,
                 status: SessionStatus::Running,
                 config_hash: snapshot.vfs_root,
                 vfs_root: Some(snapshot.vfs_root),

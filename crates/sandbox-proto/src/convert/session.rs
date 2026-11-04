@@ -188,6 +188,9 @@ impl TryFrom<pb::SessionState> for SessionState {
                 .ok_or_else(|| invalid("tenant_id is required"))?
                 .try_into()?,
             tier: enum_i32::<pb::Tier>(state.tier, "tier")?.try_into()?,
+            // The wire format does not carry the tier preference, so a decoded state is not
+            // promotable. The server sets the flag itself from the creation config.
+            allow_vm: false,
             status: enum_i32::<pb::SessionStatus>(state.status, "session status")?.try_into()?,
             config_hash: state
                 .config_hash

@@ -35,6 +35,7 @@ impl Scheduler {
             id: session_id,
             tenant_id: config.tenant_id,
             tier: Tier::Isolate,
+            allow_vm: config.tier_preference != sandbox_types::TierPreference::Isolate,
             status: SessionStatus::Running,
             config_hash: sandbox_types::hash::ContentHash::nil(),
             vfs_root: None,

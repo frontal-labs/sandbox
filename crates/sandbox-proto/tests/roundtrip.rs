@@ -340,6 +340,7 @@ proptest! {
             id: SessionId::from_ulid(id),
             tenant_id: TenantId::from_ulid(tenant),
             tier,
+            allow_vm: false,
             status: SessionStatus::Running,
             config_hash: hash,
             vfs_root: vfs,
@@ -407,9 +408,9 @@ fn every_error_code_has_one_proto_value_and_back() {
         );
         assert_eq!(ErrorCode::try_from(wire).unwrap(), *code);
     }
-    // Keep ALL_ERROR_CODES in step with the domain enum: 21 variants today.
-    assert_eq!(ALL_ERROR_CODES.len(), 21);
-    assert_eq!(seen.len(), 21);
+    // Keep ALL_ERROR_CODES in step with the domain enum: 22 variants today.
+    assert_eq!(ALL_ERROR_CODES.len(), 22);
+    assert_eq!(seen.len(), 22);
 }
 
 // --- Hostile and malformed wire input must be rejected, not defaulted -----

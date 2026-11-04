@@ -27,6 +27,9 @@ pub enum ErrorCode {
     ShellError,
     RuntimeError,
     WasmError,
+    /// A command the Tier 1 shell cannot run. The server may promote the session to a VM
+    /// and run it there.
+    NeedsVm,
 }
 
 impl fmt::Display for ErrorCode {
@@ -147,6 +150,14 @@ impl SandboxError {
 
     pub fn wasm_error(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::WasmError, message)
+    }
+
+    /// A command the isolate tier cannot run, so the session needs a Tier 2 VM.
+    pub fn needs_vm(command: &str) -> Self {
+        Self::new(
+            ErrorCode::NeedsVm,
+            format!("{command} is not available in the isolate tier"),
+        )
     }
 }
 

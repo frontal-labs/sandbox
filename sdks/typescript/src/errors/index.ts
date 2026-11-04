@@ -20,6 +20,7 @@ export type ErrorCode =
   | "SHELL_ERROR"
   | "RUNTIME_ERROR"
   | "WASM_ERROR"
+  | "NEEDS_VM"
 
 export interface SandboxError extends Error {
   code: ErrorCode
@@ -69,6 +70,7 @@ export const SandboxErrorCodes = {
   runtimeError: (message: string, cause?: Error) =>
     createSandboxError("RUNTIME_ERROR", message, cause),
   wasmError: (message: string, cause?: Error) => createSandboxError("WASM_ERROR", message, cause),
+  needsVm: (message: string, cause?: Error) => createSandboxError("NEEDS_VM", message, cause),
 }
 
 export type Result<T> = T | SandboxError

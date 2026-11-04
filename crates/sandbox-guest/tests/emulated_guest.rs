@@ -88,8 +88,28 @@ async fn the_agent_serves_the_guest_protocol_from_a_booted_kernel() {
         (0, b"hi\n".as_slice())
     );
 
-    client
+    let before = client
         .sync(sandbox_guest::guest::SyncRequest::default())
         .await
+        .unwrap()
+        .into_inner();
+    client
+        .write_file(WriteFileRequest {
+            path: "/after-sync.txt".to_string(),
+            data: b"changed".to_vec(),
+            offset: 0,
+            truncate: true,
+        })
+        .await
         .unwrap();
+    let after = client
+        .sync(sandbox_guest::guest::SyncRequest::default())
+        .await
+        .unwrap()
+        .into_inner();
+    eprintln!("SYNC before={:?} after={:?}", before.root, after.root);
+    assert_ne!(
+        before.root, after.root,
+        "a write must change the guest's root"
+    );
 }

@@ -107,6 +107,9 @@ pub struct AppState {
     pub(crate) gc_last_run: Arc<tokio::sync::Mutex<Option<std::time::Instant>>>,
     /// What each key has used since this server started (PLAN §4.14).
     pub(crate) usage: UsageTable,
+    /// The Tier 2 guest the server can promote a session into. `None` when no image is
+    /// configured, and then a command the isolate tier cannot run is refused.
+    pub(crate) vm: Option<Arc<VmConfig>>,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -120,6 +123,8 @@ pub(crate) struct SnapshotRecord {
     labels: HashMap<String, String>,
     /// The limits of the session it was taken from. A fork gets them (ADR 0014).
     pub(crate) limits: ResourceLimits,
+    /// Whether the session it was taken from could move to a VM. A fork inherits it.
+    pub(crate) allow_vm: bool,
 }
 
 /// Snapshots held by the server, keyed by ID. The server owns this table, so
@@ -136,6 +141,17 @@ const MAX_FORK_COUNT: u32 = 64;
 /// Live sessions one key may hold. Sessions use process memory, so this bounds
 /// what a single key can take from the server.
 pub const MAX_SESSIONS_PER_KEY: usize = 64;
+/// Where the server finds a Tier 2 guest: QEMU, and the image directory that holds
+/// `vmlinuz` and `initrd.gz` (see docker/emulated-vm/build-image.sh).
+#[derive(Clone, Debug)]
+pub struct VmConfig {
+    pub qemu: std::path::PathBuf,
+    pub image: std::path::PathBuf,
+    pub accel: sandbox_vmm::Accel,
+    pub memory_mib: u32,
+    pub boot_timeout: std::time::Duration,
+}
+
 /// Live sessions the server holds across all keys.
 pub const MAX_SESSIONS_TOTAL: usize = 4096;
 /// Largest file one read returns. A read holds the whole file in memory, and a
@@ -279,7 +295,7 @@ impl IntoResponse for ApiError {
             ErrorCode::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
             ErrorCode::Unsupported => StatusCode::NOT_IMPLEMENTED,
             ErrorCode::Timeout => StatusCode::GATEWAY_TIMEOUT,
-            ErrorCode::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::Unavailable | ErrorCode::NeedsVm => StatusCode::SERVICE_UNAVAILABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let body = ErrorBody {
@@ -345,12 +361,14 @@ fn entry(
     tenant_id: TenantId,
     labels: HashMap<String, String>,
     limits: ResourceLimits,
+    allow_vm: bool,
 ) -> Entry {
     let now = SystemTime::now();
     let state = SessionState {
         id: session.id(),
         tenant_id,
         tier: Tier::Isolate,
+        allow_vm,
         status: SessionStatus::Running,
         config_hash: ContentHash::nil(),
         vfs_root: None,
@@ -386,6 +404,12 @@ struct Lookup {
     state: SessionState,
     gate: Arc<tokio::sync::Mutex<()>>,
     limits: ResourceLimits,
+}
+
+/// Whether a session may move to a VM. The state says so, and the server must have an
+/// image to move it to.
+fn promotable(state: &AppState, owned_state: &SessionState) -> bool {
+    owned_state.allow_vm && state.vm.is_some()
 }
 
 /// A live session the caller owns.
@@ -484,6 +508,24 @@ pub fn create_router_with_state(
     scheduler: Arc<Scheduler>,
     auth: Arc<AuthManager>,
 ) -> (Router, AppState) {
+    router_with_vm(scheduler, auth, None)
+}
+
+/// Like [`create_router_with_state`], and sessions may move to the Tier 2 guest `vm`
+/// describes when a command needs one.
+pub fn create_router_with_vm(
+    scheduler: Arc<Scheduler>,
+    auth: Arc<AuthManager>,
+    vm: VmConfig,
+) -> (Router, AppState) {
+    router_with_vm(scheduler, auth, Some(Arc::new(vm)))
+}
+
+fn router_with_vm(
+    scheduler: Arc<Scheduler>,
+    auth: Arc<AuthManager>,
+    vm: Option<Arc<VmConfig>>,
+) -> (Router, AppState) {
     let state = AppState {
         scheduler,
         auth,
@@ -492,6 +534,7 @@ pub fn create_router_with_state(
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
         store: None,
+        vm,
     };
     (build_router(state.clone()), state)
 }
@@ -513,8 +556,24 @@ pub async fn open_durable_with_state(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
+    open_durable_with_vm(scheduler, dir, None).await
+}
+
+/// Like [`open_durable_with_state`], and sessions may move to the Tier 2 guest `vm`
+/// describes when a command needs one.
+pub async fn open_durable_with_vm(
+    scheduler: Arc<Scheduler>,
+    dir: &std::path::Path,
+    vm: Option<VmConfig>,
+) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let (store, saved) = crate::persist::Store::open(dir)?;
-    attach_store(scheduler, crate::persist::Persistence::Files(store), saved).await
+    attach_store(
+        scheduler,
+        crate::persist::Persistence::Files(store),
+        saved,
+        vm.map(Arc::new),
+    )
+    .await
 }
 
 /// Like [`open_durable_with_state`], with the metadata in the Postgres database at
@@ -532,6 +591,7 @@ pub async fn open_clustered_with_state(
         scheduler,
         crate::persist::Persistence::Clustered(store),
         saved,
+        None,
     )
     .await
 }
@@ -542,6 +602,7 @@ async fn attach_store(
     scheduler: Arc<Scheduler>,
     store: crate::persist::Persistence,
     saved: crate::persist::Saved,
+    vm: Option<Arc<VmConfig>>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
@@ -562,6 +623,7 @@ async fn attach_store(
         snapshots: SnapshotTable::default(),
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
+        vm,
         store: Some(Arc::new(store)),
     };
     restore(&state, saved).await?;
@@ -583,6 +645,8 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
                     created_at: s.created_at,
                     labels: s.labels,
                     limits: s.limits,
+                    // Stored snapshots predate the flag, so they are not promotable.
+                    allow_vm: false,
                 },
             );
         }
@@ -946,6 +1010,7 @@ pub async fn create_session(
         tenant_id,
         labels,
         limits.clone(),
+        config.tier_preference != TierPreference::Isolate,
     );
     entry.checkpoint_policy = config.checkpoint;
     entry.checkpoint_retain = config.checkpoint_retain;
@@ -1169,9 +1234,50 @@ pub async fn exec_command(
     let limit = request.output_limit.map_or(DEFAULT_OUTPUT_LIMIT, |limit| {
         usize::try_from(limit).unwrap_or(usize::MAX)
     });
-    let (mut result, seq) = run_exec(&state, &owner, &own, request, None).await?;
+    // A command the isolate tier cannot run moves the session to a VM, and runs there. The
+    // gate is still held, so no other command interleaves with the move.
+    let (mut result, seq) = match run_exec(&state, &owner, &own, request.clone(), None).await {
+        Err(error) if error.0.code == ErrorCode::NeedsVm && promotable(&state, &own.state) => {
+            let promoted = promote_session(&state, &owner, &own).await?;
+            run_exec(&state, &owner, &promoted, request, None).await?
+        }
+        outcome => outcome?,
+    };
     cap_result(&mut result, limit, seq);
     Ok(Json(result).into_response())
+}
+
+/// Moves a session to a Tier 2 VM. The guest starts, the session's files are copied in, and
+/// the table entry takes the VM session, under the same ID. Its trace and its gate carry over.
+/// Shell state and running processes do not: they stay on the isolate session.
+async fn promote_session(state: &AppState, owner: &KeyId, own: &Owned) -> Result<Owned, ApiError> {
+    let Some(config) = state.vm.clone() else {
+        return Err(SandboxError::new(
+            ErrorCode::NeedsVm,
+            "this server has no VM image, so the command cannot run",
+        )
+        .into());
+    };
+    let spec = sandbox_vmm::QemuSpec {
+        qemu: config.qemu.clone(),
+        kernel: config.image.join("vmlinuz"),
+        initrd: config.image.join("initrd.gz"),
+        memory_mib: config.memory_mib,
+        accel: config.accel,
+        console: config.image.join(format!("console-{}.log", own.state.id)),
+    };
+    let mut vm = sandbox_vmm::QemuVm::start(&spec).await?;
+    vm.wait_for_agent(config.boot_timeout).await?;
+    let (promoted, _report) = sandbox_promote::promote_to_vm(own.session.as_ref(), vm).await?;
+    {
+        let mut table = state.sessions.0.write().await;
+        let Some(entry) = table.get_mut(&own.state.id) else {
+            return Err(SandboxError::not_found("the session is gone").into());
+        };
+        entry.session = Some(Arc::new(promoted));
+        entry.state.tier = Tier::Vm;
+    }
+    owned(state, owner, &own.state.id.to_string()).await
 }
 
 /// Caps both streams of a buffered result (IMAGE.md §4.5). The full streams are the
@@ -1986,6 +2092,7 @@ async fn store_snapshot(
         created_at: SystemTime::now(),
         labels: session.labels.clone(),
         limits,
+        allow_vm: session.allow_vm,
     };
     state
         .snapshots
@@ -2181,6 +2288,7 @@ pub async fn fork_snapshot(
             TenantId::nil(),
             HashMap::new(),
             record.limits.clone(),
+            record.allow_vm,
         );
         stamp(&state, &mut entry, &session).await?;
         write_forked_env_json(&session, sid, &record.limits).await?;
@@ -2597,6 +2705,7 @@ async fn fork_locked(
             TenantId::nil(),
             HashMap::new(),
             own.limits.clone(),
+            own.state.allow_vm,
         );
         stamp(state, &mut entry, &child).await?;
         write_forked_env_json(&child, child_id, &own.limits).await?;

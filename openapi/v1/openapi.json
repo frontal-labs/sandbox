@@ -1481,7 +1481,8 @@
           "VFS_ERROR",
           "SHELL_ERROR",
           "RUNTIME_ERROR",
-          "WASM_ERROR"
+          "WASM_ERROR",
+          "NEEDS_VM"
         ]
       },
       "ExecEvent": {
@@ -2036,6 +2037,10 @@
           "labels"
         ],
         "properties": {
+          "allow_vm": {
+            "type": "boolean",
+            "description": "Whether the session may move to a Tier 2 VM when a command needs one. Set from the\ncreation config's tier preference: `isolate` sessions never move. Stored sessions\nfrom before this field load as not promotable."
+          },
           "config_hash": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"

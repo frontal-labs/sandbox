@@ -961,6 +961,7 @@ components:
       - SHELL_ERROR
       - RUNTIME_ERROR
       - WASM_ERROR
+      - NEEDS_VM
     ExecEvent:
       oneOf:
       - type: object
@@ -1359,6 +1360,12 @@ components:
       - updated_at
       - labels
       properties:
+        allow_vm:
+          type: boolean
+          description: |-
+            Whether the session may move to a Tier 2 VM when a command needs one. Set from the
+            creation config's tier preference: `isolate` sessions never move. Stored sessions
+            from before this field load as not promotable.
         config_hash:
           type: string
           pattern: ^[0-9a-f]{64}$

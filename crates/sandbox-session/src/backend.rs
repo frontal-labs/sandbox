@@ -179,6 +179,11 @@ impl IsolateBackend {
         let mut shell = DetachOnDrop {
             shell: self.shell.lock().await,
         };
+        // A command this tier cannot run is refused, so the caller can promote the session
+        // to a VM (PLAN.md section 4.11). It is not run as a "command not found" failure.
+        if !shell.command_available(&req.argv[0]).await {
+            return Err(SandboxError::needs_vm(&req.argv[0]));
+        }
         for (key, value) in req.env {
             shell.set_env(key, value);
         }
@@ -575,8 +580,14 @@ mod tests {
             (0, b"hello\n".as_slice())
         );
 
-        let missing = backend.exec(argv(&["nonexistent-tool"])).await.unwrap();
-        assert_eq!(missing.exit_code, 127);
+        // A command the isolate tier cannot run is refused, not run as a failure.
+        let missing = backend.exec(argv(&["nonexistent-tool"])).await.unwrap_err();
+        assert_eq!(
+            missing.code,
+            sandbox_types::ErrorCode::NeedsVm,
+            "{}",
+            missing.message
+        );
     }
 
     #[tokio::test]

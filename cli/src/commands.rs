@@ -164,6 +164,23 @@ pub enum Commands {
         /// the blobs, so it must be a directory every node can reach.
         #[arg(long, requires = "data_dir")]
         database_url: Option<String>,
+        /// A directory with `vmlinuz` and `initrd.gz`, the guest image (see
+        /// docker/emulated-vm/build-image.sh). With it, a command the isolate tier cannot
+        /// run moves the session to a Tier 2 VM. Without it, such a command is refused.
+        #[arg(long)]
+        vm_image: Option<PathBuf>,
+        /// The QEMU binary that runs the guest.
+        #[arg(long, default_value = "qemu-system-x86_64")]
+        qemu: PathBuf,
+        /// How QEMU runs the guest: `tcg` (software, works in Docker without KVM) or `kvm`.
+        #[arg(long, default_value = "tcg")]
+        vm_accel: String,
+        /// Guest memory in MiB.
+        #[arg(long, default_value_t = 512)]
+        vm_memory_mib: u32,
+        /// Seconds to wait for a guest's agent to answer after boot.
+        #[arg(long, default_value_t = 180)]
+        vm_boot_timeout_secs: u64,
     },
 
     /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
@@ -241,17 +258,41 @@ impl Cli {
                 gc_interval_secs,
                 idle_sleep_secs,
                 database_url,
+                vm_image,
+                qemu,
+                vm_accel,
+                vm_memory_mib,
+                vm_boot_timeout_secs,
             } => {
                 // The URL may also come from the environment, so a secret need not be on the command line.
                 let url = database_url
                     .clone()
                     .or_else(|| std::env::var("SANDBOX_DATABASE_URL").ok());
+                let vm = match vm_image {
+                    None => None,
+                    Some(image) => Some(sandbox_server::VmConfig {
+                        qemu: qemu.clone(),
+                        image: image.clone(),
+                        accel: match vm_accel.as_str() {
+                            "tcg" => sandbox_vmm::Accel::Tcg,
+                            "kvm" => sandbox_vmm::Accel::Kvm,
+                            other => {
+                                return Err(SandboxError::invalid_argument(format!(
+                                    "--vm-accel must be tcg or kvm, not {other}"
+                                )))
+                            }
+                        },
+                        memory_mib: *vm_memory_mib,
+                        boot_timeout: std::time::Duration::from_secs(*vm_boot_timeout_secs),
+                    }),
+                };
                 serve(
                     addr,
                     data_dir.as_deref(),
                     *gc_interval_secs,
                     *idle_sleep_secs,
                     url.as_deref(),
+                    vm,
                 )
             }
             Commands::Snapshot { session_id } => snapshot(session_id),
@@ -497,6 +538,7 @@ fn serve(
     gc_interval_secs: u64,
     idle_sleep_secs: u64,
     database_url: Option<&str>,
+    vm: Option<sandbox_server::VmConfig>,
 ) -> Result<i32, SandboxError> {
     use std::sync::Arc;
     // Log to stderr, so stdout keeps its key line. RUST_LOG overrides the default.
@@ -511,12 +553,15 @@ fn serve(
     let (app, state, new_key) = match (data_dir, database_url) {
         (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir)?,
         (Some(dir), None) => {
-            rt.block_on(sandbox_server::open_durable_with_state(scheduler, dir))?
+            rt.block_on(sandbox_server::open_durable_with_vm(scheduler, dir, vm))?
         }
         (None, _) => {
             let auth = Arc::new(sandbox_server::auth::AuthManager::new());
             let key = auth.create_key();
-            let (app, state) = sandbox_server::create_router_with_state(scheduler, auth);
+            let (app, state) = match vm {
+                Some(vm) => sandbox_server::create_router_with_vm(scheduler, auth, vm),
+                None => sandbox_server::create_router_with_state(scheduler, auth),
+            };
             (app, state, Some(key))
         }
     };

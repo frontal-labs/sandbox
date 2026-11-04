@@ -29,6 +29,7 @@ ErrorCode = Literal[
   "SHELL_ERROR",
   "RUNTIME_ERROR",
   "WASM_ERROR",
+  "NEEDS_VM",
 ]
 
 

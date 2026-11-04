@@ -26,6 +26,7 @@ enum ErrorCode {
   ERROR_CODE_SHELL_ERROR = 19;
   ERROR_CODE_RUNTIME_ERROR = 20;
   ERROR_CODE_WASM_ERROR = 21;
+  ERROR_CODE_NEEDS_VM = 22;
 }
 
 message Error {

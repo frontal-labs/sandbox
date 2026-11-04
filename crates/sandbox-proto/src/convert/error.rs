@@ -29,6 +29,7 @@ impl From<ErrorCode> for pb::ErrorCode {
             ErrorCode::ShellError => Self::ShellError,
             ErrorCode::RuntimeError => Self::RuntimeError,
             ErrorCode::WasmError => Self::WasmError,
+            ErrorCode::NeedsVm => Self::NeedsVm,
         }
     }
 }
@@ -59,6 +60,7 @@ impl TryFrom<pb::ErrorCode> for ErrorCode {
             pb::ErrorCode::ShellError => Self::ShellError,
             pb::ErrorCode::RuntimeError => Self::RuntimeError,
             pb::ErrorCode::WasmError => Self::WasmError,
+            pb::ErrorCode::NeedsVm => Self::NeedsVm,
         })
     }
 }

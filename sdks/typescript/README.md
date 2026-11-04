@@ -196,7 +196,7 @@ Errors are returned as values, not thrown. `Result<T>` is `T | SandboxError`. `S
 import { isSandboxError, SandboxErrorCodes, type Result, type SandboxError } from "@frontal-labs/sandbox-sdk/errors"
 ```
 
-`ErrorCode` values: `INTERNAL`, `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `TIMEOUT`, `CANCELLED`, `INVALID_STATE`, `UNSUPPORTED`, `POLICY_DENIED`, `PROMOTION_FAILED`, `SNAPSHOT_FAILED`, `VM_BOOT_FAILED`, `NETWORK_ERROR`, `CAS_ERROR`, `VFS_ERROR`, `SHELL_ERROR`, `RUNTIME_ERROR`, `WASM_ERROR`.
+`ErrorCode` values: `INTERNAL`, `INVALID_ARGUMENT`, `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `TIMEOUT`, `CANCELLED`, `INVALID_STATE`, `UNSUPPORTED`, `POLICY_DENIED`, `PROMOTION_FAILED`, `SNAPSHOT_FAILED`, `VM_BOOT_FAILED`, `NETWORK_ERROR`, `CAS_ERROR`, `VFS_ERROR`, `SHELL_ERROR`, `RUNTIME_ERROR`, `WASM_ERROR`, `NEEDS_VM`.
 
 Note: the client currently maps every non-OK HTTP response to `INTERNAL`. It does not map HTTP status codes to `NOT_FOUND`, `POLICY_DENIED`, or `TIMEOUT`, so branch on those codes only once the server maps them.
 

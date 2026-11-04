@@ -13,6 +13,8 @@ sandbox-scheduler = { path = "../sandbox-scheduler" }
 sandbox-session = { path = "../sandbox-session" }
 sandbox-vfs = { path = "../sandbox-vfs" }
 sandbox-cas = { path = "../sandbox-cas" }
+sandbox-vmm = { path = "../sandbox-vmm" }
+sandbox-promote = { path = "../sandbox-promote" }
 sandbox-trace = { path = "../sandbox-trace" }
 tokio = { workspace = true }
 sqlx = { workspace = true, optional = true }

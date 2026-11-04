@@ -150,6 +150,11 @@ pub struct SessionState {
     #[cfg_attr(feature = "openapi", schema(value_type = String, pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"))]
     pub tenant_id: TenantId,
     pub tier: Tier,
+    /// Whether the session may move to a Tier 2 VM when a command needs one. Set from the
+    /// creation config's tier preference: `isolate` sessions never move. Stored sessions
+    /// from before this field load as not promotable.
+    #[serde(default)]
+    pub allow_vm: bool,
     pub status: SessionStatus,
     #[cfg_attr(feature = "openapi", schema(value_type = String, pattern = "^[0-9a-f]{64}$"))]
     pub config_hash: ContentHash,

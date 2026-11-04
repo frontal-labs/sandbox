@@ -101,8 +101,26 @@ fn unsupported(what: &str) -> VfsError {
 
 #[async_trait]
 impl SessionFs for GuestFs {
+    /// Walks the guest's tree and adds up the file sizes. The protocol has no call for it,
+    /// so this costs one listing per directory.
     async fn total_bytes(&self) -> VfsResult<u64> {
-        Err(unsupported("the total size"))
+        let mut total = 0u64;
+        let mut pending = vec!["/".to_string()];
+        while let Some(dir) = pending.pop() {
+            for entry in self.readdir(Path::new(&dir)).await? {
+                let path = if dir == "/" {
+                    format!("/{}", entry.name)
+                } else {
+                    format!("{dir}/{}", entry.name)
+                };
+                if entry.is_dir {
+                    pending.push(path);
+                } else {
+                    total += entry.size;
+                }
+            }
+        }
+        Ok(total)
     }
 
     async fn open(&self, path: &Path, flags: OpenFlags) -> VfsResult<FileHandle> {
@@ -330,6 +348,23 @@ pub struct VmSession {
 }
 
 impl VmSession {
+    /// The root the guest's tree commits to. It is held in the guest's store, so it
+    /// restores only into the same VM.
+    async fn sync_root(&self) -> Result<ContentHash, SandboxError> {
+        let reply = self
+            .client
+            .clone()
+            .sync(sandbox_proto::v1::guest::SyncRequest::default())
+            .await
+            .map_err(Self::exec_error)?
+            .into_inner();
+        let root = reply
+            .root
+            .ok_or_else(|| SandboxError::internal("the guest sent no root"))?;
+        ContentHash::try_from(root)
+            .map_err(|e| SandboxError::internal(format!("bad root from the guest: {e}")))
+    }
+
     fn exec_error(error: tonic::Status) -> SandboxError {
         SandboxError::new(
             ErrorCode::VmBootFailed,
@@ -415,15 +450,13 @@ impl Session for VmSession {
     }
 
     async fn snapshot(&self) -> Result<ContentHash, SandboxError> {
-        Err(SandboxError::unsupported(
-            "snapshots of Tier 2 sessions are not built yet",
-        ))
+        self.sync_root().await
     }
 
     async fn checkpoint(&self) -> Result<Checkpoint, SandboxError> {
-        Err(SandboxError::unsupported(
-            "checkpoints of Tier 2 sessions are not built yet",
-        ))
+        // The guest's shell state is not kept between commands, so the checkpoint carries
+        // the filesystem root alone, with the default working directory and no environment.
+        Ok(Checkpoint::root_only(self.sync_root().await?))
     }
 
     async fn destroy(self: Box<Self>) -> Result<(), SandboxError> {
