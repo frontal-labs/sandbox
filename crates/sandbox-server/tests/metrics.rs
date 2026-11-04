@@ -11,7 +11,13 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-async fn send(app: &axum::Router, key: Option<&str>, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, String) {
+async fn send(
+    app: &axum::Router,
+    key: Option<&str>,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, String) {
     let mut builder = Request::builder().method(method).uri(uri);
     if let Some(key) = key {
         builder = builder.header(header::AUTHORIZATION, format!("Bearer {key}"));
@@ -23,9 +29,15 @@ async fn send(app: &axum::Router, key: Option<&str>, method: &str, uri: &str, bo
         }
         None => Body::empty(),
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     (status, String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -66,7 +78,62 @@ async fn metrics_need_a_key_and_count_the_server_activity() {
         "sandbox_sessions_active 1",
         "sandbox_snapshots_active 0",
     ] {
-        assert!(text.lines().any(|l| l == line), "missing {line:?} in:\n{text}");
+        assert!(
+            text.lines().any(|l| l == line),
+            "missing {line:?} in:\n{text}"
+        );
     }
-    assert!(text.contains("# TYPE sandbox_execs_total counter"), "{text}");
+    assert!(
+        text.contains("# TYPE sandbox_execs_total counter"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn every_response_carries_a_request_id_and_keeps_a_usable_client_one() {
+    let auth = Arc::new(AuthManager::new());
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let generated = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(generated.len(), 36, "a generated ID is a UUID: {generated}");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/openapi.json")
+                .header("x-request-id", "trace-42")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.headers()["x-request-id"], "trace-42");
+
+    // A client ID that is too long is replaced, not echoed.
+    let long = "a".repeat(200);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/openapi.json")
+                .header("x-request-id", long.as_str())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(response.headers()["x-request-id"], long.as_str());
 }

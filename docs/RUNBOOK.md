@@ -22,6 +22,14 @@ except `/v1/openapi.json` does. Scrape it with `Authorization: Bearer <key>`.
 The counters are in memory and reset on restart, so a rate can drop to zero after one.
 They sum every key, so they carry no tenant label. Per-key usage is at `GET /v1/usage`.
 
+## Logs and request IDs
+
+`frontal-sandbox serve` logs to stderr. `RUST_LOG` sets the filter, and the default is `info`.
+Each request gets an ID. A client may send `x-request-id` (printable, at most 128 bytes), and
+the server echoes it. Otherwise the server generates one. The response carries the same
+header. Each request is logged once, with its method, path, status, and duration, under a span
+that holds the ID. API keys are not logged.
+
 ## Limits that refuse new work
 
 These return `RESOURCE_EXHAUSTED`. They are deliberate.
@@ -44,7 +52,7 @@ a long command delays it.
 ## Not yet available
 
 - No health endpoint beyond the OpenAPI document.
-- No tracing export, and no OpenTelemetry spans.
+- No tracing export, and no OpenTelemetry spans. Logs go to stderr only.
 - No billing export. Usage is in memory only.
 - No tenant-level quota. Only the per-key limits above exist.
 - No Tier 2 (VM) sessions. Requests that need a VM are refused.

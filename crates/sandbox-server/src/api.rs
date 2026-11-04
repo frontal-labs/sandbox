@@ -801,16 +801,48 @@ pub async fn get_metrics(State(state): State<AppState>) -> impl axum::response::
     let sessions = state.sessions.0.read().await.len();
     let snapshots = state.snapshots.records.read().await.len();
     let counters = [
-        ("sandbox_sessions_created_total", "Sessions created since start.", total.sessions_created),
-        ("sandbox_sessions_slept_total", "Sessions put to sleep since start.", total.sessions_slept),
-        ("sandbox_sessions_woken_total", "Sessions woken since start.", total.sessions_woken),
-        ("sandbox_execs_total", "Commands run since start.", total.execs),
-        ("sandbox_exec_wall_ms_total", "Wall time of commands run, in milliseconds.", total.exec_wall_ms),
-        ("sandbox_bytes_written_total", "Bytes written through the filesystem API.", total.bytes_written),
+        (
+            "sandbox_sessions_created_total",
+            "Sessions created since start.",
+            total.sessions_created,
+        ),
+        (
+            "sandbox_sessions_slept_total",
+            "Sessions put to sleep since start.",
+            total.sessions_slept,
+        ),
+        (
+            "sandbox_sessions_woken_total",
+            "Sessions woken since start.",
+            total.sessions_woken,
+        ),
+        (
+            "sandbox_execs_total",
+            "Commands run since start.",
+            total.execs,
+        ),
+        (
+            "sandbox_exec_wall_ms_total",
+            "Wall time of commands run, in milliseconds.",
+            total.exec_wall_ms,
+        ),
+        (
+            "sandbox_bytes_written_total",
+            "Bytes written through the filesystem API.",
+            total.bytes_written,
+        ),
     ];
     let gauges = [
-        ("sandbox_sessions_active", "Sessions the server holds now.", sessions as u64),
-        ("sandbox_snapshots_active", "Snapshots the server holds now.", snapshots as u64),
+        (
+            "sandbox_sessions_active",
+            "Sessions the server holds now.",
+            sessions as u64,
+        ),
+        (
+            "sandbox_snapshots_active",
+            "Snapshots the server holds now.",
+            snapshots as u64,
+        ),
     ];
     let mut body = String::new();
     for (kind, metrics) in [("counter", &counters[..]), ("gauge", &gauges[..])] {
@@ -821,7 +853,10 @@ pub async fn get_metrics(State(state): State<AppState>) -> impl axum::response::
         }
     }
     (
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         body,
     )
 }
@@ -856,6 +891,7 @@ fn build_router(state: AppState) -> Router {
         ))
         .route("/v1/openapi.json", get(openapi_json))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(middleware::from_fn(crate::middleware::request_context))
         .with_state(state)
 }
 

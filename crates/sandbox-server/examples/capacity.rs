@@ -20,7 +20,13 @@ use tower::ServiceExt;
 
 type Router = axum::Router;
 
-async fn send(app: &Router, key: &str, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+async fn send(
+    app: &Router,
+    key: &str,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -41,7 +47,10 @@ async fn send(app: &Router, key: &str, method: &str, uri: &str, body: Option<Val
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 fn session_body() -> Value {
@@ -59,7 +68,10 @@ fn rss_kib() -> u64 {
         .args(["-o", "rss=", "-p", &std::process::id().to_string()])
         .output()
         .expect("ps runs");
-    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0)
 }
 
 fn percentile(sorted: &[Duration], p: f64) -> Duration {
@@ -92,7 +104,8 @@ async fn main() {
     let mut fork_times = Vec::new();
     for _ in 0..forks {
         let key = auth.create_key();
-        let (status, created) = send(&app, &key, "POST", "/v1/sessions", Some(session_body())).await;
+        let (status, created) =
+            send(&app, &key, "POST", "/v1/sessions", Some(session_body())).await;
         assert_eq!(status, StatusCode::CREATED, "{created}");
         let source = created["session_id"].as_str().unwrap().to_string();
         let (status, _) = send(
@@ -100,13 +113,22 @@ async fn main() {
             &key,
             "POST",
             &format!("/v1/sessions/{source}/exec"),
-            Some(json!({"argv": ["sh", "-c", "echo state > file.txt"], "env": {}, "stream": false})),
+            Some(
+                json!({"argv": ["sh", "-c", "echo state > file.txt"], "env": {}, "stream": false}),
+            ),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
 
         let started = Instant::now();
-        let (status, taken) = send(&app, &key, "POST", &format!("/v1/sessions/{source}/snapshot"), None).await;
+        let (status, taken) = send(
+            &app,
+            &key,
+            "POST",
+            &format!("/v1/sessions/{source}/snapshot"),
+            None,
+        )
+        .await;
         snapshot_times.push(started.elapsed());
         assert_eq!(status, StatusCode::CREATED, "{taken}");
         let snapshot = taken["snapshot_id"].as_str().unwrap().to_string();
@@ -138,7 +160,8 @@ async fn main() {
             key = auth.create_key();
         }
         keys.push(key.clone());
-        let (status, created) = send(&app, &key, "POST", "/v1/sessions", Some(session_body())).await;
+        let (status, created) =
+            send(&app, &key, "POST", "/v1/sessions", Some(session_body())).await;
         assert_eq!(status, StatusCode::CREATED);
         ids.push(created["session_id"].as_str().unwrap().to_string());
     }
@@ -155,7 +178,8 @@ async fn main() {
     // Sleeping sessions: put every idle session to sleep, and measure the memory they hold.
     let started = Instant::now();
     for (id, key) in ids.iter().zip(&keys) {
-        let (status, slept) = send(&app, key, "POST", &format!("/v1/sessions/{id}/sleep"), None).await;
+        let (status, slept) =
+            send(&app, key, "POST", &format!("/v1/sessions/{id}/sleep"), None).await;
         assert!(status.is_success(), "{slept}");
     }
     let slept_after = rss_kib();
