@@ -30,6 +30,14 @@ the server echoes it. Otherwise the server generates one. The response carries t
 header. Each request is logged once, with its method, path, status, and duration, under a span
 that holds the ID. API keys are not logged.
 
+### Trace context
+
+Requests follow the W3C `traceparent` header. A valid incoming trace ID is kept, and the
+response carries it with a new span ID for this server, so a caller can follow a request into
+the server's logs by its `trace_id`. Without a valid header, a new trace starts. This is the
+trace-context format OpenTelemetry uses. Spans are not exported to a collector yet: the logs
+carry the IDs, and an exporter is still to be built.
+
 ## Limits that refuse new work
 
 These return `RESOURCE_EXHAUSTED`. They are deliberate.
@@ -52,7 +60,7 @@ a long command delays it.
 ## Not yet available
 
 - No health endpoint beyond the OpenAPI document.
-- No tracing export, and no OpenTelemetry spans. Logs go to stderr only.
+- No span export to an OpenTelemetry collector. Trace IDs are in the logs and the headers.
 - No billing export. Usage is in memory only.
 - No tenant-level quota. Only the per-key limits above exist.
 - No Tier 2 (VM) sessions. Requests that need a VM are refused.

@@ -137,3 +137,50 @@ async fn every_response_carries_a_request_id_and_keeps_a_usable_client_one() {
         .unwrap();
     assert_ne!(response.headers()["x-request-id"], long.as_str());
 }
+
+#[tokio::test]
+async fn a_request_joins_the_callers_trace() {
+    let auth = Arc::new(AuthManager::new());
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let caller_trace = "0af7651916cd43dd8448eb211c80319c";
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/openapi.json")
+                .header(
+                    "traceparent",
+                    format!("00-{caller_trace}-b7ad6b7169203331-01"),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let echoed = response.headers()["traceparent"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let parts: Vec<&str> = echoed.split('-').collect();
+    assert_eq!(
+        parts[1], caller_trace,
+        "the server keeps the caller's trace: {echoed}"
+    );
+    assert_ne!(parts[2], "b7ad6b7169203331", "the server adds its own span");
+
+    // Without a traceparent, a new trace starts, and it is still well formed.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let fresh = response.headers()["traceparent"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(fresh.len(), 55, "{fresh}");
+}
