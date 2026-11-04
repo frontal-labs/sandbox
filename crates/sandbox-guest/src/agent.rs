@@ -1,7 +1,8 @@
 use sandbox_proto::v1::guest::{
     guest_service_server::GuestService, guest_service_server::GuestServiceServer, DirEntry,
     ListDirRequest, ListDirResponse, MkDirRequest, PingResponse, ReadFileRequest, ReadFileResponse,
-    SyncRequest, SyncResponse, WriteFileRequest,
+    RemoveRequest, RenameRequest, StatRequest, StatResponse, SyncRequest, SyncResponse,
+    WriteFileRequest,
 };
 use sandbox_types::{ContentHash, SandboxError};
 use sandbox_vfs::{SessionFs, Vfs};
@@ -170,12 +171,13 @@ impl GuestService for GuestServiceImpl {
             ));
         }
 
-        // The first chunk creates the file afresh. Later chunks extend it.
+        // A write creates the file if needed and changes only the bytes it names. The
+        // caller asks for a truncation when it wants the file emptied first.
         let flags = sandbox_vfs::OpenFlags {
             read: false,
             write: true,
             create: true,
-            truncate: req.offset == 0,
+            truncate: req.truncate,
             ..Default::default()
         };
         let handle = self
@@ -190,6 +192,38 @@ impl GuestService for GuestServiceImpl {
             .map_err(|e| Status::internal(e.to_string()));
         self.vfs.close(&handle);
         written?;
+        Ok(Response::new(()))
+    }
+
+    async fn stat(&self, request: Request<StatRequest>) -> Result<Response<StatResponse>, Status> {
+        let path = PathBuf::from(request.into_inner().path);
+        let stat = self
+            .vfs
+            .stat(&path)
+            .await
+            .map_err(|e| Status::not_found(e.to_string()))?;
+        Ok(Response::new(StatResponse {
+            is_dir: stat.is_dir,
+            is_file: stat.is_file,
+            size: stat.size,
+        }))
+    }
+
+    async fn remove(&self, request: Request<RemoveRequest>) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        self.vfs
+            .rm(&PathBuf::from(req.path), req.recursive)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(()))
+    }
+
+    async fn rename(&self, request: Request<RenameRequest>) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        self.vfs
+            .rename(&PathBuf::from(req.from), &PathBuf::from(req.to))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(()))
     }
 

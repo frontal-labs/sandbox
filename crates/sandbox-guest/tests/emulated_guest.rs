@@ -46,6 +46,7 @@ async fn the_agent_serves_the_guest_protocol_from_a_booted_kernel() {
             path: "/hello.txt".to_string(),
             data: b"from the host".to_vec(),
             offset: 0,
+            truncate: true,
         })
         .await
         .unwrap();

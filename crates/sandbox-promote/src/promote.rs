@@ -88,6 +88,8 @@ async fn copy_file(
                         path: path.to_string(),
                         data: chunk.to_vec(),
                         offset,
+                        // The first chunk empties a file the guest may already hold.
+                        truncate: offset == 0,
                     })
                     .await
                     .map_err(guest_error)?;

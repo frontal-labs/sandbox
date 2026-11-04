@@ -20,10 +20,12 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 sandbox-proto = { path = "../sandbox-proto" }
+sandbox-shell = { path = "../sandbox-shell" }
 tonic = { workspace = true }
 
 [features]
 default = []
+
 [dev-dependencies]
 sandbox-cas = { path = "../sandbox-cas" }
 sandbox-proto = { path = "../sandbox-proto" }

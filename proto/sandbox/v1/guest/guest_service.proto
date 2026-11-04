@@ -14,6 +14,9 @@ service GuestService {
   rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
   rpc WriteFile(WriteFileRequest) returns (google.protobuf.Empty);
   rpc MkDir(MkDirRequest) returns (google.protobuf.Empty);
+  rpc Stat(StatRequest) returns (StatResponse);
+  rpc Remove(RemoveRequest) returns (google.protobuf.Empty);
+  rpc Rename(RenameRequest) returns (google.protobuf.Empty);
   rpc ListDir(ListDirRequest) returns (ListDirResponse);
   // Makes the guest's writable tree match the given root, or reports the root it now has.
   rpc Sync(SyncRequest) returns (SyncResponse);
@@ -38,15 +41,37 @@ message ReadFileResponse {
   bool eof = 2;
 }
 
-// A chunk of a file. Offset zero creates the file, or truncates it if it exists.
+// A chunk of a file. The file is created if it does not exist. With `truncate`, it is
+// emptied first, so a promoted file starts clean.
 message WriteFileRequest {
   string path = 1;
   bytes data = 2;
   uint64 offset = 3;
+  bool truncate = 4;
 }
 
 message MkDirRequest {
   string path = 1;
+}
+
+message StatRequest {
+  string path = 1;
+}
+
+message StatResponse {
+  bool is_dir = 1;
+  bool is_file = 2;
+  uint64 size = 3;
+}
+
+message RemoveRequest {
+  string path = 1;
+  bool recursive = 2;
+}
+
+message RenameRequest {
+  string from = 1;
+  string to = 2;
 }
 
 message ListDirRequest {
