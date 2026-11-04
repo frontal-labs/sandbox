@@ -59,7 +59,7 @@ async fn an_auto_session_moves_to_the_vm_when_a_command_needs_it() {
         VmConfig {
             qemu: PathBuf::from("qemu-system-x86_64"),
             image,
-            accel: sandbox_vmm::Accel::Tcg,
+            accel: sandbox_vmm::Accel::from_env(),
             memory_mib: 2048,
             boot_timeout: Duration::from_secs(180),
             warm_guests: 1,
@@ -113,7 +113,7 @@ async fn a_streamed_command_moves_an_auto_session_to_the_vm() {
         VmConfig {
             qemu: PathBuf::from("qemu-system-x86_64"),
             image,
-            accel: sandbox_vmm::Accel::Tcg,
+            accel: sandbox_vmm::Accel::from_env(),
             memory_mib: 2048,
             boot_timeout: Duration::from_secs(180),
             warm_guests: 0,

@@ -15,7 +15,7 @@ async fn the_pool_keeps_ready_guests_and_boots_on_demand() {
             kernel: dir.join("vmlinuz"),
             initrd: dir.join("initrd.gz"),
             memory_mib: 2048,
-            accel: Accel::Tcg,
+            accel: Accel::from_env(),
             console: dir.join("pool-console.log"),
         },
         1,

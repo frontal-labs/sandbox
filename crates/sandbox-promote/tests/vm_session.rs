@@ -16,7 +16,7 @@ fn spec(dir: &Path) -> QemuSpec {
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
         memory_mib: 2048,
-        accel: Accel::Tcg,
+        accel: Accel::from_env(),
         console: dir.join("vm-session-console.log"),
     }
 }

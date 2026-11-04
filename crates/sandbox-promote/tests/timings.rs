@@ -22,7 +22,7 @@ async fn print_tier2_timings() {
             kernel: dir.join("vmlinuz"),
             initrd: dir.join("initrd.gz"),
             memory_mib: 2048,
-            accel: Accel::Tcg,
+            accel: Accel::from_env(),
             console: dir.join("timings-console.log"),
         },
         1,

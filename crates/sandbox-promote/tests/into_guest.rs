@@ -35,7 +35,7 @@ async fn a_promoted_tree_is_readable_and_runnable_in_the_guest() {
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
         memory_mib: 2048,
-        accel: Accel::Tcg,
+        accel: Accel::from_env(),
         console: dir.join("promote-test-console.log"),
     })
     .await

@@ -27,6 +27,15 @@ pub enum Accel {
 }
 
 impl Accel {
+    /// The accelerator the environment names: `SANDBOX_VM_ACCEL=kvm` for hardware virtualisation,
+    /// and software emulation otherwise. The emulated CI and the KVM runner set it.
+    pub fn from_env() -> Accel {
+        match std::env::var("SANDBOX_VM_ACCEL").as_deref() {
+            Ok("kvm") => Accel::Kvm,
+            _ => Accel::Tcg,
+        }
+    }
+
     fn arg(self) -> &'static str {
         match self {
             Accel::Tcg => "tcg",

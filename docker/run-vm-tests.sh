@@ -10,7 +10,16 @@ IMAGE=frontal-sandbox-linux-dev
 
 docker build -q -t "$IMAGE" -f "$ROOT/docker/linux-dev.Dockerfile" "$ROOT/docker" >/dev/null
 
-exec docker run --rm --user 0:0 \
+# With /dev/kvm on the host (a KVM-enabled runner), the container gets it, and the tests
+# run the guest with hardware virtualisation. Without it, QEMU emulates the guest.
+kvm=""
+if [ -e /dev/kvm ]; then
+  kvm="--device /dev/kvm"
+  export SANDBOX_VM_ACCEL=${SANDBOX_VM_ACCEL:-kvm}
+fi
+
+exec docker run --rm --user 0:0 $kvm \
+  -e SANDBOX_VM_ACCEL="${SANDBOX_VM_ACCEL:-tcg}" \
   -v "$ROOT:/src" \
   -v frontal-sandbox-cargo-registry:/usr/local/cargo/registry \
   -v frontal-sandbox-linux-target:/cache/target \

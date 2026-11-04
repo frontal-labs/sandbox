@@ -1,0 +1,38 @@
+name: VM tests (KVM)
+
+# Runs the Tier 2 tests with hardware virtualisation. GitHub's Linux runners expose
+# /dev/kvm once a udev rule makes it usable, so this job runs the same tests as the emulated
+# runs, with SANDBOX_VM_ACCEL=kvm. It fails if the runner has no /dev/kvm, so a missing KVM is
+# never reported as a pass.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-kvm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  kvm:
+    name: Tier 2 tests with KVM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Enable /dev/kvm for this user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Require /dev/kvm
+        run: |
+          test -r /dev/kvm && test -w /dev/kvm || { echo "::error::this runner has no usable /dev/kvm"; exit 1; }
+      - name: Run the Tier 2 tests with KVM
+        env:
+          SANDBOX_VM_ACCEL: kvm
+        run: docker/run-vm-tests.sh

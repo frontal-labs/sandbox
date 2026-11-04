@@ -44,7 +44,7 @@ async fn programs_run_in_the_guest_and_their_changes_come_back() {
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
         memory_mib: 2048,
-        accel: Accel::Tcg,
+        accel: Accel::from_env(),
         console: dir.join("real-programs-console.log"),
     })
     .await
