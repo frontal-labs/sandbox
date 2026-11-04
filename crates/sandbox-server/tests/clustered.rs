@@ -43,7 +43,7 @@ async fn saved_state_survives_a_restart_and_a_stale_node_cannot_overwrite_it() {
     let (node_a, saved) = PgStore::connect(&url).await.unwrap();
     assert!(saved.keys.is_empty());
     node_a
-        .save(|| async { state_with_key("first") })
+        .save(|| async { Ok(state_with_key("first")) })
         .await
         .unwrap();
 
@@ -56,11 +56,11 @@ async fn saved_state_survives_a_restart_and_a_stale_node_cannot_overwrite_it() {
     // earlier revision, so its save is refused and writes nothing.
     let (node_b, _) = PgStore::connect(&url).await.unwrap();
     node_b
-        .save(|| async { state_with_key("second") })
+        .save(|| async { Ok(state_with_key("second")) })
         .await
         .unwrap();
     let err = restarted
-        .save(|| async { state_with_key("stale") })
+        .save(|| async { Ok(state_with_key("stale")) })
         .await
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidState, "{}", err.message);
@@ -72,7 +72,7 @@ async fn saved_state_survives_a_restart_and_a_stale_node_cannot_overwrite_it() {
     // Once the stale node reloads, it can save again.
     let (reloaded, _) = PgStore::connect(&url).await.unwrap();
     reloaded
-        .save(|| async { state_with_key("third") })
+        .save(|| async { Ok(state_with_key("third")) })
         .await
         .unwrap();
     let (_, saved) = PgStore::connect(&url).await.unwrap();
