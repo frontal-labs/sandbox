@@ -1,0 +1,7 @@
+# BLAKE3 pins for the CPython artifacts that tools/wasm/python/build.sh writes. The
+# conformance script refuses artifacts that do not match. A rebuild that changes a hash is
+# a deliberate change: update these lines with the new hashes, in the same commit.
+[python]
+version = "3.13.1"
+python_wasm = "17c89c550278b675c1d052883dbbe78c03bd4e860aa31e96b14eafeb24226171"
+python313_zip = "4a2c1a2304b53365ef813c5a293d5ce8266402f5615b9497268029eb1c0b6fad"
