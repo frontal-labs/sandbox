@@ -75,6 +75,23 @@ impl UsageTable {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         table.get(owner.as_str()).cloned().unwrap_or_default()
     }
+
+    /// The counters of every key added together.
+    fn total(&self) -> Counters {
+        let table = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        table.values().fold(Counters::default(), |mut sum, c| {
+            sum.sessions_created += c.sessions_created;
+            sum.sessions_slept += c.sessions_slept;
+            sum.sessions_woken += c.sessions_woken;
+            sum.execs += c.execs;
+            sum.exec_wall_ms += c.exec_wall_ms;
+            sum.bytes_written += c.bytes_written;
+            sum
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -776,6 +793,39 @@ pub async fn get_usage(
     Json(state.usage.get(&owner))
 }
 
+/// Server totals in the Prometheus text format (version 0.0.4). The counters sum every
+/// key, so no key or tenant appears in the output. The gauges read the current tables.
+/// The route requires an API key, so the totals are not public.
+pub async fn get_metrics(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let total = state.usage.total();
+    let sessions = state.sessions.0.read().await.len();
+    let snapshots = state.snapshots.records.read().await.len();
+    let counters = [
+        ("sandbox_sessions_created_total", "Sessions created since start.", total.sessions_created),
+        ("sandbox_sessions_slept_total", "Sessions put to sleep since start.", total.sessions_slept),
+        ("sandbox_sessions_woken_total", "Sessions woken since start.", total.sessions_woken),
+        ("sandbox_execs_total", "Commands run since start.", total.execs),
+        ("sandbox_exec_wall_ms_total", "Wall time of commands run, in milliseconds.", total.exec_wall_ms),
+        ("sandbox_bytes_written_total", "Bytes written through the filesystem API.", total.bytes_written),
+    ];
+    let gauges = [
+        ("sandbox_sessions_active", "Sessions the server holds now.", sessions as u64),
+        ("sandbox_snapshots_active", "Snapshots the server holds now.", snapshots as u64),
+    ];
+    let mut body = String::new();
+    for (kind, metrics) in [("counter", &counters[..]), ("gauge", &gauges[..])] {
+        for (name, help, value) in metrics {
+            body.push_str(&format!(
+                "# HELP {name} {help}\n# TYPE {name} {kind}\n{name} {value}\n"
+            ));
+        }
+    }
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        body,
+    )
+}
+
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/sessions", post(create_session))
@@ -799,6 +849,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id/fork", post(fork_command))
         .route("/v1/gc", post(crate::gc::run_gc))
         .route("/v1/usage", get(get_usage))
+        .route("/metrics", get(get_metrics))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_api_key,
