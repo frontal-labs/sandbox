@@ -141,6 +141,9 @@ const MAX_FORK_COUNT: u32 = 64;
 /// Live sessions one key may hold. Sessions use process memory, so this bounds
 /// what a single key can take from the server.
 pub const MAX_SESSIONS_PER_KEY: usize = 64;
+/// Live sessions one tenant may hold across all keys. A tenant's keys share this bound, so
+/// one tenant cannot take the server by using many keys.
+pub const MAX_SESSIONS_PER_TENANT: usize = 256;
 /// Where the server finds a Tier 2 guest: QEMU, and the image directory that holds
 /// `vmlinuz` and `initrd.gz` (see docker/emulated-vm/build-image.sh).
 #[derive(Clone, Debug)]
@@ -178,6 +181,17 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
     if held >= MAX_SESSIONS_PER_KEY {
         return Err(SandboxError::resource_exhausted(format!(
             "this key already holds {MAX_SESSIONS_PER_KEY} sessions"
+        ))
+        .into());
+    }
+    let tenant = entry.state.tenant_id;
+    let tenant_held = table
+        .values()
+        .filter(|e| e.state.tenant_id == tenant)
+        .count();
+    if tenant_held >= MAX_SESSIONS_PER_TENANT {
+        return Err(SandboxError::resource_exhausted(format!(
+            "this tenant already holds {MAX_SESSIONS_PER_TENANT} sessions"
         ))
         .into());
     }
