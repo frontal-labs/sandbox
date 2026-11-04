@@ -192,6 +192,8 @@ class SessionState:
   labels: dict[str, str]
   # Pinned checkpoints, as GET reports them. Absent from responses that omit it.
   checkpoints: dict[str, object] | None = None
+  # Whether a command the isolate tier cannot run may move this session to a Tier 2 VM.
+  allow_vm: bool = False
 
 
 @dataclass(frozen=True)
