@@ -17,10 +17,11 @@ measured in this pass. Otherwise it says "not measured".
 | `sandbox-scheduler` (single node) | done | Single-node scheduler, plus the clustered variant below. |
 | Idle sleep and wake | done | ADR 0015. |
 | Metering | partial | Per-key counters in memory, reset on restart. Per-command CPU is now measured (ADR 0033). Memory-time and the durable usage queue are not built. |
-| **Accept:** snapshot and fork under 5 ms | not measured | `benchmarks/` has the harness. It was not run in this pass. |
-| **Accept:** 1,000 concurrent sessions on one node | not measured | The `concurrent_sessions` load scenario exists. It was not run in this pass. |
-| **Accept:** sleeping sessions use no memory | not measured | Not verified. |
+| **Accept:** snapshot and fork under 5 ms | **met, in memory** | Measured with `crates/sandbox-server/examples/capacity.rs`, release build, 200 iterations: snapshot p50 0.017 ms, p95 0.027 ms; fork one session p50 0.109 ms, p95 0.144 ms. The store is in memory, so disk and network cost are not included. |
+| **Accept:** 1,000 concurrent sessions on one node | **met, idle, in process** | The same example creates 1,000 idle sessions in 0.07 s, at about 6.3 KiB of resident memory each. This is an in-process run of the isolate tier, not a load test on a worker. The `benchmarks/` load scenarios are scaffolds and were not used. |
+| **Accept:** sleeping sessions use no memory | **not met** | The same example puts the 1,000 sessions to sleep. Resident memory then sits about 7.3 KiB per session above the idle baseline, not below it. Sleep stores its checkpoint in the in-memory store, so the memory is not released. The disk store would move it out of process, which is not measured. |
 | **Accept:** escape test suite passes | partial | Isolation tests pass on Linux. The plan's list (host file reads, metadata IP, fork bombs, zip bombs, symlink races) is not fully covered. |
+| Quotas, per key (measured limits) | done | 64 sessions and 32 snapshots per key, 4,096 sessions per server. The example works around them with a key per 30 sessions. |
 | **Accept:** TypeScript SDK generated | partial | The TypeScript SDK is hand-written with zod schemas. It is not generated from OpenAPI, so this criterion is not met as written. |
 
 ## M4: Tier 2 (VM)
