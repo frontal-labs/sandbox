@@ -50,10 +50,9 @@ async fn print_tier2_timings() {
     let vm = pool.take().await.unwrap();
     let warm_handout = started.elapsed();
 
-    let mut guest = sandbox_proto::v1::guest::guest_service_client::GuestServiceClient::connect(format!(
-        "http://{}",
-        vm.agent()
-    ))
+    let mut guest = sandbox_proto::v1::guest::guest_service_client::GuestServiceClient::connect(
+        format!("http://{}", vm.agent()),
+    )
     .await
     .unwrap();
     let started = Instant::now();
