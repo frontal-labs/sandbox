@@ -2,7 +2,10 @@
 //! fork latency, and the memory of many idle sessions. It does not use the load driver in
 //! `benchmarks/`, which the benchmark README marks as a scaffold.
 //!
-//!   cargo run --release -p sandbox-server --example capacity -- [forks] [sessions]
+//!   cargo run --release -p sandbox-server --example capacity -- [forks] [sessions] [data-dir]
+//!
+//! Without a data directory the store is in memory. With one, the server stores its state on
+//! disk, which is the mode where sleeping sessions can leave memory behind.
 //!
 //! The output is the measurement. Nothing is saved as a baseline.
 
@@ -53,9 +56,9 @@ async fn send(
     )
 }
 
-fn session_body() -> Value {
+fn session_body(tenant: TenantId) -> Value {
     serde_json::to_value(SessionConfig {
-        tenant_id: TenantId::nil(),
+        tenant_id: tenant,
         tier_preference: TierPreference::Isolate,
         ..SessionConfig::default()
     })
@@ -98,14 +101,45 @@ async fn main() {
 
     // Snapshot and fork. A key may hold 32 snapshots, so each iteration uses its own key
     // and source session, which holds a file so that the snapshot has content.
-    let auth = Arc::new(AuthManager::new());
-    let app = create_router(Arc::new(Scheduler::new()), auth.clone());
+    // With a directory as the third argument, the server is durable: sleeping sessions are
+    // stored on disk, and that changes what sleep leaves in memory.
+    let data_dir = args.next().map(std::path::PathBuf::from);
+    let (app, auth) = match &data_dir {
+        Some(dir) => {
+            let (app, state, _) =
+                sandbox_server::open_durable_with_state(Arc::new(Scheduler::new()), dir)
+                    .await
+                    .expect("the durable store opens");
+            (app, state.auth.clone())
+        }
+        None => {
+            let auth = Arc::new(AuthManager::new());
+            let (app, _) =
+                sandbox_server::create_router_with_state(Arc::new(Scheduler::new()), auth.clone());
+            (app, auth)
+        }
+    };
+    println!(
+        "mode: {}",
+        data_dir
+            .as_deref()
+            .map_or("in memory".to_string(), |d| format!(
+                "durable at {}",
+                d.display()
+            ))
+    );
     let mut snapshot_times = Vec::new();
     let mut fork_times = Vec::new();
     for _ in 0..forks {
         let key = auth.create_key();
-        let (status, created) =
-            send(&app, &key, "POST", "/v1/sessions", Some(session_body())).await;
+        let (status, created) = send(
+            &app,
+            &key,
+            "POST",
+            "/v1/sessions",
+            Some(session_body(TenantId::new())),
+        )
+        .await;
         assert_eq!(status, StatusCode::CREATED, "{created}");
         let source = created["session_id"].as_str().unwrap().to_string();
         let (status, _) = send(
@@ -153,16 +187,24 @@ async fn main() {
     let before = rss_kib();
     let started = Instant::now();
     let mut key = auth.create_key();
+    let mut tenant = TenantId::new();
     let mut ids = Vec::with_capacity(sessions);
     let mut keys = Vec::new();
     for index in 0..sessions {
         if index > 0 && index % 30 == 0 {
             key = auth.create_key();
+            tenant = TenantId::new();
         }
         keys.push(key.clone());
-        let (status, created) =
-            send(&app, &key, "POST", "/v1/sessions", Some(session_body())).await;
-        assert_eq!(status, StatusCode::CREATED);
+        let (status, created) = send(
+            &app,
+            &key,
+            "POST",
+            "/v1/sessions",
+            Some(session_body(tenant)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "session {index}: {created}");
         ids.push(created["session_id"].as_str().unwrap().to_string());
     }
     let elapsed = started.elapsed();
