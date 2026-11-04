@@ -76,3 +76,29 @@ async fn a_command_the_isolate_tier_lacks_is_refused_as_needs_vm_without_an_imag
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["code"], "NEEDS_VM", "{body}");
 }
+
+#[tokio::test]
+async fn a_streamed_command_the_isolate_tier_lacks_ends_with_needs_vm_without_an_image() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let id = session(&app, &key, TierPreference::Auto).await;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{id}/exec?stream=true"))
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({"argv": ["nonexistent-tool"], "env": {}, "stream": true}).to_string(),
+        ))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let last: Value =
+        serde_json::from_str(String::from_utf8_lossy(&bytes).lines().last().unwrap()).unwrap();
+    assert_eq!(last["type"], "error", "{last}");
+    assert_eq!(last["code"], "NEEDS_VM", "{last}");
+}

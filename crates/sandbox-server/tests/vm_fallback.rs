@@ -100,3 +100,54 @@ async fn an_auto_session_moves_to_the_vm_when_a_command_needs_it() {
     assert_eq!(status, StatusCode::OK, "{info}");
     assert_eq!(info["tier"], "vm", "{info}");
 }
+
+#[tokio::test]
+#[ignore = "needs SANDBOX_VM_IMAGE; see docker/run-vm-tests.sh"]
+async fn a_streamed_command_moves_an_auto_session_to_the_vm() {
+    let image = PathBuf::from(std::env::var("SANDBOX_VM_IMAGE").expect("set SANDBOX_VM_IMAGE"));
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let (app, _state) = create_router_with_vm(
+        Arc::new(Scheduler::new()),
+        auth,
+        VmConfig {
+            qemu: PathBuf::from("qemu-system-x86_64"),
+            image,
+            accel: sandbox_vmm::Accel::Tcg,
+            memory_mib: 512,
+            boot_timeout: Duration::from_secs(180),
+            warm_guests: 0,
+        },
+    );
+    let config = serde_json::to_value(SessionConfig {
+        tenant_id: TenantId::nil(),
+        tier_preference: TierPreference::Auto,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let (status, created) = call(&app, &key, "POST", "/v1/sessions", Some(config)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["session_id"].as_str().unwrap().to_string();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{id}/exec?stream=true"))
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({"argv": ["nonexistent-tool"], "env": {}, "stream": true}).to_string(),
+        ))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let last: Value =
+        serde_json::from_str(String::from_utf8_lossy(&bytes).lines().last().unwrap()).unwrap();
+    assert_eq!(last["type"], "exit", "{last}");
+    assert_eq!(last["exit_code"], 127, "{last}");
+
+    let (status, info) = call(&app, &key, "GET", &format!("/v1/sessions/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["tier"], "vm", "{info}");
+}

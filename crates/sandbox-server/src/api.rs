@@ -1288,15 +1288,30 @@ pub async fn exec_command(
     });
     // A command the isolate tier cannot run moves the session to a VM, and runs there. The
     // gate is still held, so no other command interleaves with the move.
-    let (mut result, seq) = match run_exec(&state, &owner, &own, request.clone(), None).await {
-        Err(error) if error.0.code == ErrorCode::NeedsVm && promotable(&state, &own.state) => {
-            let promoted = promote_session(&state, &owner, &own).await?;
-            run_exec(&state, &owner, &promoted, request, None).await?
-        }
-        outcome => outcome?,
-    };
+    let (mut result, seq) = run_with_promotion(&state, &owner, &own, request, None).await?;
     cap_result(&mut result, limit, seq);
     Ok(Json(result).into_response())
+}
+
+/// Runs a command. A command the isolate tier refuses with `NEEDS_VM` moves the session to a
+/// VM and runs there, if the session may move. The refusal comes before any output, so the
+/// observer never sees a partial run from the isolate tier.
+async fn run_with_promotion(
+    state: &AppState,
+    owner: &KeyId,
+    own: &Owned,
+    request: ExecRequest,
+    observer: Option<OutputObserver>,
+) -> Result<(ExecResult, Option<u64>), ApiError> {
+    match run_exec(state, owner, own, request.clone(), observer.clone()).await {
+        Err(ApiError(error))
+            if error.code == ErrorCode::NeedsVm && promotable(state, &own.state) =>
+        {
+            let promoted = promote_session(state, owner, own).await?;
+            run_exec(state, owner, &promoted, request, observer).await
+        }
+        outcome => outcome,
+    }
 }
 
 /// Moves a session to a Tier 2 VM. The guest starts, the session's files are copied in, and
@@ -1442,7 +1457,7 @@ fn start_exec(
     tokio::spawn(async move {
         let _gate = gate;
         let last = tokio::select! {
-            outcome = run_exec(&state, &owner, &own, request, Some(observer)) => match outcome {
+            outcome = run_with_promotion(&state, &owner, &own, request, Some(observer)) => match outcome {
                 Ok((result, _)) => ExecEvent::Exit {
                     exit_code: result.exit_code,
                     cpu_ms: result.cpu_ms,
