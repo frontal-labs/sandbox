@@ -1,6 +1,7 @@
 //! Guest agent for the sandbox system
 
 pub mod agent;
+pub mod program;
 
 pub use agent::{start_guest_agent, GuestAgent};
 

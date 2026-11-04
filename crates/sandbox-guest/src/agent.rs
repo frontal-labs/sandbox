@@ -98,14 +98,39 @@ impl GuestService for GuestServiceImpl {
     ) -> Result<Response<sandbox_proto::v1::types::ExecResult>, Status> {
         let req = request.into_inner();
         let argv = req.argv;
+        if argv.is_empty() {
+            return Err(Status::invalid_argument("argv is empty"));
+        }
         let env: Vec<(String, String)> = req.env.into_iter().collect();
         let cwd = req.cwd;
         let stdin = req.stdin;
 
         let mut shell =
             sandbox_shell::Shell::new(self.vfs.clone(), sandbox_shell::ShellConfig::default());
-        for (k, v) in env {
-            shell.set_env(k, v);
+        for (k, v) in &env {
+            shell.set_env(k.clone(), v.clone());
+        }
+        // A command the shell provides (a builtin, a registered tool, or a function) runs in
+        // the shell. Anything else is a program in the guest's image, run as a real process.
+        if !shell.command_available(&argv[0]).await {
+            let started = std::time::Instant::now();
+            let output = crate::program::run_program(
+                &self.vfs,
+                &argv,
+                &env,
+                cwd.as_deref().unwrap_or("/"),
+                &stdin.unwrap_or_default(),
+            )
+            .await
+            .map_err(|e| Status::internal(e.message))?;
+            let result = sandbox_types::ExecResult {
+                exit_code: output.exit_code,
+                stdout: output.stdout,
+                stderr: output.stderr,
+                cpu_ms: 0,
+                wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            };
+            return Ok(Response::new(result.into()));
         }
         if let Some(cwd) = cwd {
             shell
