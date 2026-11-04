@@ -516,9 +516,10 @@ fn clustered_open(
     scheduler: std::sync::Arc<sandbox_scheduler::Scheduler>,
     url: &str,
     dir: &Path,
+    vm: Option<sandbox_server::VmConfig>,
 ) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
-    rt.block_on(sandbox_server::open_clustered_with_state(
-        scheduler, url, dir,
+    rt.block_on(sandbox_server::open_clustered_with_vm(
+        scheduler, url, dir, vm,
     ))
 }
 
@@ -528,6 +529,7 @@ fn clustered_open(
     _scheduler: std::sync::Arc<sandbox_scheduler::Scheduler>,
     _url: &str,
     _dir: &Path,
+    _vm: Option<sandbox_server::VmConfig>,
 ) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
     Err(SandboxError::new(
         ErrorCode::Unsupported,
@@ -556,7 +558,7 @@ fn serve(
     let scheduler = Arc::new(sandbox_scheduler::Scheduler::new());
     let rt = runtime()?;
     let (app, state, new_key) = match (data_dir, database_url) {
-        (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir)?,
+        (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir, vm)?,
         (Some(dir), None) => {
             rt.block_on(sandbox_server::open_durable_with_vm(scheduler, dir, vm))?
         }

@@ -623,13 +623,26 @@ pub async fn open_clustered_with_state(
     database_url: &str,
     dir: &std::path::Path,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
+    open_clustered_with_vm(scheduler, database_url, dir, None).await
+}
+
+/// Like [`open_clustered_with_state`], and sessions may move to the Tier 2 guest `vm`
+/// describes when a command needs one. Every node that serves the database should have the
+/// same image, because a session may be promoted on whichever node takes its next command.
+#[cfg(feature = "clustered")]
+pub async fn open_clustered_with_vm(
+    scheduler: Arc<Scheduler>,
+    database_url: &str,
+    dir: &std::path::Path,
+    vm: Option<VmConfig>,
+) -> Result<(Router, AppState, Option<String>), SandboxError> {
     crate::persist::prepare_blobs(dir)?;
     let (store, saved) = crate::pg_store::PgStore::connect(database_url).await?;
     attach_store(
         scheduler,
         crate::persist::Persistence::Clustered(store),
         saved,
-        None,
+        vm.map(Arc::new),
     )
     .await
 }
