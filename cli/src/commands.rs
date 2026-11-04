@@ -176,7 +176,7 @@ pub enum Commands {
         #[arg(long, default_value = "tcg")]
         vm_accel: String,
         /// Guest memory in MiB.
-        #[arg(long, default_value_t = 1024)]
+        #[arg(long, default_value_t = 2048)]
         vm_memory_mib: u32,
         /// Seconds to wait for a guest's agent to answer after boot.
         #[arg(long, default_value_t = 180)]

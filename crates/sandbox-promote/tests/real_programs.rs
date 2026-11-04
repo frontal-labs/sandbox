@@ -43,7 +43,7 @@ async fn programs_run_in_the_guest_and_their_changes_come_back() {
         qemu: PathBuf::from("qemu-system-x86_64"),
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
-        memory_mib: 1024,
+        memory_mib: 2048,
         accel: Accel::Tcg,
         console: dir.join("real-programs-console.log"),
     })
@@ -141,6 +141,53 @@ async fn programs_run_in_the_guest_and_their_changes_come_back() {
             .trim()
             .starts_with("6."),
         "{again:?}"
+    );
+
+    // Chromium starts, then renders a page without a display, and its output is the DOM.
+    let version = guest
+        .exec(request(&["chromium", "--version"], b""))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        version.exit_code,
+        0,
+        "chromium --version: exit {} stderr {:?}",
+        version.exit_code,
+        String::from_utf8_lossy(&version.stderr)
+    );
+    let chromium = guest
+        .exec(request(
+            &[
+                "chromium",
+                "--headless",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--dump-dom",
+                "data:text/html,<p>hello from the guest</p>",
+            ],
+            b"",
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    if chromium.exit_code != 0 {
+        let console =
+            std::fs::read_to_string(dir.join("real-programs-console.log")).unwrap_or_default();
+        let tail: Vec<&str> = console.lines().rev().take(40).collect();
+        panic!(
+            "chromium --dump-dom: exit {} stderr {:?} stdout {:?}\n--- guest console (last lines) ---\n{}",
+            chromium.exit_code,
+            String::from_utf8_lossy(&chromium.stderr),
+            String::from_utf8_lossy(&chromium.stdout),
+            tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+        );
+    }
+    assert!(
+        String::from_utf8_lossy(&chromium.stdout).contains("<p>hello from the guest</p>"),
+        "{}",
+        String::from_utf8_lossy(&chromium.stdout)
     );
 
     vm.stop().await.unwrap();

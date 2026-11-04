@@ -20,7 +20,7 @@ exec docker run --rm --user 0:0 \
   -w /src \
   "$IMAGE" sh -c '
     set -eu
-    sh /src/docker/emulated-vm/build-image.sh >/dev/null
+    GUEST_PROGRAMS="ffmpeg chromium" sh /src/docker/emulated-vm/build-image.sh >/dev/null
     cargo test -p sandbox-vmm --test qemu_guest -- --ignored --nocapture "$@"
     cargo test -p sandbox-promote --test into_guest -- --ignored --nocapture "$@"
     cargo test -p sandbox-promote --test vm_session -- --ignored --nocapture "$@"

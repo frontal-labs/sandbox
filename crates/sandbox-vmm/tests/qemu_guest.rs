@@ -13,7 +13,7 @@ fn spec_from_env() -> QemuSpec {
         qemu: PathBuf::from(std::env::var("SANDBOX_QEMU").unwrap_or("qemu-system-x86_64".into())),
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
-        memory_mib: 1024,
+        memory_mib: 2048,
         accel: Accel::Tcg,
         console: dir.join("qemu-test-console.log"),
     }

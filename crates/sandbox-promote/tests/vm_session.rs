@@ -15,7 +15,7 @@ fn spec(dir: &Path) -> QemuSpec {
         qemu: PathBuf::from("qemu-system-x86_64"),
         kernel: dir.join("vmlinuz"),
         initrd: dir.join("initrd.gz"),
-        memory_mib: 1024,
+        memory_mib: 2048,
         accel: Accel::Tcg,
         console: dir.join("vm-session-console.log"),
     }

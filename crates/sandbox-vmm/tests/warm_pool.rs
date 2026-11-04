@@ -14,7 +14,7 @@ async fn the_pool_keeps_ready_guests_and_boots_on_demand() {
             qemu: PathBuf::from("qemu-system-x86_64"),
             kernel: dir.join("vmlinuz"),
             initrd: dir.join("initrd.gz"),
-            memory_mib: 1024,
+            memory_mib: 2048,
             accel: Accel::Tcg,
             console: dir.join("pool-console.log"),
         },

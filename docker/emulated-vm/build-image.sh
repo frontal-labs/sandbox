@@ -37,6 +37,24 @@ copy_libraries() {
 copy_libraries "$AGENT"
 mkdir -p "$W/root/usr/bin"
 for program in ${GUEST_PROGRAMS:-ffmpeg}; do
+  if [ "$program" = chromium ]; then
+    # Debian's /usr/bin/chromium is a wrapper script. The binary is the one beside its data,
+    # and the image takes that binary, the resource packs, the ICU data, the snapshots, and
+    # the English locale that a headless run reads.
+    src=/usr/lib/chromium/chromium
+    [ -x "$src" ] || { echo "chromium is not installed" >&2; exit 1; }
+    data="$W/root/usr/lib/chromium"
+    mkdir -p "$data/locales"
+    cp -L "$src" "$data/chromium"
+    copy_libraries "$src"
+    cp -L /usr/lib/chromium/*.pak /usr/lib/chromium/*.dat /usr/lib/chromium/*.bin "$data/"
+    # The crash reporter is started as a process, so it must be present with its libraries.
+    cp -L /usr/lib/chromium/chrome_crashpad_handler "$data/"
+    copy_libraries /usr/lib/chromium/chrome_crashpad_handler
+    cp -L /usr/lib/chromium/locales/en-US.pak "$data/locales/"
+    ln -sf ../lib/chromium/chromium "$W/root/usr/bin/chromium"
+    continue
+  fi
   src=$(command -v "$program") || { echo "guest program $program is not installed" >&2; exit 1; }
   cp -L "$src" "$W/root/usr/bin/$program"
   copy_libraries "$src"
@@ -67,6 +85,9 @@ cat > "$W/root/init" <<'INIT'
 #!/bin/sh
 mount -t proc proc /proc
 mount -t sysfs sys /sys
+# A real /dev, with urandom and a shared-memory directory, for programs that use them.
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /dev/shm /tmp
 echo "init: booted kernel $(uname -r)"
 while read -r module; do
   insmod "$module" && echo "init: loaded $module" || echo "init: could not load $module"

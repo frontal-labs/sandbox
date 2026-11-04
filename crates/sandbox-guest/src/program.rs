@@ -142,7 +142,10 @@ fn join(dir: &str, name: &str) -> String {
 const SYSTEM_DIRS: [&str; 5] = ["/bin", "/sbin", "/lib", "/lib64", "/usr"];
 /// The system directories bound from the guest. `/bin` is not one of them: it is the copy's
 /// own, holding busybox and the links that let a command run.
-const MOUNTED_DIRS: [&str; 4] = ["/sbin", "/lib", "/lib64", "/usr"];
+const MOUNTED_DIRS: [&str; 5] = ["/sbin", "/lib", "/lib64", "/usr", "/dev"];
+/// Kernel file systems mounted fresh into the copy, not bound from the guest. Programs such as
+/// Chromium read them to find out about the machine.
+const KERNEL_MOUNTS: [(&str, &str); 3] = [("proc", "proc"), ("sysfs", "sys"), ("tmpfs", "dev/shm")];
 
 fn in_system_dir(path: &str) -> bool {
     SYSTEM_DIRS
@@ -167,6 +170,17 @@ fn mount_system(root: &Path) -> Result<(), SandboxError> {
             target.to_str().unwrap_or_default(),
         ])?;
     }
+    for (kind, name) in KERNEL_MOUNTS {
+        let target = root.join(name);
+        std::fs::create_dir_all(&target).map_err(io_error)?;
+        busybox(&[
+            "mount",
+            "-t",
+            kind,
+            kind,
+            target.to_str().unwrap_or_default(),
+        ])?;
+    }
     Ok(())
 }
 
@@ -174,13 +188,19 @@ fn mount_system(root: &Path) -> Result<(), SandboxError> {
 /// the caller never removes a copy that still reaches the guest's own files.
 fn unmount_system(root: &Path) -> Result<(), SandboxError> {
     let mut stuck = Vec::new();
-    for dir in MOUNTED_DIRS.iter().rev() {
+    let targets: Vec<String> = KERNEL_MOUNTS
+        .iter()
+        .rev()
+        .map(|(_, name)| format!("/{name}"))
+        .chain(MOUNTED_DIRS.iter().rev().map(|dir| dir.to_string()))
+        .collect();
+    for dir in targets {
         let target = root.join(dir.trim_start_matches('/'));
         if !target.exists() || !is_mount_point(&target) {
             continue;
         }
         if busybox(&["umount", target.to_str().unwrap_or_default()]).is_err() {
-            stuck.push(dir.to_string());
+            stuck.push(dir);
         }
     }
     if stuck.is_empty() {
