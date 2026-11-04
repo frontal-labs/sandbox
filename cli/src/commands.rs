@@ -181,6 +181,9 @@ pub enum Commands {
         /// Seconds to wait for a guest's agent to answer after boot.
         #[arg(long, default_value_t = 180)]
         vm_boot_timeout_secs: u64,
+        /// Guests kept booted ahead of promotions, so a promotion skips the boot.
+        #[arg(long, default_value_t = 1)]
+        vm_warm_guests: usize,
     },
 
     /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
@@ -263,6 +266,7 @@ impl Cli {
                 vm_accel,
                 vm_memory_mib,
                 vm_boot_timeout_secs,
+                vm_warm_guests,
             } => {
                 // The URL may also come from the environment, so a secret need not be on the command line.
                 let url = database_url
@@ -284,6 +288,7 @@ impl Cli {
                         },
                         memory_mib: *vm_memory_mib,
                         boot_timeout: std::time::Duration::from_secs(*vm_boot_timeout_secs),
+                        warm_guests: *vm_warm_guests,
                     }),
                 };
                 serve(

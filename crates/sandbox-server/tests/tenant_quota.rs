@@ -33,7 +33,9 @@ async fn create(app: &axum::Router, key: &str, tenant: TenantId) -> StatusCode {
         .await
         .unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let _: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     status
 }
@@ -49,10 +51,20 @@ async fn a_tenants_keys_share_one_session_bound() {
 
     for created in 0..MAX_SESSIONS_PER_TENANT {
         let key = &keys[created / 64];
-        assert_eq!(create(&app, key, tenant).await, StatusCode::CREATED, "session {created}");
+        assert_eq!(
+            create(&app, key, tenant).await,
+            StatusCode::CREATED,
+            "session {created}"
+        );
     }
-    assert_eq!(create(&app, &keys[3], tenant).await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        create(&app, &keys[3], tenant).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
 
     // Another tenant is unaffected.
-    assert_eq!(create(&app, other_key.as_str(), TenantId::new()).await, StatusCode::CREATED);
+    assert_eq!(
+        create(&app, other_key.as_str(), TenantId::new()).await,
+        StatusCode::CREATED
+    );
 }

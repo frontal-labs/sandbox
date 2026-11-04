@@ -110,6 +110,8 @@ pub struct AppState {
     /// The Tier 2 guest the server can promote a session into. `None` when no image is
     /// configured, and then a command the isolate tier cannot run is refused.
     pub(crate) vm: Option<Arc<VmConfig>>,
+    /// Booted guests waiting for promotions. Built from `vm`.
+    pub(crate) vm_pool: Option<Arc<sandbox_vmm::VmPool>>,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -153,6 +155,9 @@ pub struct VmConfig {
     pub accel: sandbox_vmm::Accel,
     pub memory_mib: u32,
     pub boot_timeout: std::time::Duration,
+    /// Guests kept booted ahead of need, so a promotion does not wait for a boot. Zero boots
+    /// each guest when it is needed.
+    pub warm_guests: usize,
 }
 
 /// Live sessions the server holds across all keys.
@@ -535,6 +540,24 @@ pub fn create_router_with_vm(
     router_with_vm(scheduler, auth, Some(Arc::new(vm)))
 }
 
+/// The warm pool for a VM configuration, or `None` without one.
+fn pool_for(vm: &Option<Arc<VmConfig>>) -> Option<Arc<sandbox_vmm::VmPool>> {
+    let config = vm.as_ref()?;
+    let spec = sandbox_vmm::QemuSpec {
+        qemu: config.qemu.clone(),
+        kernel: config.image.join("vmlinuz"),
+        initrd: config.image.join("initrd.gz"),
+        memory_mib: config.memory_mib,
+        accel: config.accel,
+        console: config.image.join("console.log"),
+    };
+    Some(sandbox_vmm::VmPool::new(
+        spec,
+        config.warm_guests,
+        config.boot_timeout,
+    ))
+}
+
 fn router_with_vm(
     scheduler: Arc<Scheduler>,
     auth: Arc<AuthManager>,
@@ -548,6 +571,7 @@ fn router_with_vm(
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
         store: None,
+        vm_pool: pool_for(&vm),
         vm,
     };
     (build_router(state.clone()), state)
@@ -637,6 +661,7 @@ async fn attach_store(
         snapshots: SnapshotTable::default(),
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
+        vm_pool: pool_for(&vm),
         vm,
         store: Some(Arc::new(store)),
     };
@@ -1265,24 +1290,26 @@ pub async fn exec_command(
 /// the table entry takes the VM session, under the same ID. Its trace and its gate carry over.
 /// Shell state and running processes do not: they stay on the isolate session.
 async fn promote_session(state: &AppState, owner: &KeyId, own: &Owned) -> Result<Owned, ApiError> {
-    let Some(config) = state.vm.clone() else {
+    if state.vm.is_none() {
         return Err(SandboxError::new(
             ErrorCode::NeedsVm,
             "this server has no VM image, so the command cannot run",
         )
         .into());
-    };
-    let spec = sandbox_vmm::QemuSpec {
-        qemu: config.qemu.clone(),
-        kernel: config.image.join("vmlinuz"),
-        initrd: config.image.join("initrd.gz"),
-        memory_mib: config.memory_mib,
-        accel: config.accel,
-        console: config.image.join(format!("console-{}.log", own.state.id)),
-    };
-    let mut vm = sandbox_vmm::QemuVm::start(&spec).await?;
-    vm.wait_for_agent(config.boot_timeout).await?;
+    }
+    // A warm guest is taken if there is one. The pool boots the rest on demand.
+    let pool = state
+        .vm_pool
+        .clone()
+        .ok_or_else(|| SandboxError::new(ErrorCode::NeedsVm, "no guest pool is configured"))?;
+    let vm = pool.take().await?;
     let (promoted, _report) = sandbox_promote::promote_to_vm(own.session.as_ref(), vm).await?;
+    // Replace the guest that was taken, off the request's path.
+    tokio::spawn(async move {
+        if let Err(error) = pool.refill().await {
+            tracing::warn!(error = %error.message, "refilling the guest pool failed");
+        }
+    });
     {
         let mut table = state.sessions.0.write().await;
         let Some(entry) = table.get_mut(&own.state.id) else {

@@ -62,6 +62,7 @@ async fn an_auto_session_moves_to_the_vm_when_a_command_needs_it() {
             accel: sandbox_vmm::Accel::Tcg,
             memory_mib: 512,
             boot_timeout: Duration::from_secs(180),
+            warm_guests: 1,
         },
     );
 

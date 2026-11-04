@@ -26,4 +26,5 @@ exec docker run --rm --user 0:0 \
     cargo test -p sandbox-promote --test vm_session -- --ignored --nocapture "$@"
     cargo test -p sandbox-server --test vm_fallback -- --ignored --nocapture "$@"
     cargo test -p sandbox-promote --test real_programs -- --ignored --nocapture "$@"
+    cargo test -p sandbox-vmm --test warm_pool -- --ignored --nocapture "$@"
   ' sh "$@"
