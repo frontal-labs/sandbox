@@ -31,3 +31,7 @@ which = "5"
 default = []
 seccomp = ["seccompiler"]
 firecracker = ["dep:firecracker"]
+
+[dev-dependencies]
+sandbox-proto = { path = "../sandbox-proto" }
+tonic = { workspace = true }
