@@ -166,9 +166,15 @@ jobs:
               print("\n✅ All benchmarks passed!")
           EOF
       
-      - name: Update baselines (on main only)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: scripts/bench/update_baselines.sh bench_results_ '' vfs cas shell runtime wasm session
+      # Baselines are not committed from CI. The results are uploaded, and a person
+      # copies them in through a PR (scripts/bench/update_baselines.sh).
+      - name: Upload micro-benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: micro-benchmark-results
+          path: bench_results_*.json
+          if-no-files-found: ignore
 
   bench-load:
     name: Load Tests (Short)
@@ -290,9 +296,13 @@ jobs:
               print("\n✅ All load tests passed!")
           EOF
       
-      - name: Update load test baselines (on main only)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: scripts/bench/update_baselines.sh load_results_ load_ concurrent throughput snapshot
+      - name: Upload load test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: load_results_*.json
+          if-no-files-found: ignore
 
   bench-full:
     name: Full Load Tests (Nightly Only)
