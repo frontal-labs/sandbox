@@ -4027,6 +4027,7 @@ dependencies = [
  "sandbox-types",
  "sandbox-vfs",
  "sandbox-vmm",
+ "sandbox-wasm",
  "serde",
  "thiserror 2.0.21",
  "tokio",
