@@ -4104,6 +4104,7 @@ dependencies = [
  "bytes",
  "futures",
  "hyper 1.12.0",
+ "reqwest",
  "sandbox-cas",
  "sandbox-promote",
  "sandbox-runtime",
