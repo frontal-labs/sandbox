@@ -865,6 +865,9 @@ pub struct ServerOptions {
     pub python: Option<sandbox_wasm::PythonArtifacts>,
     /// Where request spans are exported.
     pub telemetry: Option<crate::otel::SpanExporter>,
+    /// An object store that keeps every blob too, on a durable server. A node that lacks a blob
+    /// reads it from here. `None` keeps the blobs on this node only.
+    pub blob_remote: Option<Arc<dyn object_store::ObjectStore>>,
 }
 
 /// An in-memory server with the given options.
@@ -979,7 +982,7 @@ pub async fn open_durable_with_options(
     dir: &std::path::Path,
     options: ServerOptions,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
-    let (store, saved) = crate::persist::Store::open(dir)?;
+    let (store, saved) = crate::persist::Store::open_with_remote(dir, options.blob_remote)?;
     let parked = crate::parked::parked_store(dir)?;
     let snapshot_files = crate::parked::snapshot_files(dir)?;
     attach_store(
@@ -1020,7 +1023,7 @@ pub async fn open_clustered_with_vm(
     dir: &std::path::Path,
     vm: Option<VmConfig>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
-    crate::persist::prepare_blobs(dir)?;
+    crate::persist::prepare_blobs(dir, None)?;
     let (store, saved) = crate::pg_store::PgStore::connect(database_url).await?;
     attach_store(
         scheduler,

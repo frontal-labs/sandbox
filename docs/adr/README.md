@@ -76,6 +76,7 @@ What is the change that we're proposing and/or doing?
 | [0032](0032-websocket-cancel.md) | Cancelling a WebSocket command | Accepted | 2026-11-03 |
 | [0033](0033-cpu-accounting.md) | CPU accounting for a command | Accepted | 2026-11-03 |
 | [0034](0034-parked-sleeping-sessions.md) | Parked sleeping sessions | Accepted | 2026-11-05 |
+| [0035](0035-object-store-blobs.md) | Blobs in an object store | Accepted | 2026-11-05 |
 | [0031](0031-bazel-resolves-from-its-own-lock.md) | Bazel resolves crates from its own lock | Accepted | 2026-11-03 |
 
 Add rows here as `NNNN-title.md` files are created.

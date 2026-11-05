@@ -8,6 +8,7 @@ authors = ["Frontal Labs"]
 description = "API server for the sandbox system"
 
 [dependencies]
+object_store = { workspace = true }
 sandbox-types = { path = "../sandbox-types", features = ["openapi"] }
 sandbox-scheduler = { path = "../sandbox-scheduler" }
 sandbox-session = { path = "../sandbox-session" }

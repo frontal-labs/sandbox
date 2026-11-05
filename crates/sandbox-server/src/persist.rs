@@ -7,7 +7,9 @@
 //! compaction writes a new snapshot when the log outgrows it. Blobs live in
 //! `blobs/`, in the disk store.
 
-use sandbox_cas::DiskStore;
+use object_store::ObjectStore;
+use sandbox_cas::tiered_store::CachePolicy;
+use sandbox_cas::{DiskStore, TieredStore};
 use sandbox_session::install_blob_store;
 use sandbox_types::hash::ContentHash;
 use sandbox_types::{CheckpointPolicy, SandboxError, SessionId, SessionState, SnapshotId};
@@ -25,7 +27,9 @@ const READABLE: &[u32] = &[1, 2];
 
 /// The data directory this process installed its blob store for. A process has
 /// one blob store, so reopening the same directory is fine and another one is not.
-static INSTALLED: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// The data directory this process installed its blob store for, and whether the store has a
+/// remote tier.
+static INSTALLED: Mutex<Option<(PathBuf, bool)>> = Mutex::new(None);
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Saved {
@@ -252,7 +256,16 @@ impl Store {
     /// state: the base file, then the log for its epoch. A new directory has an
     /// empty state.
     pub fn open(dir: &Path) -> Result<(Self, Saved), SandboxError> {
-        prepare_blobs(dir)?;
+        Self::open_with_remote(dir, None)
+    }
+
+    /// Like [`Store::open`], and the blobs are also kept in `remote`, an object store, so a
+    /// node that does not have a blob locally can read it from there.
+    pub fn open_with_remote(
+        dir: &Path,
+        remote: Option<Arc<dyn ObjectStore>>,
+    ) -> Result<(Self, Saved), SandboxError> {
+        prepare_blobs(dir, remote)?;
         Self::load(dir)
     }
 
@@ -562,12 +575,15 @@ async fn create_empty(path: PathBuf) -> Result<(), SandboxError> {
 /// Creates the data directory and its blob directory, and installs the blob store
 /// for this process. Both durable backends call this first, because the blobs
 /// stay in the directory whichever backend holds the metadata.
-pub(crate) fn prepare_blobs(dir: &Path) -> Result<(), SandboxError> {
+pub(crate) fn prepare_blobs(
+    dir: &Path,
+    remote: Option<Arc<dyn ObjectStore>>,
+) -> Result<(), SandboxError> {
     let to_error =
         |e: std::io::Error| SandboxError::internal(format!("cannot create {}: {e}", dir.display()));
     create_private_dir(dir).map_err(to_error)?;
     create_private_dir(&dir.join("blobs")).map_err(to_error)?;
-    install_blob_store_once(dir)
+    install_blob_store_once(dir, remote)
 }
 
 /// Where the durable state lives: a data directory on this node, or the Postgres
@@ -607,25 +623,40 @@ pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
     builder.create(path)
 }
 
-/// Installs the disk store for `dir` once per process. Reopening the same
-/// directory is allowed. A different directory is refused.
-fn install_blob_store_once(dir: &Path) -> Result<(), SandboxError> {
+/// Installs the blob store for `dir` once per process: the disk store, with a write-through
+/// remote tier when `remote` is given. Reopening the same directory the same way is allowed.
+/// A different directory, or a different remote setting, is refused.
+fn install_blob_store_once(
+    dir: &Path,
+    remote: Option<Arc<dyn ObjectStore>>,
+) -> Result<(), SandboxError> {
+    let tiered = remote.is_some();
     let mut installed = INSTALLED.lock().unwrap_or_else(|p| p.into_inner());
-    match installed.as_deref() {
-        Some(existing) if existing == dir => Ok(()),
-        Some(existing) => Err(SandboxError::new(
+    match installed.as_ref() {
+        Some((existing, existing_tiered)) if existing == dir && *existing_tiered == tiered => {
+            Ok(())
+        }
+        Some((existing, _)) => Err(SandboxError::new(
             sandbox_types::ErrorCode::InvalidState,
             format!(
-                "this process already uses {} for its blobs; cannot switch to {}",
+                "this process already uses {} for its blobs, with or without a remote tier as before; cannot switch to {}",
                 existing.display(),
                 dir.display()
             ),
         )),
         None => {
-            let blobs = DiskStore::new(dir.join("blobs"))
+            let disk = DiskStore::new(dir.join("blobs"))
                 .map_err(|e| SandboxError::internal(format!("cannot open the blob store: {e}")))?;
-            install_blob_store(Arc::new(blobs))?;
-            *installed = Some(dir.to_path_buf());
+            let blobs: Arc<dyn sandbox_cas::BlobStore> = match remote {
+                Some(remote) => Arc::new(TieredStore::new(
+                    Arc::new(disk),
+                    remote,
+                    CachePolicy::WriteThrough,
+                )),
+                None => Arc::new(disk),
+            };
+            install_blob_store(blobs)?;
+            *installed = Some((dir.to_path_buf(), tiered));
             Ok(())
         }
     }

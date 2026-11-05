@@ -103,23 +103,35 @@ impl BlobStore for TieredStore {
     async fn put(&self, data: &[u8], options: PutOptions) -> BlobStoreResult<ContentHash> {
         let hash = ContentHash::new(data);
 
-        if self.local.has(&hash).await? {
-            return Ok(hash);
+        // A blob the local store already has may still be missing from the remote, if it was
+        // written before the remote was configured or its remote write failed. So the remote
+        // is checked on every put, not only the first.
+        if !self.local.has(&hash).await? {
+            self.local.put(data, options).await?;
         }
-
-        self.local.put(data, options).await?;
 
         if matches!(
             self.cache_policy,
             CachePolicy::WriteThrough | CachePolicy::WriteBack
         ) {
             let path = Self::object_path(&hash);
-            self.remote
-                .put(&path, Bytes::copy_from_slice(data).into())
-                .await
-                .map_err(|e| {
-                    BlobStoreError::Storage(format!("Failed to write to remote: {}", e))
-                })?;
+            match self.remote.head(&path).await {
+                Ok(_) => {}
+                Err(object_store::Error::NotFound { .. }) => {
+                    self.remote
+                        .put(&path, Bytes::copy_from_slice(data).into())
+                        .await
+                        .map_err(|e| {
+                            BlobStoreError::Storage(format!("Failed to write to remote: {}", e))
+                        })?;
+                }
+                Err(e) => {
+                    return Err(BlobStoreError::Storage(format!(
+                        "Remote store error: {}",
+                        e
+                    )))
+                }
+            }
         }
 
         self.stats.write().await.writes += 1;
@@ -224,6 +236,21 @@ mod tests {
         assert_eq!(retrieved.as_ref(), data);
 
         assert!(local.has(&hash).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_blob_the_local_store_has_still_reaches_the_remote() {
+        let local = Arc::new(MemStore::new());
+        let remote = Arc::new(InMemory::new());
+        let store = TieredStore::new(local.clone(), remote.clone(), CachePolicy::WriteThrough);
+
+        // Written locally before the remote existed, so only the local store has it.
+        let data = b"written before the remote";
+        let hash = local.put(data, PutOptions::default()).await.unwrap();
+        assert!(remote.head(&TieredStore::object_path(&hash)).await.is_err());
+
+        store.put(data, PutOptions::default()).await.unwrap();
+        assert!(remote.head(&TieredStore::object_path(&hash)).await.is_ok());
     }
 
     #[tokio::test]

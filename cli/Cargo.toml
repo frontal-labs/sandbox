@@ -17,6 +17,7 @@ name = "frontal-sandbox"
 path = "src/main.rs"
 
 [dependencies]
+object_store = { workspace = true }
 frontal-sandbox-sdk = { path = "../sdks/rust" }
 sandbox-types = { path = "../crates/sandbox-types" }
 sandbox-session = { path = "../crates/sandbox-session" }

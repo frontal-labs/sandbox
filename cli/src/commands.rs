@@ -193,6 +193,14 @@ pub enum Commands {
         /// http://127.0.0.1:4318. The OTEL_EXPORTER_OTLP_ENDPOINT variable does the same.
         #[arg(long)]
         otel_endpoint: Option<String>,
+        /// An S3 bucket that keeps every blob too, on a durable server (--data-dir), so a node
+        /// that lacks a blob reads it from the bucket. Credentials come from the AWS_* variables.
+        #[arg(long)]
+        object_store_bucket: Option<String>,
+        /// The endpoint of an S3-compatible service, such as http://127.0.0.1:9000 for MinIO.
+        /// Without it, the AWS endpoint is used.
+        #[arg(long)]
+        object_store_endpoint: Option<String>,
     },
 
     /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
@@ -278,6 +286,8 @@ impl Cli {
                 vm_warm_guests,
                 python_artifacts,
                 otel_endpoint,
+                object_store_bucket,
+                object_store_endpoint,
             } => {
                 // The URL may also come from the environment, so a secret need not be on the command line.
                 let url = database_url
@@ -312,15 +322,30 @@ impl Cli {
                 let telemetry = otel
                     .as_deref()
                     .map(sandbox_server::otel::SpanExporter::start);
+                if object_store_bucket.is_some() && data_dir.is_none() {
+                    return Err(SandboxError::invalid_argument(
+                        "--object-store-bucket needs --data-dir, because the blobs live there",
+                    ));
+                }
+                let blob_remote = match object_store_bucket {
+                    None => None,
+                    Some(bucket) => Some(object_store_remote(
+                        bucket,
+                        object_store_endpoint.as_deref(),
+                    )?),
+                };
                 serve(
                     addr,
                     data_dir.as_deref(),
                     *gc_interval_secs,
                     *idle_sleep_secs,
                     url.as_deref(),
-                    vm,
-                    python,
-                    telemetry,
+                    sandbox_server::ServerOptions {
+                        vm,
+                        python,
+                        telemetry,
+                        blob_remote,
+                    },
                 )
             }
             Commands::Snapshot { session_id } => snapshot(session_id),
@@ -562,17 +587,39 @@ fn clustered_open(
 
 /// Runs the server until the process is stopped. The key is printed once, to
 /// stderr, because keys live in memory and nothing else can provision them.
+/// The object store the blobs are kept in: an S3 bucket, or an S3-compatible service at `endpoint`.
+fn object_store_remote(
+    bucket: &str,
+    endpoint: Option<&str>,
+) -> Result<std::sync::Arc<dyn object_store::ObjectStore>, SandboxError> {
+    let mut builder = object_store::aws::AmazonS3Builder::from_env().with_bucket_name(bucket);
+    if let Some(endpoint) = endpoint {
+        builder = builder
+            .with_endpoint(endpoint)
+            .with_allow_http(endpoint.starts_with("http://"))
+            .with_virtual_hosted_style_request(false);
+    }
+    let store = builder.build().map_err(|e| {
+        SandboxError::invalid_argument(format!("cannot open the object store: {e}"))
+    })?;
+    Ok(std::sync::Arc::new(store))
+}
+
 fn serve(
     addr: &str,
     data_dir: Option<&Path>,
     gc_interval_secs: u64,
     idle_sleep_secs: u64,
     database_url: Option<&str>,
-    vm: Option<sandbox_server::VmConfig>,
-    python: Option<sandbox_wasm::PythonArtifacts>,
-    telemetry: Option<sandbox_server::otel::SpanExporter>,
+    options: sandbox_server::ServerOptions,
 ) -> Result<i32, SandboxError> {
     use std::sync::Arc;
+    let sandbox_server::ServerOptions {
+        vm,
+        python,
+        telemetry,
+        blob_remote,
+    } = options;
     // Log to stderr, so stdout keeps its key line. RUST_LOG overrides the default.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
@@ -589,6 +636,12 @@ fn serve(
                 "span export is not yet wired into the clustered server",
             ))
         }
+        (Some(_), Some(_)) if blob_remote.is_some() => {
+            return Err(sandbox_types::SandboxError::new(
+                sandbox_types::ErrorCode::Unsupported,
+                "the object store is not yet wired into the clustered server",
+            ))
+        }
         (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir, vm)?,
         (Some(dir), None) => rt.block_on(sandbox_server::open_durable_with_options(
             scheduler,
@@ -597,6 +650,7 @@ fn serve(
                 vm,
                 python,
                 telemetry,
+                blob_remote,
             },
         ))?,
         (None, _) => {
@@ -609,6 +663,7 @@ fn serve(
                     vm,
                     python,
                     telemetry,
+                    blob_remote: None,
                 },
             );
             (app, state, Some(key))

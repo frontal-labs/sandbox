@@ -44,6 +44,21 @@ open at about 6,100 KiB. See ADR 0034.
 | Exec a command | Proposed | p95 < 50 ms, echo case | in memory 0.06 ms; durable 25 ms | met |
 | Idle session memory | Proposed | < 100 KiB | in memory 8.4 KiB; durable 86 KiB | met |
 
+## Tier 2 (QEMU, KVM)
+
+From the `VM tests (KVM)` job on GitHub's Ubuntu 24.04 runner, commit 04f7ab3, which passed. The
+timings test prints one line per run:
+
+| Measure | Value |
+|---|---|
+| Cold boot of a guest, until it answers `Ping` | 7.6 s |
+| Warm handout from the pool | 0 ms |
+| Promote one 64 KiB file into a guest | 5 ms |
+| CPython runs in a promoted guest (whole test, including boot) | 141 s |
+
+These are the first numbers from hardware virtualisation. The emulated (TCG) figures are not
+recorded here, because the Python test takes over 25 minutes under emulation.
+
 ## Open items
 
 - **Durable snapshot and fork are fsync-bound.** Each record and each link is written with a

@@ -18,6 +18,7 @@ rust_library(
         "//crates/sandbox-promote:sandbox_promote",
         "//crates/sandbox-wasm:sandbox_wasm",
         "@crates//:reqwest",
+        "@crates//:object_store",
         "//crates/sandbox-session:sandbox_session",
         "//crates/sandbox-vfs:sandbox_vfs",
         "@crates//:tokio",
