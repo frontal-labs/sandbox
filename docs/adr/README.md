@@ -68,6 +68,7 @@ What is the change that we're proposing and/or doing?
 | [0024](0024-typescript-type-stripping.md) | TypeScript by type stripping | Accepted | 2026-10-20 |
 | [0025](0025-warm-isolate-pool.md) | Warm isolate pool and the cold-start measurements | Accepted | 2026-10-20 |
 | [0026](0026-package-layers-and-lockfile.md) | Package layers and lockfile | Proposed | 2026-10-25 |
+| [0027](0027-guest-protocol-v1.md) | Guest protocol v1 | Proposed | 2026-10-25 |
 
 Add rows here as `NNNN-title.md` files are created.
 
