@@ -141,11 +141,63 @@ pub(crate) struct SnapshotRecord {
     pub(crate) allow_vm: bool,
 }
 
+/// How many snapshots the server holds, in all and per key. A key's snapshots are never
+/// removed, so the counts only grow. They take memory per key, not per snapshot.
+#[derive(Default)]
+pub(crate) struct SnapshotCounts {
+    total: usize,
+    by_key: HashMap<KeyId, usize>,
+}
+
+impl SnapshotCounts {
+    fn add(&mut self, owner: &KeyId) {
+        self.total += 1;
+        *self.by_key.entry(owner.clone()).or_default() += 1;
+    }
+
+    fn total(&self) -> usize {
+        self.total
+    }
+
+    fn held_by(&self, owner: &KeyId) -> usize {
+        self.by_key.get(owner).copied().unwrap_or(0)
+    }
+}
+
+fn record_of(saved: crate::persist::SavedSnapshot) -> SnapshotRecord {
+    SnapshotRecord {
+        owner: KeyId::from_stored(saved.owner),
+        session: saved.session,
+        root: saved.root,
+        created_at: saved.created_at,
+        labels: saved.labels,
+        limits: saved.limits,
+        allow_vm: saved.allow_vm,
+    }
+}
+
+fn saved_snapshot_of(id: SnapshotId, record: &SnapshotRecord) -> crate::persist::SavedSnapshot {
+    crate::persist::SavedSnapshot {
+        id,
+        owner: record.owner.as_str().to_string(),
+        session: record.session,
+        root: record.root,
+        created_at: record.created_at,
+        labels: record.labels.clone(),
+        limits: record.limits.clone(),
+        allow_vm: record.allow_vm,
+    }
+}
+
 /// Snapshots held by the server, keyed by ID. The server owns this table, so
 /// the snapshot limits and the owner checks live in one place.
 #[derive(Clone, Default)]
 pub struct SnapshotTable {
     pub(crate) records: Arc<RwLock<HashMap<SnapshotId, SnapshotRecord>>>,
+    /// On a durable server, how many snapshots each key holds, and in all. The records are files.
+    pub(crate) counts: Arc<RwLock<SnapshotCounts>>,
+    /// The snapshot record files of a durable server. `None` on a memory-only server.
+    pub(crate) files: Option<crate::parked::SnapshotFiles>,
     /// Serializes snapshot admission, so the limits cannot be raced past.
     admit: Arc<tokio::sync::Mutex<()>>,
 }
@@ -935,7 +987,8 @@ pub async fn open_durable_with_options(
         ));
     }
     let (store, saved) = crate::persist::Store::open(dir)?;
-    let parked = crate::parked::ParkedStore::open(dir)?;
+    let parked = crate::parked::parked_store(dir)?;
+    let snapshot_files = crate::parked::snapshot_files(dir)?;
     attach_store(
         scheduler,
         crate::persist::Persistence::Files(store),
@@ -944,6 +997,7 @@ pub async fn open_durable_with_options(
         options.python.map(Arc::new),
         Some(dir.join("usage.jsonl")),
         Some(parked),
+        Some(snapshot_files),
     )
     .await
 }
@@ -980,6 +1034,7 @@ pub async fn open_clustered_with_vm(
         None,
         None,
         None,
+        None,
     )
     .await
 }
@@ -994,6 +1049,7 @@ async fn attach_store(
     python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
     usage_log: Option<std::path::PathBuf>,
     parked: Option<crate::parked::ParkedStore>,
+    snapshot_files: Option<crate::parked::SnapshotFiles>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
@@ -1011,7 +1067,10 @@ async fn attach_store(
         scheduler,
         auth,
         sessions: SessionTable::default(),
-        snapshots: SnapshotTable::default(),
+        snapshots: SnapshotTable {
+            files: snapshot_files,
+            ..SnapshotTable::default()
+        },
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
         vm_pool: pool_for(&vm),
@@ -1030,22 +1089,28 @@ async fn attach_store(
 
 /// Loads snapshot records and sleeping sessions into an empty server.
 async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), SandboxError> {
-    {
-        let mut records = state.snapshots.records.write().await;
-        for s in saved.snapshots {
-            records.insert(
-                s.id,
-                SnapshotRecord {
-                    owner: KeyId::from_stored(s.owner),
-                    session: s.session,
-                    root: s.root,
-                    created_at: s.created_at,
-                    labels: s.labels,
-                    limits: s.limits,
-                    // Stored snapshots predate the flag, so they are not promotable.
-                    allow_vm: false,
-                },
-            );
+    match &state.snapshots.files {
+        Some(files) => {
+            // A record from the state log moves to its file, unless the file already exists.
+            for snapshot in saved.snapshots {
+                if files.get(snapshot.id).await?.is_none() {
+                    files.put(&snapshot).await?;
+                }
+            }
+            let mut counts = state.snapshots.counts.write().await;
+            for id in files.ids().await? {
+                if let Some(saved) = files.get(id).await? {
+                    files.ensure_link(saved.session, id).await?;
+                    counts.add(&KeyId::from_stored(saved.owner));
+                }
+            }
+        }
+        None => {
+            let mut records = state.snapshots.records.write().await;
+            for s in saved.snapshots {
+                let id = s.id;
+                records.insert(id, record_of(s));
+            }
         }
     }
     // Version 1 kept sleeping sessions in their own list, with no shell state.
@@ -1117,7 +1182,7 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
 
 /// The durable state as it is now.
 async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError> {
-    use crate::persist::{Saved, SavedKey, SavedSnapshot};
+    use crate::persist::{Saved, SavedKey};
     let keys = state
         .auth
         .export_digests()
@@ -1128,15 +1193,7 @@ async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError
         let records = state.snapshots.records.read().await;
         records
             .iter()
-            .map(|(id, r)| SavedSnapshot {
-                id: *id,
-                owner: r.owner.as_str().to_string(),
-                session: r.session,
-                root: r.root,
-                created_at: r.created_at,
-                labels: r.labels.clone(),
-                limits: r.limits.clone(),
-            })
+            .map(|(id, r)| saved_snapshot_of(*id, r))
             .collect()
     };
     let sessions = {
@@ -1275,7 +1332,7 @@ pub async fn get_usage(
 pub async fn get_metrics(State(state): State<AppState>) -> impl axum::response::IntoResponse {
     let total = state.usage.total();
     let sessions = state.sessions.0.read().await.len() + parked_counts(&state).total();
-    let snapshots = state.snapshots.records.read().await.len();
+    let snapshots = snapshot_total(&state).await;
     let counters = [
         (
             "sandbox_sessions_created_total",
@@ -2489,7 +2546,7 @@ pub async fn take_snapshot(
     let _gate = own.gate.lock().await;
     let _admit = admit_snapshot(&state, &owner).await?;
     let root = own.session.snapshot().await?;
-    let snapshot_id = store_snapshot(&state, owner, &own.state, root, own.limits.clone()).await;
+    let snapshot_id = store_snapshot(&state, owner, &own.state, root, own.limits.clone()).await?;
     persist(&state).await?;
     Ok((
         StatusCode::CREATED,
@@ -2504,11 +2561,22 @@ async fn admit_snapshot<'a>(
     owner: &KeyId,
 ) -> Result<tokio::sync::MutexGuard<'a, ()>, ApiError> {
     let admit = state.snapshots.admit.lock().await;
-    let records = state.snapshots.records.read().await;
-    if records.len() >= MAX_SNAPSHOTS_TOTAL {
+    let (total, held) = match &state.snapshots.files {
+        Some(_) => {
+            let counts = state.snapshots.counts.read().await;
+            (counts.total(), counts.held_by(owner))
+        }
+        None => {
+            let records = state.snapshots.records.read().await;
+            (
+                records.len(),
+                records.values().filter(|r| r.owner == *owner).count(),
+            )
+        }
+    };
+    if total >= MAX_SNAPSHOTS_TOTAL {
         return Err(SandboxError::resource_exhausted("the server is at its snapshot limit").into());
     }
-    let held = records.values().filter(|r| r.owner == *owner).count();
     if held >= MAX_SNAPSHOTS_PER_KEY {
         return Err(SandboxError::resource_exhausted(format!(
             "this key already holds {MAX_SNAPSHOTS_PER_KEY} snapshots"
@@ -2525,7 +2593,7 @@ async fn store_snapshot(
     session: &SessionState,
     root: ContentHash,
     limits: ResourceLimits,
-) -> SnapshotId {
+) -> Result<SnapshotId, ApiError> {
     let snapshot_id = SnapshotId::new();
     let record = SnapshotRecord {
         owner,
@@ -2536,13 +2604,70 @@ async fn store_snapshot(
         limits,
         allow_vm: session.allow_vm,
     };
-    state
-        .snapshots
-        .records
-        .write()
-        .await
-        .insert(snapshot_id, record);
-    snapshot_id
+    match &state.snapshots.files {
+        Some(files) => {
+            files.put(&saved_snapshot_of(snapshot_id, &record)).await?;
+            state.snapshots.counts.write().await.add(&record.owner);
+        }
+        None => {
+            state
+                .snapshots
+                .records
+                .write()
+                .await
+                .insert(snapshot_id, record);
+        }
+    }
+    Ok(snapshot_id)
+}
+
+/// The snapshot with this ID, whoever took it. Callers check its owner and session.
+async fn snapshot_record(
+    state: &AppState,
+    id: SnapshotId,
+) -> Result<Option<SnapshotRecord>, SandboxError> {
+    match &state.snapshots.files {
+        Some(files) => Ok(files.get(id).await?.map(record_of)),
+        None => Ok(state.snapshots.records.read().await.get(&id).cloned()),
+    }
+}
+
+/// The snapshots one key took from one session, with their IDs.
+async fn session_snapshots(
+    state: &AppState,
+    owner: &KeyId,
+    session: SessionId,
+) -> Result<Vec<(SnapshotId, SnapshotRecord)>, SandboxError> {
+    match &state.snapshots.files {
+        Some(files) => {
+            let mut found = Vec::new();
+            for id in files.of_session(session).await? {
+                if let Some(saved) = files.get(id).await? {
+                    if saved.owner == owner.as_str() {
+                        found.push((id, record_of(saved)));
+                    }
+                }
+            }
+            Ok(found)
+        }
+        None => Ok(state
+            .snapshots
+            .records
+            .read()
+            .await
+            .iter()
+            .filter(|(_, r)| r.owner == *owner && r.session == session)
+            .map(|(id, r)| (*id, r.clone()))
+            .collect()),
+    }
+}
+
+/// The snapshots the server holds, across all keys.
+async fn snapshot_total(state: &AppState) -> usize {
+    match &state.snapshots.files {
+        Some(_) => state.snapshots.counts.read().await.total(),
+        None => state.snapshots.records.read().await.len(),
+    }
 }
 
 /// Put a session to sleep. The filesystem is checkpointed and recorded as a
@@ -2600,7 +2725,7 @@ pub(crate) async fn sleep_locked(
     let _admit = admit_snapshot(state, &owner).await?;
     let checkpoint = session.checkpoint().await?;
     let root = checkpoint.root;
-    let snapshot_id = store_snapshot(state, owner.clone(), &live_state, root, limits).await;
+    let snapshot_id = store_snapshot(state, owner.clone(), &live_state, root, limits).await?;
     // Dropping the live session releases its VFS once no other handle to it remains.
     drop(session);
 
@@ -3478,9 +3603,8 @@ async fn snapshot_for(
     owner: &KeyId,
     snapshot_id: SnapshotId,
 ) -> Result<SnapshotRecord, ApiError> {
-    let records = state.snapshots.records.read().await;
-    match records.get(&snapshot_id) {
-        Some(record) if record.owner == *owner => Ok(record.clone()),
+    match snapshot_record(state, snapshot_id).await? {
+        Some(record) if record.owner == *owner => Ok(record),
         _ => Err(SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into()),
     }
 }
@@ -3520,11 +3644,10 @@ pub async fn list_snapshots(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<Snapshot>>, ApiError> {
     let session_id = owned(&state, &owner, &id).await?.state.id;
-    let records = state.snapshots.records.read().await;
-    let mut snapshots: Vec<Snapshot> = records
+    let mut snapshots: Vec<Snapshot> = session_snapshots(&state, &owner, session_id)
+        .await?
         .iter()
-        .filter(|(_, r)| r.owner == owner && r.session == session_id)
-        .map(|(snapshot_id, r)| snapshot_view(*snapshot_id, r))
+        .map(|(snapshot_id, record)| snapshot_view(*snapshot_id, record))
         .collect();
     snapshots.sort_by_key(|s| s.created_at);
     Ok(Json(snapshots))
@@ -3553,10 +3676,9 @@ pub async fn get_snapshot(
 ) -> Result<Json<Snapshot>, ApiError> {
     let session_id = owned(&state, &owner, &id).await?.state.id;
     let snapshot_id = parse_snapshot_id(&snapshot_id)?;
-    let records = state.snapshots.records.read().await;
-    match records.get(&snapshot_id) {
+    match snapshot_record(&state, snapshot_id).await? {
         Some(record) if record.owner == owner && record.session == session_id => {
-            Ok(Json(snapshot_view(snapshot_id, record)))
+            Ok(Json(snapshot_view(snapshot_id, &record)))
         }
         _ => Err(SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into()),
     }

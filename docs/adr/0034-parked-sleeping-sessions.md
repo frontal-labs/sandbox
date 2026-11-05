@@ -39,13 +39,16 @@ keeps them there, because its data directory is shared between nodes and the cou
 node.
 
 ## Consequences
-- Measured in a fresh process (`examples/parked_restart`): 1,000 parked sessions add about 0.15 KiB
-  each to a restarted server. A control with 1,000 snapshot records and no sessions adds about 8.2 KiB
-  each. See `docs/MILESTONE_TRIAGE.md`.
-- Each sleep still writes a snapshot record, which the server keeps in memory (about 8 KiB).
-  Moving snapshot records to disk is the next step; until then the criterion is met for sessions
-  but not for the sleep as a whole.
-- Every parked session costs a file. Interrupted writes can leave a `.tmp` file in
-  `sessions/`; startup ignores those.
-- Waking, reading a trace, or reading checkpoints of a sleeping session reads its file. These
-  are slower than a table lookup, and the cost is per request, not per server.
+- Measured in a fresh process (`examples/parked_restart`): an empty data directory opens at about
+  4,400 KiB. With 1,000 sleeping sessions, each with its snapshot, it opens at about 6,100 KiB.
+  The cost is a one-time overhead of about 1.7 MB, and it does not grow between 1,000 and 2,000
+  records. See `docs/MILESTONE_TRIAGE.md`.
+- Snapshot records are files too (`snapshots/<id>.json`). A link file per snapshot under
+  `snapshots/by-session/<session>/` lets a session's snapshots be listed without reading every
+  record. The server keeps per-key and total counts for admission, and nothing per snapshot.
+- Creating a snapshot on a durable server does one synced write per record and per link. Creation
+  is therefore slow (about 80 ms at 2,000 records). Whether to batch or relax the sync is open.
+- Every parked session and snapshot costs a file. Interrupted writes can leave a `.tmp` file in
+  those directories; startup ignores them.
+- Waking, reading a trace, or reading checkpoints of a sleeping session reads its file. These are
+  slower than a table lookup, and the cost is per request, not per server.

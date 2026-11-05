@@ -116,6 +116,10 @@ async fn a_sleeping_session_is_parked_on_disk_and_comes_back_on_wake() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let snapshot_id = serde_json::from_slice::<Value>(&body).unwrap()["snapshot_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert!(
         parked_file(&dir, &id).exists(),
         "a sleeping session has a parked record"
@@ -161,6 +165,20 @@ async fn a_sleeping_session_is_parked_on_disk_and_comes_back_on_wake() {
         serde_json::from_slice::<Value>(&body).unwrap()["status"],
         "running"
     );
+
+    // The sleep's snapshot was written as a file before the restart, and it is still listed.
+    let (status, body) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/snapshots"),
+        &key,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let listed = serde_json::from_slice::<Value>(&body).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+    assert_eq!(listed[0]["id"], snapshot_id.as_str());
 
     // Destroying a parked session removes its record, and it is gone.
     let (status, _) = call(

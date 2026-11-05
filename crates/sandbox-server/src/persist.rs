@@ -121,6 +121,9 @@ pub struct SavedSnapshot {
     /// The limits of the session the snapshot was taken from (ADR 0014).
     #[serde(default)]
     pub limits: sandbox_types::policy::ResourceLimits,
+    /// Whether the session could move to a VM. Older records predate the flag.
+    #[serde(default)]
+    pub allow_vm: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

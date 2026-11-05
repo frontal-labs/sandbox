@@ -136,6 +136,14 @@ async fn sweep_once(
         let records = state.snapshots.records.read().await;
         roots.extend(records.values().map(|record| record.root));
     }
+    // A durable server's snapshot records are files: each one's root is live.
+    if let Some(files) = &state.snapshots.files {
+        for id in files.ids().await? {
+            if let Some(saved) = files.get(id).await? {
+                roots.push(saved.root);
+            }
+        }
+    }
 
     let mut live = sandbox_vfs::reachable_blobs(store, &roots)
         .await
