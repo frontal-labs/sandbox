@@ -59,6 +59,27 @@ timings test prints one line per run:
 These are the first numbers from hardware virtualisation. The emulated (TCG) figures are not
 recorded here, because the Python test takes over 25 minutes under emulation.
 
+## Decisions
+
+These were open, and the owner asked for them to be decided here.
+
+- **Durable snapshot fsync: keep the synced writes.** A snapshot is about 40 ms on a durable
+  server, against 5 ms for the plan's target. Weakening the sync would let a crash lose an
+  acknowledged snapshot, and the plan promises durability for them. Speed is the cost, and it is
+  accepted. Revisit only with a measured reason that a faster disk or a batched commit can meet the
+  guarantee.
+- **Resume speed: do not put saved states in the promotion pool yet.** The pool already hands out a
+  booted guest in 0 ms, so saved states would only shorten refills. Under emulation a resume takes
+  12 to 14 s against a cold boot of 19 to 31 s, so it helps, but it is far from 150 ms. The 150 ms
+  criterion is not met, and it is unmeasured on KVM. Revisit when a KVM resume is measured.
+- **Four-byte residual in `python-init.wasm`: leave it unpinned.** The conformance cases and the
+  install-time `reactor_hash` cover the reactor's behaviour, and the cause is probably a clock
+  reading, which only the build's Wizer step captures. More build cycles would not change what the
+  reactor does, so the residual stays documented.
+- **Object-store CAS: accept `adobe/s3mock` as the S3 test target.** The code uses only the S3 API,
+  and MinIO's images could not be pulled from Docker Hub or Quay on 2026-11-05. Run the same tests
+  against MinIO when its images are reachable; that is a follow-up, not a blocker.
+
 ## Open items
 
 - **Durable snapshot and fork are fsync-bound.** Each record and each link is written with a
