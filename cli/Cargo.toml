@@ -22,6 +22,7 @@ sandbox-types = { path = "../crates/sandbox-types" }
 sandbox-session = { path = "../crates/sandbox-session" }
 sandbox-server = { path = "../crates/sandbox-server" }
 sandbox-vmm = { path = "../crates/sandbox-vmm" }
+sandbox-wasm = { path = "../crates/sandbox-wasm" }
 sandbox-scheduler = { path = "../crates/sandbox-scheduler" }
 sandbox-trace = { path = "../crates/sandbox-trace" }
 sandbox-runtime = { path = "../crates/sandbox-runtime" }

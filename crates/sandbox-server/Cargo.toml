@@ -15,6 +15,7 @@ sandbox-vfs = { path = "../sandbox-vfs" }
 sandbox-cas = { path = "../sandbox-cas" }
 sandbox-vmm = { path = "../sandbox-vmm" }
 sandbox-promote = { path = "../sandbox-promote" }
+sandbox-wasm = { path = "../sandbox-wasm" }
 sandbox-trace = { path = "../sandbox-trace" }
 tokio = { workspace = true }
 sqlx = { workspace = true, optional = true }

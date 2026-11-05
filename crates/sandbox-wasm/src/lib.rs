@@ -1,9 +1,11 @@
 //! WASI preview1 host for command modules, with files backed by the VFS.
 //! See [`wasi`] for what the guest can and cannot reach.
 
+pub mod python;
 pub mod registry;
 pub mod wasi;
 
+pub use python::{install as install_python, PythonArtifacts};
 pub use registry::{Registry, ToolSpec};
 
 pub use wasi::{

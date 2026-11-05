@@ -112,6 +112,8 @@ pub struct AppState {
     pub(crate) vm: Option<Arc<VmConfig>>,
     /// Booted guests waiting for promotions. Built from `vm`.
     pub(crate) vm_pool: Option<Arc<sandbox_vmm::VmPool>>,
+    /// CPython, installed into every new isolate session (see `sandbox_wasm::python`).
+    pub(crate) python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -527,7 +529,7 @@ pub fn create_router_with_state(
     scheduler: Arc<Scheduler>,
     auth: Arc<AuthManager>,
 ) -> (Router, AppState) {
-    router_with_vm(scheduler, auth, None)
+    router_with_options(scheduler, auth, None, None)
 }
 
 /// Like [`create_router_with_state`], and sessions may move to the Tier 2 guest `vm`
@@ -537,7 +539,17 @@ pub fn create_router_with_vm(
     auth: Arc<AuthManager>,
     vm: VmConfig,
 ) -> (Router, AppState) {
-    router_with_vm(scheduler, auth, Some(Arc::new(vm)))
+    router_with_options(scheduler, auth, Some(Arc::new(vm)), None)
+}
+
+/// Like [`create_router_with_state`], and every new isolate session has CPython installed
+/// from `python`, so `python` runs in it.
+pub fn create_router_with_python(
+    scheduler: Arc<Scheduler>,
+    auth: Arc<AuthManager>,
+    python: sandbox_wasm::PythonArtifacts,
+) -> (Router, AppState) {
+    router_with_options(scheduler, auth, None, Some(Arc::new(python)))
 }
 
 /// The warm pool for a VM configuration, or `None` without one.
@@ -558,10 +570,11 @@ fn pool_for(vm: &Option<Arc<VmConfig>>) -> Option<Arc<sandbox_vmm::VmPool>> {
     ))
 }
 
-fn router_with_vm(
+fn router_with_options(
     scheduler: Arc<Scheduler>,
     auth: Arc<AuthManager>,
     vm: Option<Arc<VmConfig>>,
+    python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
 ) -> (Router, AppState) {
     let state = AppState {
         scheduler,
@@ -573,6 +586,7 @@ fn router_with_vm(
         store: None,
         vm_pool: pool_for(&vm),
         vm,
+        python,
     };
     (build_router(state.clone()), state)
 }
@@ -676,6 +690,7 @@ async fn attach_store(
         usage: UsageTable::default(),
         vm_pool: pool_for(&vm),
         vm,
+        python: None,
         store: Some(Arc::new(store)),
     };
     restore(&state, saved).await?;
@@ -1068,6 +1083,13 @@ pub async fn create_session(
     entry.checkpoint_retain = config.checkpoint_retain;
     stamp(&state, &mut entry, &session).await?;
     write_env_json(&session, &env_json(id, session.tier(), &limits, &network)).await?;
+    // A new isolate session gets CPython before it is admitted, so a failed install leaves
+    // no session behind.
+    if let Some(python) = state.python.as_deref() {
+        if session.tier() == Tier::Isolate {
+            sandbox_wasm::install_python(session.fs(), python).await?;
+        }
+    }
     admit_session(&state, &owner, entry).await?;
     state.usage.add(&owner, |c| c.sessions_created += 1);
     checkpoint_now(&state, &owner, id, &session).await?;

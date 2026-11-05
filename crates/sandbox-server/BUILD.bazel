@@ -16,6 +16,7 @@ rust_library(
         "//crates/sandbox-scheduler:sandbox_scheduler",
         "//crates/sandbox-vmm:sandbox_vmm",
         "//crates/sandbox-promote:sandbox_promote",
+        "//crates/sandbox-wasm:sandbox_wasm",
         "//crates/sandbox-session:sandbox_session",
         "//crates/sandbox-vfs:sandbox_vfs",
         "@crates//:tokio",
