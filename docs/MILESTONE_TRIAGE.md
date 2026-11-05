@@ -38,7 +38,7 @@ measured in this pass. Otherwise it says "not measured".
 | Firecracker snapshots | blocked | Needs KVM. This host and the Docker VM have none. |
 | **Accept:** ffmpeg and headless Chromium via auto-promotion | not started | Depends on promotion and images. |
 | **Accept:** promotion under 400 ms | measured, emulated | Promoting a 64 KiB file takes 128 ms under QEMU TCG (`crates/sandbox-promote/tests/timings.rs`). That size is not the ffmpeg-scale promotion the criterion means, and TCG is not the target hardware. |
-| **Accept:** VM resume under 150 ms | not measured | Resume from a snapshot is not built. The 19.1 s cold boot under TCG is the only boot time measured. |
+| **Accept:** VM resume under 150 ms | not met | Resume from a memory snapshot is not working. QEMU's migration stream reaches its full size, but the host never sees the end of the stream, so the snapshot hangs (`crates/sandbox-vmm` history). Cold boot under KVM on a hosted runner is 7.8 s, and under TCG 19–31 s. |
 | **Accept:** guest protocol fuzzed 24 h | partial | `guest_protocol` fuzz target exists. A 90 s run covered 1.5 M inputs with no crash. Not 24 h. |
 
 ## M5: production hardening

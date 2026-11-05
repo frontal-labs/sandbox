@@ -16,13 +16,14 @@ use std::time::{Duration, Instant};
 #[ignore = "needs SANDBOX_VM_IMAGE; see docker/run-vm-tests.sh"]
 async fn print_tier2_timings() {
     let dir = PathBuf::from(std::env::var("SANDBOX_VM_IMAGE").expect("set SANDBOX_VM_IMAGE"));
+    let accel = Accel::from_env();
     let pool = VmPool::new(
         QemuSpec {
             qemu: PathBuf::from("qemu-system-x86_64"),
             kernel: dir.join("vmlinuz"),
             initrd: dir.join("initrd.gz"),
             memory_mib: 2048,
-            accel: Accel::from_env(),
+            accel,
             console: dir.join("timings-console.log"),
         },
         1,
@@ -60,7 +61,8 @@ async fn print_tier2_timings() {
     let promotion = started.elapsed();
 
     println!(
-        "TIER2 TIMINGS (QEMU TCG, this host): cold_boot_ms={} warm_handout_ms={} promote_64kib_ms={} files={} bytes={}",
+        "TIER2 TIMINGS (QEMU {}, this host): cold_boot_ms={} warm_handout_ms={} promote_64kib_ms={} files={} bytes={}",
+        accel.name(),
         cold_boot.as_millis(),
         warm_handout.as_millis(),
         promotion.as_millis(),
