@@ -116,6 +116,11 @@ pub struct AppState {
     pub(crate) python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
     /// Where request spans go, when a collector is configured.
     pub(crate) otel: Option<crate::otel::SpanExporter>,
+    /// When this server started, in milliseconds since the Unix epoch. Usage counters start
+    /// from zero then, so a billing consumer uses it to tell a reset from a decrease.
+    pub(crate) epoch_ms: u64,
+    /// Where usage snapshots are kept, on a durable server. `None` keeps them only in the reply.
+    pub(crate) usage_log: Option<std::path::PathBuf>,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -621,6 +626,8 @@ fn router_with_options(
         snapshots: SnapshotTable::default(),
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
+        epoch_ms: now_millis(),
+        usage_log: None,
         store: None,
         vm_pool: pool_for(&vm),
         vm,
@@ -688,6 +695,7 @@ pub async fn open_durable_with_options(
         saved,
         options.vm.map(Arc::new),
         options.python.map(Arc::new),
+        Some(dir.join("usage.jsonl")),
     )
     .await
 }
@@ -722,6 +730,7 @@ pub async fn open_clustered_with_vm(
         saved,
         vm.map(Arc::new),
         None,
+        None,
     )
     .await
 }
@@ -734,6 +743,7 @@ async fn attach_store(
     saved: crate::persist::Saved,
     vm: Option<Arc<VmConfig>>,
     python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
+    usage_log: Option<std::path::PathBuf>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
@@ -758,6 +768,8 @@ async fn attach_store(
         vm,
         python,
         otel: None,
+        epoch_ms: now_millis(),
+        usage_log,
         store: Some(Arc::new(store)),
     };
     restore(&state, saved).await?;
@@ -973,6 +985,53 @@ async fn persist(state: &AppState) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// The caller's usage as billing history: one snapshot line per request, with the server's
+/// start time, so a consumer computes what happened between two snapshots, and knows when a
+/// restart reset the counters. On a durable server each snapshot is also kept in the data
+/// directory, in `usage.jsonl`, so the history survives a restart.
+pub async fn get_usage_export(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+) -> Result<Response, ApiError> {
+    let counters = state.usage.get(&owner);
+    let line = serde_json::json!({
+        "key": owner.as_str(),
+        "server_epoch_ms": state.epoch_ms,
+        "at_ms": now_millis(),
+        "counters": counters,
+    });
+    let mut body = String::new();
+    if let Some(path) = &state.usage_log {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| SandboxError::internal(format!("cannot open the usage log: {e}")))?;
+        writeln!(file, "{line}")
+            .map_err(|e| SandboxError::internal(format!("cannot write the usage log: {e}")))?;
+        // The history for this key, oldest first, from the same file.
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| SandboxError::internal(format!("cannot read the usage log: {e}")))?;
+        for stored in text.lines() {
+            let mentions = serde_json::from_str::<serde_json::Value>(stored)
+                .ok()
+                .is_some_and(|v| v["key"] == owner.as_str());
+            if mentions {
+                body.push_str(stored);
+                body.push('\n');
+            }
+        }
+    } else {
+        body = format!("{line}\n");
+    }
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/x-ndjson")],
+        body,
+    )
+        .into_response())
+}
+
 /// The caller's usage counters since this server started.
 #[utoipa::path(
     get,
@@ -1082,6 +1141,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id/fork", post(fork_command))
         .route("/v1/gc", post(crate::gc::run_gc))
         .route("/v1/usage", get(get_usage))
+        .route("/v1/usage/export", get(get_usage_export))
         .route("/metrics", get(get_metrics))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
