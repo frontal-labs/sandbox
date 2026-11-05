@@ -8,8 +8,10 @@
 //! ID with a new span ID for this server hop. Without a valid header, a new trace starts here.
 //! The API key is never logged: only the method, the path, the status, and the time.
 
+use crate::api::AppState;
+use crate::otel::Span;
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::{HeaderName, HeaderValue},
     middleware::Next,
     response::Response,
@@ -100,13 +102,18 @@ fn fresh_context() -> TraceContext {
 }
 
 /// Runs the request inside a span that carries its ID and trace, and logs the outcome.
-pub async fn request_context(request: Request, next: Next) -> Response {
+pub async fn request_context(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
     let id = request_id(&request);
     let incoming = request
         .headers()
         .get(&TRACEPARENT_HEADER)
         .and_then(|value| value.to_str().ok())
         .and_then(TraceContext::parse);
+    let parent_span_id = incoming.as_ref().map(|parent| parent.span_id.clone());
     let context = match incoming {
         Some(parent) => TraceContext {
             trace_id: parent.trace_id,
@@ -114,6 +121,7 @@ pub async fn request_context(request: Request, next: Next) -> Response {
         },
         None => fresh_context(),
     };
+    let wall_start = now_nanos();
     let method = request.method().clone();
     let path = request.uri().path().to_string();
     let span = tracing::info_span!(
@@ -139,7 +147,26 @@ pub async fn request_context(request: Request, next: Next) -> Response {
     if let Ok(value) = HeaderValue::from_str(&context.header()) {
         response.headers_mut().insert(TRACEPARENT_HEADER, value);
     }
+    if let Some(exporter) = &state.otel {
+        exporter.record(Span {
+            trace_id: context.trace_id.clone(),
+            span_id: context.span_id.clone(),
+            parent_span_id,
+            name: format!("{method} {path}"),
+            method: method.to_string(),
+            path: path.clone(),
+            status: response.status().as_u16(),
+            start_unix_nanos: wall_start,
+            end_unix_nanos: now_nanos(),
+        });
+    }
     response
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos())
 }
 
 #[cfg(test)]

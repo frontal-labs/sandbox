@@ -114,6 +114,8 @@ pub struct AppState {
     pub(crate) vm_pool: Option<Arc<sandbox_vmm::VmPool>>,
     /// CPython, installed into every new isolate session (see `sandbox_wasm::python`).
     pub(crate) python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
+    /// Where request spans go, when a collector is configured.
+    pub(crate) otel: Option<crate::otel::SpanExporter>,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -529,7 +531,7 @@ pub fn create_router_with_state(
     scheduler: Arc<Scheduler>,
     auth: Arc<AuthManager>,
 ) -> (Router, AppState) {
-    router_with_options(scheduler, auth, None, None)
+    router_with_options(scheduler, auth, None, None, None)
 }
 
 /// Like [`create_router_with_state`], and sessions may move to the Tier 2 guest `vm`
@@ -539,7 +541,7 @@ pub fn create_router_with_vm(
     auth: Arc<AuthManager>,
     vm: VmConfig,
 ) -> (Router, AppState) {
-    router_with_options(scheduler, auth, Some(Arc::new(vm)), None)
+    router_with_options(scheduler, auth, Some(Arc::new(vm)), None, None)
 }
 
 /// Like [`create_router_with_state`], and every new isolate session has CPython installed
@@ -549,7 +551,42 @@ pub fn create_router_with_python(
     auth: Arc<AuthManager>,
     python: sandbox_wasm::PythonArtifacts,
 ) -> (Router, AppState) {
-    router_with_options(scheduler, auth, None, Some(Arc::new(python)))
+    router_with_options(scheduler, auth, None, Some(Arc::new(python)), None)
+}
+
+/// The options an in-memory server can be started with. Any of them may be absent.
+#[derive(Default)]
+pub struct ServerOptions {
+    /// A Tier 2 guest image, for promoting sessions.
+    pub vm: Option<VmConfig>,
+    /// CPython, installed into every new isolate session.
+    pub python: Option<sandbox_wasm::PythonArtifacts>,
+    /// Where request spans are exported.
+    pub telemetry: Option<crate::otel::SpanExporter>,
+}
+
+/// An in-memory server with the given options.
+pub fn create_router_with_options(
+    scheduler: Arc<Scheduler>,
+    auth: Arc<AuthManager>,
+    options: ServerOptions,
+) -> (Router, AppState) {
+    router_with_options(
+        scheduler,
+        auth,
+        options.vm.map(Arc::new),
+        options.python.map(Arc::new),
+        options.telemetry,
+    )
+}
+
+/// Like [`create_router_with_state`], and every request is exported as a span to `exporter`.
+pub fn create_router_with_telemetry(
+    scheduler: Arc<Scheduler>,
+    auth: Arc<AuthManager>,
+    exporter: crate::otel::SpanExporter,
+) -> (Router, AppState) {
+    router_with_options(scheduler, auth, None, None, Some(exporter))
 }
 
 /// The warm pool for a VM configuration, or `None` without one.
@@ -575,6 +612,7 @@ fn router_with_options(
     auth: Arc<AuthManager>,
     vm: Option<Arc<VmConfig>>,
     python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
+    otel: Option<crate::otel::SpanExporter>,
 ) -> (Router, AppState) {
     let state = AppState {
         scheduler,
@@ -587,6 +625,7 @@ fn router_with_options(
         vm_pool: pool_for(&vm),
         vm,
         python,
+        otel,
     };
     (build_router(state.clone()), state)
 }
@@ -691,6 +730,7 @@ async fn attach_store(
         vm_pool: pool_for(&vm),
         vm,
         python: None,
+        otel: None,
         store: Some(Arc::new(store)),
     };
     restore(&state, saved).await?;
@@ -1022,7 +1062,10 @@ fn build_router(state: AppState) -> Router {
         ))
         .route("/v1/openapi.json", get(openapi_json))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
-        .layer(middleware::from_fn(crate::middleware::request_context))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::request_context,
+        ))
         .with_state(state)
 }
 

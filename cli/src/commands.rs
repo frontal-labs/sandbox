@@ -189,6 +189,10 @@ pub enum Commands {
         /// with --data-dir or a VM image.
         #[arg(long)]
         python_artifacts: Option<PathBuf>,
+        /// An OTLP/HTTP collector to send one span per request to, such as
+        /// http://127.0.0.1:4318. The OTEL_EXPORTER_OTLP_ENDPOINT variable does the same.
+        #[arg(long)]
+        otel_endpoint: Option<String>,
     },
 
     /// Time a fixed set of operations on the local runtime. Prints one JSON line per case.
@@ -273,6 +277,7 @@ impl Cli {
                 vm_boot_timeout_secs,
                 vm_warm_guests,
                 python_artifacts,
+                otel_endpoint,
             } => {
                 // The URL may also come from the environment, so a secret need not be on the command line.
                 let url = database_url
@@ -299,15 +304,19 @@ impl Cli {
                 };
                 let python = match python_artifacts {
                     None => None,
-                    Some(dir) => {
-                        if data_dir.is_some() || vm.is_some() {
-                            return Err(SandboxError::invalid_argument(
-                                "--python-artifacts is not yet combined with --data-dir or --vm-image",
-                            ));
-                        }
-                        Some(sandbox_wasm::PythonArtifacts::load(dir)?)
-                    }
+                    Some(dir) => Some(sandbox_wasm::PythonArtifacts::load(dir)?),
                 };
+                let otel = otel_endpoint
+                    .clone()
+                    .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok());
+                if data_dir.is_some() && (python.is_some() || otel.is_some()) {
+                    return Err(SandboxError::invalid_argument(
+                        "--python-artifacts and span export are not yet combined with --data-dir",
+                    ));
+                }
+                let telemetry = otel
+                    .as_deref()
+                    .map(sandbox_server::otel::SpanExporter::start);
                 serve(
                     addr,
                     data_dir.as_deref(),
@@ -316,6 +325,7 @@ impl Cli {
                     url.as_deref(),
                     vm,
                     python,
+                    telemetry,
                 )
             }
             Commands::Snapshot { session_id } => snapshot(session_id),
@@ -565,6 +575,7 @@ fn serve(
     database_url: Option<&str>,
     vm: Option<sandbox_server::VmConfig>,
     python: Option<sandbox_wasm::PythonArtifacts>,
+    telemetry: Option<sandbox_server::otel::SpanExporter>,
 ) -> Result<i32, SandboxError> {
     use std::sync::Arc;
     // Log to stderr, so stdout keeps its key line. RUST_LOG overrides the default.
@@ -584,13 +595,15 @@ fn serve(
         (None, _) => {
             let auth = Arc::new(sandbox_server::auth::AuthManager::new());
             let key = auth.create_key();
-            let (app, state) = match (vm, python) {
-                (Some(vm), _) => sandbox_server::create_router_with_vm(scheduler, auth, vm),
-                (None, Some(python)) => {
-                    sandbox_server::create_router_with_python(scheduler, auth, python)
-                }
-                (None, None) => sandbox_server::create_router_with_state(scheduler, auth),
-            };
+            let (app, state) = sandbox_server::create_router_with_options(
+                scheduler,
+                auth,
+                sandbox_server::ServerOptions {
+                    vm,
+                    python,
+                    telemetry,
+                },
+            );
             (app, state, Some(key))
         }
     };
