@@ -565,9 +565,14 @@ fn clustered_open(
     url: &str,
     dir: &Path,
     vm: Option<sandbox_server::VmConfig>,
+    blob_remote: Option<std::sync::Arc<dyn object_store::ObjectStore>>,
 ) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
-    rt.block_on(sandbox_server::open_clustered_with_vm(
-        scheduler, url, dir, vm,
+    rt.block_on(sandbox_server::open_clustered_with_remote(
+        scheduler,
+        url,
+        dir,
+        vm,
+        blob_remote,
     ))
 }
 
@@ -578,6 +583,7 @@ fn clustered_open(
     _url: &str,
     _dir: &Path,
     _vm: Option<sandbox_server::VmConfig>,
+    _blob_remote: Option<std::sync::Arc<dyn object_store::ObjectStore>>,
 ) -> Result<(axum::Router, sandbox_server::AppState, Option<String>), SandboxError> {
     Err(SandboxError::new(
         ErrorCode::Unsupported,
@@ -636,13 +642,7 @@ fn serve(
                 "span export is not yet wired into the clustered server",
             ))
         }
-        (Some(_), Some(_)) if blob_remote.is_some() => {
-            return Err(sandbox_types::SandboxError::new(
-                sandbox_types::ErrorCode::Unsupported,
-                "the object store is not yet wired into the clustered server",
-            ))
-        }
-        (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir, vm)?,
+        (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir, vm, blob_remote)?,
         (Some(dir), None) => rt.block_on(sandbox_server::open_durable_with_options(
             scheduler,
             dir,

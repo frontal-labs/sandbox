@@ -1023,7 +1023,20 @@ pub async fn open_clustered_with_vm(
     dir: &std::path::Path,
     vm: Option<VmConfig>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
-    crate::persist::prepare_blobs(dir, None)?;
+    open_clustered_with_remote(scheduler, database_url, dir, vm, None).await
+}
+
+/// Like [`open_clustered_with_vm`], and the blobs are also kept in `blob_remote`, an object store
+/// every node can reach. A node that lacks a blob reads it from there (ADR 0035).
+#[cfg(feature = "clustered")]
+pub async fn open_clustered_with_remote(
+    scheduler: Arc<Scheduler>,
+    database_url: &str,
+    dir: &std::path::Path,
+    vm: Option<VmConfig>,
+    blob_remote: Option<Arc<dyn object_store::ObjectStore>>,
+) -> Result<(Router, AppState, Option<String>), SandboxError> {
+    crate::persist::prepare_blobs(dir, blob_remote)?;
     let (store, saved) = crate::pg_store::PgStore::connect(database_url).await?;
     attach_store(
         scheduler,

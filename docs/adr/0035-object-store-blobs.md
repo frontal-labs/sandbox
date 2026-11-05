@@ -25,8 +25,8 @@ Credentials come from the `AWS_*` variables.
   its next put. Without this a blob could stay local-only.
 - The choice is fixed for the process, as the directory is (ADR 0008). Reopening with a different
   directory, or with or without a bucket, is refused.
-- The clustered server refuses the bucket explicitly. Its blobs live in a directory that every node
-  shares, so the bucket is not needed there yet, and combining the two is not decided.
+- A clustered server takes the same option. Every node writes its blobs to the bucket, and a node
+  without a blob reads it from there, so the blob directory no longer has to be shared.
 
 ## Consequences
 - A blob written on one node reads on another that has none of it locally, and a delete reaches
@@ -36,6 +36,7 @@ Credentials come from the `AWS_*` variables.
 - The write path makes one bucket request per put to check for the blob, and a write when it is
   missing. Writes are therefore slower than local-only ones. A batch or cache for those checks is a
   possible later change.
+- The clustered round trip is tested with Postgres and adobe/s3mock (`docker/clustered-test.sh`).
 - The tests ran against adobe/s3mock, not MinIO. MinIO's images could not be pulled from Docker Hub
   or Quay here. The tests use only the S3 API, so MinIO should behave the same, but it has not been
   run.

@@ -18,4 +18,4 @@ pub use api::{
     open_durable_with_state, open_durable_with_vm, AppState, ServerOptions, VmConfig,
 };
 #[cfg(feature = "clustered")]
-pub use api::{open_clustered_with_state, open_clustered_with_vm};
+pub use api::{open_clustered_with_remote, open_clustered_with_state, open_clustered_with_vm};

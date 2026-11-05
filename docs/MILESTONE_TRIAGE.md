@@ -46,7 +46,7 @@ measured in this pass. Otherwise it says "not measured".
 | Item | Status | Evidence / gap |
 | --- | --- | --- |
 | Clustered scheduler with Postgres | partial | `ClusterScheduler` and a Postgres store exist. Not tested against a live Postgres here. |
-| Object-store CAS | done for one durable node | `serve --object-store-bucket` keeps every blob in an S3 bucket behind the disk store (ADR 0035). Tested against adobe/s3mock in Docker (`docker/object-store-test.sh`), and a smoke run read a file back from the bucket after its local blobs were deleted. MinIO was not pullable here, so it is untested. Not wired into the clustered server. |
+| Object-store CAS | done, durable and clustered | `serve --object-store-bucket` keeps every blob in an S3 bucket behind the disk store (ADR 0035). Tested against adobe/s3mock in Docker (`docker/object-store-test.sh`), and a smoke run read a file back from the bucket after its local blobs were deleted. MinIO was not pullable here, so it is untested. Wired into the clustered server too, tested with Postgres (`docker/clustered-test.sh`). |
 | Garbage collection | done | Mark and sweep, ADR 0013. |
 | Multi-tenant quotas | partial | Per-session limits are enforced (ADR 0014). Counts are capped per key (64 sessions, 32 snapshots), per tenant (256 sessions, tested), and for the server (4096 sessions). Checkpoint bytes are capped per key. Tenant byte and CPU quotas are not built. |
 | Billing export | partial | `GET /v1/usage/export` returns each key's counters as NDJSON, with the server start time. On a durable server each snapshot is kept in `usage.jsonl`. Tested in memory and durably. Not built: a durable event queue, and memory-time or CPU-time metering. |
