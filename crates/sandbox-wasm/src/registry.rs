@@ -43,6 +43,14 @@ pub struct ToolSpec {
     /// Absolute VFS trees the tool may read, each mounted read-only at the same path.
     #[serde(default)]
     pub preopen: Vec<String>,
+    /// A reactor module for the `-c <script>` invocation: the same tool, with its interpreter
+    /// initialised before it was snapshotted (see `wasi::runs_in_reactor`). The shell runs it
+    /// for that invocation, and `path` for every other. Absent, `path` runs everything.
+    #[serde(default)]
+    pub reactor: Option<String>,
+    /// The pinned hash of `reactor`, if any, checked like `hash`.
+    #[serde(default)]
+    pub reactor_hash: Option<String>,
 }
 
 impl ToolSpec {
@@ -87,15 +95,45 @@ impl ToolSpec {
         }
     }
 
+    /// The reactor module to run for `argv`, when the tool has one and the invocation is one it
+    /// serves. Otherwise `path` runs.
+    pub fn reactor_for(&self, argv: &[String]) -> Option<&str> {
+        if crate::wasi::runs_in_reactor(argv) {
+            self.reactor.as_deref()
+        } else {
+            None
+        }
+    }
+
     /// Checks `module` against the pinned hash, if any.
     pub fn verify(&self, module: &[u8]) -> Result<(), SandboxError> {
-        match self.expected_hash()? {
-            Some(expected) if expected != ContentHash::new(module) => Err(SandboxError::new(
-                ErrorCode::PermissionDenied,
-                format!("tool {}: module does not match its pinned hash", self.name),
-            )),
-            _ => Ok(()),
-        }
+        check_pinned(&self.name, self.expected_hash()?, module)
+    }
+
+    /// Checks the reactor module against its pinned hash, if any.
+    pub fn verify_reactor(&self, module: &[u8]) -> Result<(), SandboxError> {
+        let expected = match &self.reactor_hash {
+            None => None,
+            Some(hex) => Some(ContentHash::from_hex(hex).map_err(|_| {
+                invalid(format!("tool {}: reactor_hash is not valid hex", self.name))
+            })?),
+        };
+        check_pinned(&self.name, expected, module)
+    }
+}
+
+/// Fails unless `module` has the pinned hash, when there is one.
+fn check_pinned(
+    name: &str,
+    expected: Option<ContentHash>,
+    module: &[u8],
+) -> Result<(), SandboxError> {
+    match expected {
+        Some(expected) if expected != ContentHash::new(module) => Err(SandboxError::new(
+            ErrorCode::PermissionDenied,
+            format!("tool {name}: module does not match its pinned hash"),
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -247,9 +285,34 @@ path = "/bin/plain.wasm"
             max_output_bytes: None,
             argv0: None,
             preopen: Vec::new(),
+            reactor: None,
+            reactor_hash: None,
         };
         assert!(spec.verify(module).is_ok());
         let err = spec.verify(b"tampered").unwrap_err();
         assert_eq!(err.code, ErrorCode::PermissionDenied);
+    }
+
+    #[test]
+    fn a_reactor_is_checked_against_its_own_pin() {
+        let reactor = b"reactor bytes";
+        let spec = ToolSpec {
+            name: "py".into(),
+            path: "/opt/py.wasm".into(),
+            version: None,
+            hash: None,
+            fuel: None,
+            max_memory_bytes: None,
+            max_output_bytes: None,
+            argv0: None,
+            preopen: Vec::new(),
+            reactor: Some("/opt/py-init.wasm".into()),
+            reactor_hash: Some(ContentHash::new(reactor).to_hex()),
+        };
+        assert!(spec.verify_reactor(reactor).is_ok());
+        let err = spec.verify_reactor(b"tampered").unwrap_err();
+        assert_eq!(err.code, ErrorCode::PermissionDenied);
+        // The command module's pin does not cover the reactor, so it is unpinned here.
+        assert!(spec.verify(b"anything").is_ok());
     }
 }

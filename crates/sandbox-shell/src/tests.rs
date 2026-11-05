@@ -599,6 +599,49 @@ async fn export_and_unset_manage_variables() {
 /// `python` as a registry tool, with CPython 3.13.1 and its stdlib in the session's VFS.
 /// Ignored unless the artifacts from `tools/wasm/python/build.sh` are given:
 ///   SANDBOX_PYTHON_WASM=... SANDBOX_PYTHON_ZIP=... cargo test -p sandbox-shell -- --ignored python
+/// `python -c` runs in the tool's reactor, and every other invocation in the command module. The
+/// command module here is garbage, so a `-c` run that prints proves the reactor served it, and a
+/// script run fails in the command module, as it must.
+/// Ignored unless the artifacts from `tools/wasm/python/build.sh` are given:
+///   SANDBOX_PYTHON_REACTOR=... SANDBOX_PYTHON_ZIP=... cargo test -p sandbox-shell -- --ignored python
+#[tokio::test]
+#[ignore = "needs tools/wasm/python/out/python-init.wasm"]
+async fn python_c_runs_in_the_reactor() {
+    let reactor =
+        std::fs::read(std::env::var("SANDBOX_PYTHON_REACTOR").expect("set SANDBOX_PYTHON_REACTOR"))
+            .unwrap();
+    let zip = std::fs::read(std::env::var("SANDBOX_PYTHON_ZIP").expect("set SANDBOX_PYTHON_ZIP"))
+        .unwrap();
+    let mut sh = shell();
+    run(&mut sh, "mkdir -p /etc /opt /usr/lib /w").await;
+    sh.write_file("/opt/python.wasm", b"not a module", false)
+        .await
+        .unwrap();
+    sh.write_file("/opt/python-init.wasm", &reactor, false)
+        .await
+        .unwrap();
+    sh.write_file("/usr/lib/python313.zip", &zip, false)
+        .await
+        .unwrap();
+    let reactor_hash = sandbox_types::hash::ContentHash::new(&reactor);
+    let manifest = format!(
+        "[[tool]]\nname = \"python\"\npath = \"/opt/python.wasm\"\n\
+        argv0 = \"/usr/bin/python\"\npreopen = [\"/usr\"]\n\
+        fuel = 5000000000\nmax_memory_bytes = 268435456\n\
+        reactor = \"/opt/python-init.wasm\"\nreactor_hash = \"{reactor_hash}\"\n"
+    );
+    sh.write_file("/etc/tools.toml", manifest.as_bytes(), false)
+        .await
+        .unwrap();
+
+    let (code, out, err) = run(&mut sh, "python -c \"print(6 * 7)\"").await;
+    assert_eq!((code, out.as_str()), (0, "42\n"), "stderr: {err}");
+
+    // A script is not the reactor's invocation, so the command module runs it, and it is garbage.
+    let (code, _, _) = run(&mut sh, "python /w/none.py").await;
+    assert_ne!(code, 0);
+}
+
 #[tokio::test]
 #[ignore = "needs tools/wasm/python/out"]
 async fn python_runs_from_the_registry_with_a_read_only_stdlib() {

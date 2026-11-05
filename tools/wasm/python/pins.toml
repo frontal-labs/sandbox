@@ -3,5 +3,9 @@
 # a deliberate change: update these lines with the new hashes, in the same commit.
 [python]
 version = "3.13.1"
-python_wasm = "17c89c550278b675c1d052883dbbe78c03bd4e860aa31e96b14eafeb24226171"
-python313_zip = "4a2c1a2304b53365ef813c5a293d5ce8266402f5615b9497268029eb1c0b6fad"
+# python.wasm and the zip rebuild to these exact bytes (SOURCE_DATE_EPOCH is fixed, and the zip
+# has fixed times and sorted entries). python-init.wasm is not pinned: its initialised data still
+# differs by about 100 bytes between builds, so it is checked by conformance and by the install's
+# reactor_hash instead.
+python_wasm = "6a04d0d8116c94c1386092c68f96741f4aa241c46d3a4964ba7e4b30d344da45"
+python313_zip = "e858bea64ce5ef1a4ef1d8a02a073a8ae700336b70e228b38836a75f2e4869c1"

@@ -41,7 +41,7 @@ exec docker run --rm --user 0:0 $kvm \
   "$IMAGE" sh -c '
     set -eu
     GUEST_PROGRAMS="ffmpeg chromium" sh /src/docker/emulated-vm/build-image.sh >/dev/null
-    if [ ! -f /out/python.wasm ] || [ ! -f /out/python313.zip ]; then
+    if [ ! -f /out/python.wasm ] || [ ! -f /out/python313.zip ] || [ ! -f /out/python-init.wasm ]; then
       sh /src/tools/wasm/python/inside.sh >/dev/null
     fi
     cargo test -p sandbox-vmm --test qemu_guest -- --ignored --nocapture "$@"

@@ -1084,13 +1084,27 @@ impl Shell {
             },
         };
 
-        let module = match self.read_file(&path).await {
+        // The tool's reactor serves the invocations it names (`python -c`), and the command module
+        // serves the rest. The reactor was initialised before it was snapshotted, so its runs start
+        // faster (docs/PYTHON_WASM.md).
+        let reactor_path = spec
+            .as_ref()
+            .and_then(|spec| spec.reactor_for(argv).map(str::to_string));
+        let module_path = match &reactor_path {
+            Some(reactor) => self.resolve(reactor),
+            None => path.clone(),
+        };
+        let module = match self.read_file(&module_path).await {
             Ok(module) => module,
             Err(e) => return failure_with(format!("{name}: {}", describe(&e)), 126),
         };
         let limits = match &spec {
             Some(spec) => {
-                if let Err(e) = spec.verify(&module) {
+                let checked = match &reactor_path {
+                    Some(_) => spec.verify_reactor(&module),
+                    None => spec.verify(&module),
+                };
+                if let Err(e) = checked {
                     return failure_with(format!("{name}: {}", e.message), 126);
                 }
                 spec.limits()

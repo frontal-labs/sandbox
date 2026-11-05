@@ -12,6 +12,7 @@ set -eu
 
 PY_VERSION=3.13.1
 PY_SHA256=9cf9427bee9e2242e3877dd0f6b641c1853ca461f39d6503ce260a59c80bf0d9
+WIZER_VERSION=10.0.0
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 IMAGE=frontal-sandbox-linux-dev
 CACHE=frontal-cpython-cache
@@ -22,6 +23,6 @@ exec docker run --rm --user 0:0 \
   -v "$ROOT/tools/wasm/python:/stage:ro" \
   -v "$ROOT/tools/wasm/python/out:/out" \
   -v "$CACHE:/cache" \
-  -e PY_VERSION="$PY_VERSION" -e PY_SHA256="$PY_SHA256" \
+  -e PY_VERSION="$PY_VERSION" -e PY_SHA256="$PY_SHA256" -e WIZER_VERSION="$WIZER_VERSION" \
   -e WASI_SDK_PATH=/opt/wasi-sdk \
   "$IMAGE" sh /stage/inside.sh

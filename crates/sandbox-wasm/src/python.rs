@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 
 /// Where the module is installed, and the path the manifest names.
 pub const PYTHON_MODULE_PATH: &str = "/opt/python.wasm";
+/// Where the pre-initialised reactor is installed, when the artifacts have one. The shell runs it
+/// for `python -c` (see `registry::ToolSpec::reactor`).
+pub const PYTHON_REACTOR_PATH: &str = "/opt/python-init.wasm";
 /// Where the stdlib zip is installed. CPython finds it at `lib/python313.zip` under `/usr`.
 pub const PYTHON_STDLIB_PATH: &str = "/usr/lib/python313.zip";
 /// Fuel for one run. Startup and a json import take 1e9 to 3e9 instructions (docs/PYTHON_WASM.md).
@@ -27,6 +30,8 @@ pub const PYTHON_MEMORY: usize = 256 * 1024 * 1024;
 pub struct PythonArtifacts {
     pub module: Vec<u8>,
     pub stdlib: Vec<u8>,
+    /// The pre-initialised reactor (`python-init.wasm`), when the build made one.
+    pub reactor: Option<Vec<u8>>,
 }
 
 impl PythonArtifacts {
@@ -41,9 +46,16 @@ impl PythonArtifacts {
                 )
             })
         };
+        let reactor_path = dir.join("python-init.wasm");
+        let reactor = if reactor_path.exists() {
+            Some(read("python-init.wasm")?)
+        } else {
+            None
+        };
         Ok(PythonArtifacts {
             module: read("python.wasm")?,
             stdlib: read("python313.zip")?,
+            reactor,
         })
     }
 }
@@ -52,13 +64,21 @@ impl PythonArtifacts {
 /// and this crate cannot name that constant, because the shell depends on this crate.
 pub const MANIFEST_PATH: &str = "/etc/tools.toml";
 
-/// The manifest entry for `python`.
-pub fn registry_entry() -> String {
-    format!(
+/// The manifest entry for `python`. With a reactor, the entry names it and its hash, and the
+/// shell runs the reactor for `python -c`.
+pub fn registry_entry(reactor: Option<&[u8]>) -> String {
+    let mut entry = format!(
         "[[tool]]\nname = \"python\"\npath = \"{PYTHON_MODULE_PATH}\"\nversion = \"3.13.1\"\n\
          argv0 = \"/usr/bin/python\"\npreopen = [\"/usr\"]\nfuel = {PYTHON_FUEL}\n\
          max_memory_bytes = {PYTHON_MEMORY}\n"
-    )
+    );
+    if let Some(bytes) = reactor {
+        entry.push_str(&format!(
+            "reactor = \"{PYTHON_REACTOR_PATH}\"\nreactor_hash = \"{}\"\n",
+            sandbox_types::hash::ContentHash::new(bytes)
+        ));
+    }
+    entry
 }
 
 /// Writes the module, the stdlib, and the manifest entry into `fs`. A manifest that already
@@ -69,6 +89,9 @@ pub async fn install(fs: &dyn SessionFs, artifacts: &PythonArtifacts) -> Result<
     }
     write_file(fs, PYTHON_MODULE_PATH, &artifacts.module).await?;
     write_file(fs, PYTHON_STDLIB_PATH, &artifacts.stdlib).await?;
+    if let Some(reactor) = &artifacts.reactor {
+        write_file(fs, PYTHON_REACTOR_PATH, reactor).await?;
+    }
 
     let existing = read_manifest(fs).await?;
     let manifest = match existing {
@@ -77,10 +100,14 @@ pub async fn install(fs: &dyn SessionFs, artifacts: &PythonArtifacts) -> Result<
             if registry.find("python").is_some() {
                 text
             } else {
-                format!("{}\n{}", text.trim_end(), registry_entry())
+                format!(
+                    "{}\n{}",
+                    text.trim_end(),
+                    registry_entry(artifacts.reactor.as_deref())
+                )
             }
         }
-        None => registry_entry(),
+        None => registry_entry(artifacts.reactor.as_deref()),
     };
     write_file(fs, MANIFEST_PATH, manifest.as_bytes()).await
 }

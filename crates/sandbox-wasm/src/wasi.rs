@@ -322,6 +322,10 @@ fn execute(
         next_fd += 1;
     }
 
+    // A reactor module (sandbox_run, from tools/wasm/python/reactor) was initialised before it was
+    // snapshotted, so a run only executes the script. Its argv must be `-c <script>`.
+    let script = reactor_script(&argv)?;
+
     let host = Host {
         limits: StoreLimitsBuilder::new()
             .memory_size(limits.max_memory_bytes)
@@ -350,11 +354,27 @@ fn execute(
     let instance = linker
         .instantiate(&mut store, &module)
         .map_err(|e| wasm_error("instantiation failed", e))?;
-    let start = instance
-        .get_typed_func::<(), ()>(&mut store, "_start")
-        .map_err(|e| wasm_error("module has no _start export", e))?;
-
-    let result = start.call(&mut store, ());
+    let result: Result<i32, wasmtime::Error> = match (script, reactor_entry(&instance, &mut store))
+    {
+        (Some(script), Some(run)) => {
+            let buffer = reactor_buffer(&instance, &mut store)?;
+            let memory = instance
+                .get_memory(&mut store, "memory")
+                .ok_or_else(|| wasm_error("reactor has no memory export", "missing"))?;
+            memory
+                .write(&mut store, buffer, script.as_bytes())
+                .map_err(|e| wasm_error("writing the script failed", e))?;
+            let length = i32::try_from(script.len())
+                .map_err(|_| SandboxError::invalid_argument("the script is too large"))?;
+            run.call(&mut store, length)
+        }
+        _ => {
+            let start = instance
+                .get_typed_func::<(), ()>(&mut store, "_start")
+                .map_err(|e| wasm_error("module has no _start export", e))?;
+            start.call(&mut store, ()).map(|()| 0)
+        }
+    };
 
     // Release VFS handles the guest left open.
     let host = store.data_mut();
@@ -375,7 +395,7 @@ fn execute(
     let stderr = std::mem::take(&mut host.stderr);
 
     let exit_code = match result {
-        Ok(()) => 0,
+        Ok(status) => status,
         Err(e) => match e.downcast_ref::<Exit>() {
             Some(exit) => exit.0,
             None => {
@@ -394,6 +414,45 @@ fn execute(
         stdout,
         stderr,
     })
+}
+
+/// Whether an invocation is `-c <script>`, the one a reactor module serves (CPython's command line).
+/// Any other invocation runs in the command module.
+pub fn runs_in_reactor(argv: &[String]) -> bool {
+    matches!(argv, [_, flag, _] if flag == "-c")
+}
+
+/// The script a reactor run executes, for an invocation `runs_in_reactor` accepts.
+fn reactor_script(argv: &[String]) -> Result<Option<String>, SandboxError> {
+    match argv {
+        [_, flag, script] if flag == "-c" => Ok(Some(script.clone())),
+        _ => Ok(None),
+    }
+}
+
+/// The reactor's `sandbox_run` export, when the module has one.
+fn reactor_entry(
+    instance: &wasmtime::Instance,
+    store: &mut Store<Host>,
+) -> Option<wasmtime::TypedFunc<i32, i32>> {
+    instance
+        .get_typed_func::<i32, i32>(store, "sandbox_run")
+        .ok()
+}
+
+/// The address of the reactor's script buffer.
+fn reactor_buffer(
+    instance: &wasmtime::Instance,
+    store: &mut Store<Host>,
+) -> Result<usize, SandboxError> {
+    let buffer = instance
+        .get_typed_func::<(), i32>(&mut *store, "sandbox_buffer")
+        .map_err(|e| wasm_error("reactor has no sandbox_buffer export", e))?;
+    let address = buffer
+        .call(&mut *store, ())
+        .map_err(|e| wasm_error("reactor buffer call failed", e))?;
+    usize::try_from(address)
+        .map_err(|_| wasm_error("reactor buffer address is invalid", "negative"))
 }
 
 fn wasm_error(context: &str, error: impl fmt::Display) -> SandboxError {

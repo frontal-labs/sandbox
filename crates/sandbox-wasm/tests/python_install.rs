@@ -44,12 +44,17 @@ async fn an_install_writes_the_artifacts_and_keeps_one_python_entry() {
     let artifacts = PythonArtifacts {
         module: vec![7u8; 3 * 1024 * 1024 + 5],
         stdlib: vec![9u8; 1024 * 1024 + 1],
+        reactor: Some(vec![5u8; 2 * 1024 * 1024 + 3]),
     };
     install_python(&vfs, &artifacts).await.unwrap();
     install_python(&vfs, &artifacts).await.unwrap();
 
     assert_eq!(read(&vfs, "/opt/python.wasm").await, artifacts.module);
     assert_eq!(read(&vfs, "/usr/lib/python313.zip").await, artifacts.stdlib);
+    assert_eq!(
+        read(&vfs, "/opt/python-init.wasm").await,
+        artifacts.reactor.clone().unwrap()
+    );
     let manifest = String::from_utf8(read(&vfs, "/etc/tools.toml").await).unwrap();
     let registry = Registry::parse(&manifest).unwrap();
     assert!(registry.find("jq").is_some(), "{manifest}");

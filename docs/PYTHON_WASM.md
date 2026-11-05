@@ -72,6 +72,43 @@ max_memory_bytes = 268435456
 The module and the stdlib are not yet installed into a session. The shell test installs them
 directly, as a test fixture would.
 
+## Pre-initialised reactor
+
+The command module (`python.wasm`) starts the interpreter on every run. The build also makes a
+reactor (`python-init.wasm`): the same objects, linked with a reactor entry
+(`tools/wasm/python/reactor/sandbox_reactor.c`). Wizer runs `sandbox_init` once at build time,
+which starts the interpreter with the site module and the stdlib zip, and imports `collections`,
+`json`, and `re`. It then writes the initialised memory into the module, so a run only executes
+its script.
+
+- `sandbox_run(length)` runs the script in the buffer from `sandbox_buffer`, as `python -c`
+  does: `sys.argv` is `['-c']`, and a script that raises exits 1. The host runs the reactor only
+  for `-c <script>`. Every other invocation runs in the command module.
+- The registry record names the reactor (`reactor`, `reactor_hash`). The shell reads it for
+  `-c` only, and checks it against its own pin. The command module keeps its `hash`.
+- Wizer's preopens match a run's: the work directory is fd 3, as `.`, and `/usr` follows it.
+  wasi-libc reads the preopen table during initialisation, so the snapshot keeps that layout.
+- The hash seed is fixed during initialisation, because Wizer runs with real randomness. The
+  host's `random_get` is a fixed pattern anyway, so a run's behaviour does not change.
+
+Measured on the host, one run after the first compile (the first compile is about 18 s, once per
+process, and it is the same for both modules):
+
+| Case | Command module | Reactor |
+|---|---|---|
+| `import errno` (start-up only) | about 500 ms | about 120 ms |
+| `import json` | 1,590 ms | 144 ms |
+| `import re` | 1,281 ms | 130 ms |
+
+All eleven conformance cases match native CPython through the reactor, and through the command
+module.
+
+Reproducibility: `python.wasm` and `python313.zip` rebuild to the same bytes (`SOURCE_DATE_EPOCH`
+is fixed, the zip has fixed times and sorted entries). `python-init.wasm` does not yet. Its
+initialised data differs by about 100 bytes between builds, and the source of that difference is
+not known. So it is not pinned in `pins.toml`. It is checked by the conformance cases, and by the
+`reactor_hash` the install records.
+
 ## Still open
 
 1. **Install into sessions.** The module and the 14 MB stdlib must reach a session's VFS
@@ -79,11 +116,11 @@ directly, as a test fixture would.
    separate path, and it needs a decision on whether every session carries the stdlib.
    Content-addressed storage shares the blob across sessions, so the cost is mainly the
    first copy.
-2. **Pin the artifacts.** The build writes hashes, but the registry entry is not in any
-   manifest yet. The hashes belong in a committed manifest once artifact storage is decided.
-3. **Wizer.** Pre-initialising the interpreter (PLAN.md section 4.6) would cut the startup
-   cost. It is an optimisation, and the tool works without it.
+2. **Pin the artifacts.** `pins.toml` pins `python.wasm` and the zip. The reactor is checked by
+   its install-time hash, not a committed pin (see above).
+3. **Reactor reproducibility.** `python-init.wasm` differs by about 100 bytes between builds (see
+   above). Finding the source is the next step before it can be pinned.
 4. **Stdlib size.** A subset of the stdlib, without `idlelib`, `tkinter` and `ensurepip`,
    would shrink the zip. The subset needs a list of which modules scripts need.
-5. **Performance.** Nothing has been measured on the registry path. It runs under the
-   sandbox's host, which is slower than wasmtime alone.
+5. **Performance.** Measured above for the host path. The first compile of a module is about
+   18 s per process, and nothing caches it across processes yet.
