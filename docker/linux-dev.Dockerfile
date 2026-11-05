@@ -11,7 +11,7 @@ RUN apt-get update \
     protobuf-compiler libprotobuf-dev \
     python3 unzip zip curl ca-certificates \
     clang lld wasi-libc libclang-rt-14-dev-wasm32 \
-    qemu-system-x86 linux-image-amd64 busybox-static cpio kmod xz-utils \
+    qemu-system-x86 qemu-utils linux-image-amd64 busybox-static cpio kmod xz-utils \
     ffmpeg e2fsprogs chromium \
  && rm -rf /var/lib/apt/lists/*
 

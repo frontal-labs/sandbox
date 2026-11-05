@@ -9,7 +9,7 @@
 use sandbox_proto::v1::guest::guest_service_client::GuestServiceClient;
 use sandbox_types::{ErrorCode, SandboxError};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 use tokio::process::{Child, Command};
@@ -61,17 +61,38 @@ pub struct QemuSpec {
     pub console: PathBuf,
 }
 
+/// Where a guest's state is saved, and resumed from: a qcow2 disk that holds the saved state, and
+/// the QEMU monitor socket that `save_state` talks to. A VM started with it can be saved, and a VM
+/// started with `resume` set comes back in the state that was saved under that tag.
+#[derive(Debug, Clone)]
+pub struct Snapshotting {
+    pub disk: PathBuf,
+    pub monitor: PathBuf,
+    /// A saved state to resume, by its tag, instead of booting the guest.
+    pub resume: Option<String>,
+}
+
 /// A running guest. Its agent answers on `agent`.
 #[derive(Debug)]
 pub struct QemuVm {
     child: Child,
     agent: SocketAddr,
+    monitor: Option<PathBuf>,
 }
 
 impl QemuVm {
     /// Boots the guest and returns once QEMU is running. Call [`QemuVm::wait_for_agent`]
     /// before using it.
     pub async fn start(spec: &QemuSpec) -> Result<Self, SandboxError> {
+        Self::start_with(spec, None).await
+    }
+
+    /// Like [`QemuVm::start`], and the guest can be saved with [`QemuVm::save_state`], or resumed
+    /// from a saved state when `snapshotting.resume` is set.
+    pub async fn start_with(
+        spec: &QemuSpec,
+        snapshotting: Option<&Snapshotting>,
+    ) -> Result<Self, SandboxError> {
         let port = free_local_port()?;
         let console = format!("file:{}", spec.console.display());
         let mut cmd = Command::new(&spec.qemu);
@@ -87,10 +108,9 @@ impl QemuVm {
             "-no-reboot",
             "-display",
             "none",
-            "-monitor",
-            "none",
-            "-kernel",
         ])
+        .args(monitor_args(snapshotting))
+        .arg("-kernel")
         .arg(&spec.kernel)
         .arg("-initrd")
         .arg(&spec.initrd)
@@ -114,7 +134,27 @@ impl QemuVm {
         Ok(QemuVm {
             child,
             agent: SocketAddr::from(([127, 0, 0, 1], port)),
+            monitor: snapshotting.map(|s| s.monitor.clone()),
         })
+    }
+
+    /// Saves the guest's state under `tag`, on the disk `start_with` was given. QEMU pauses the
+    /// guest while it saves, and the guest runs again afterwards. Call it before [`QemuVm::stop`].
+    pub async fn save_state(&self, tag: &str) -> Result<(), SandboxError> {
+        let monitor = self.monitor.as_ref().ok_or_else(|| {
+            SandboxError::new(
+                ErrorCode::InvalidState,
+                "this VM was started without a saved-state disk",
+            )
+        })?;
+        let reply = monitor_command(monitor, &format!("savevm {tag}")).await?;
+        if reply.to_ascii_lowercase().contains("error") {
+            return Err(SandboxError::new(
+                ErrorCode::VmBootFailed,
+                format!("saving the state failed: {}", reply.trim()),
+            ));
+        }
+        Ok(())
     }
 
     /// The address of the guest agent, as the host reaches it.
@@ -166,6 +206,92 @@ impl QemuVm {
         }
         text.trim().chars().take(500).collect()
     }
+}
+
+/// The QEMU arguments for the monitor, and the saved-state disk when there is one. Without it the
+/// monitor is off, as it always was.
+fn monitor_args(snapshotting: Option<&Snapshotting>) -> Vec<String> {
+    let Some(s) = snapshotting else {
+        return vec!["-monitor".into(), "none".into()];
+    };
+    let mut args = vec![
+        "-chardev".into(),
+        format!(
+            "socket,id=mon0,path={},server=on,wait=off",
+            s.monitor.display()
+        ),
+        "-mon".into(),
+        "chardev=mon0,mode=readline".into(),
+        "-drive".into(),
+        format!("file={},format=qcow2,if=none,id=vmstate", s.disk.display()),
+        "-device".into(),
+        "virtio-blk-pci,drive=vmstate".into(),
+    ];
+    if let Some(tag) = &s.resume {
+        args.push("-loadvm".into());
+        args.push(tag.clone());
+    }
+    args
+}
+
+/// Sends one line to QEMU's human monitor on `socket`, and returns what it printed. The socket
+/// appears when QEMU starts, so the connection is retried for a while.
+async fn monitor_command(socket: &Path, line: &str) -> Result<String, SandboxError> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        match tokio::net::UnixStream::connect(socket).await {
+            Ok(stream) => return send_line(stream, line).await,
+            Err(e) => {
+                if Instant::now() >= deadline {
+                    return Err(SandboxError::new(
+                        ErrorCode::VmBootFailed,
+                        format!("cannot reach the QEMU monitor at {}: {e}", socket.display()),
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
+/// Waits for the monitor's first prompt, sends the line, and returns the reply.
+async fn send_line(mut stream: tokio::net::UnixStream, line: &str) -> Result<String, SandboxError> {
+    use tokio::io::AsyncWriteExt;
+    read_to_prompt(&mut stream).await?;
+    stream
+        .write_all(format!("{line}\n").as_bytes())
+        .await
+        .map_err(io_error)?;
+    read_to_prompt(&mut stream).await
+}
+
+/// Reads from the monitor until its prompt, and returns the text before it. A save can take as
+/// long as the guest's memory takes to write, so the wait is generous.
+async fn read_to_prompt(stream: &mut tokio::net::UnixStream) -> Result<String, SandboxError> {
+    use tokio::io::AsyncReadExt;
+    const PROMPT: &[u8] = b"(qemu) ";
+    let mut text = Vec::new();
+    let mut chunk = [0u8; 4096];
+    while !text.ends_with(PROMPT) {
+        let read = tokio::time::timeout(Duration::from_secs(300), stream.read(&mut chunk))
+            .await
+            .map_err(|_| {
+                SandboxError::new(ErrorCode::VmBootFailed, "the QEMU monitor did not answer")
+            })?
+            .map_err(io_error)?;
+        if read == 0 {
+            // The monitor closed: what it said so far is the reply.
+            return Ok(String::from_utf8_lossy(&text).into_owned());
+        }
+        text.extend_from_slice(&chunk[..read]);
+    }
+    let end = text.len().saturating_sub(PROMPT.len());
+    let text = if text.ends_with(PROMPT) {
+        &text[..end]
+    } else {
+        &text[..]
+    };
+    Ok(String::from_utf8_lossy(text).into_owned())
 }
 
 /// A local port that was free when asked. Another process could take it before QEMU binds

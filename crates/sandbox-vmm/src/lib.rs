@@ -7,4 +7,4 @@ pub mod qemu;
 
 pub use driver::VmmDriver;
 pub use pool::VmPool;
-pub use qemu::{Accel, QemuSpec, QemuVm};
+pub use qemu::{Accel, QemuSpec, QemuVm, Snapshotting};

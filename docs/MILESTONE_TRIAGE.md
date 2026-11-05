@@ -38,7 +38,7 @@ measured in this pass. Otherwise it says "not measured".
 | Firecracker snapshots | not built | Firecracker is not used: Tier 2 runs on QEMU, with KVM on the hosted runner (`vm-kvm` workflow, passing on `aed112c`) and software emulation elsewhere. Memory snapshots are not working (see VM resume). |
 | **Accept:** ffmpeg and headless Chromium via auto-promotion | not started | Depends on promotion and images. |
 | **Accept:** promotion under 400 ms | measured, emulated | Promoting a 64 KiB file takes 128 ms under QEMU TCG (`crates/sandbox-promote/tests/timings.rs`). That size is not the ffmpeg-scale promotion the criterion means, and TCG is not the target hardware. |
-| **Accept:** VM resume under 150 ms | not met | Resume from a memory snapshot is not working. QEMU's migration stream reaches its full size, but the host never sees the end of the stream, so the snapshot hangs (`crates/sandbox-vmm` history). Cold boot under KVM on a hosted runner is 7.8 s, and under TCG 19–31 s. |
+| **Accept:** VM resume under 150 ms | not met | A saved guest resumes in the state it was saved in. The guest is saved with `savevm` to a qcow2 disk and resumed with `-loadvm` (`QemuVm::save_state`, `start_with`). The earlier migration-stream attempt hung, and this does not use one. `crates/sandbox-vmm/tests/snapshot_resume.rs` passes under TCG. Resume takes 12 to 14 s from QEMU start to the agent's answer under TCG (two runs), against 150 ms. KVM is not measured yet, and the promotion pool does not use saved states. Cold boot under KVM on a hosted runner is 7.8 s, and under TCG 19–31 s. |
 | **Accept:** guest protocol fuzzed 24 h | partial | `guest_protocol` fuzz target exists. A 90 s run covered 1.5 M inputs with no crash. Not 24 h. |
 
 ## M5: production hardening
