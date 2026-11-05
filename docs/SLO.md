@@ -55,6 +55,7 @@ timings test prints one line per run:
 | Warm handout from the pool | 0 ms |
 | Promote one 64 KiB file into a guest | 5 ms |
 | CPython runs in a promoted guest (whole test, including boot) | 141 s |
+| Resume a saved guest until its agent answers (QEMU start, `-loadvm`, ping) | 1.38 s |
 
 These are the first numbers from hardware virtualisation. The emulated (TCG) figures are not
 recorded here, because the Python test takes over 25 minutes under emulation.
