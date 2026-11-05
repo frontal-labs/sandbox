@@ -181,6 +181,38 @@ async fn main() {
     report("snapshot", snapshot_times);
     report("fork (one session)", fork_times);
 
+    // Create and run a command. Each session gets its own key, so the quotas do not interfere.
+    let mut create_times = Vec::new();
+    let mut exec_times = Vec::new();
+    for _ in 0..50 {
+        let key = auth.create_key();
+        let started = Instant::now();
+        let (status, created) = send(
+            &app,
+            &key,
+            "POST",
+            "/v1/sessions",
+            Some(session_body(TenantId::new())),
+        )
+        .await;
+        create_times.push(started.elapsed());
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let id = created["session_id"].as_str().unwrap().to_string();
+        let started = Instant::now();
+        let (status, ran) = send(
+            &app,
+            &key,
+            "POST",
+            &format!("/v1/sessions/{id}/exec"),
+            Some(json!({"argv": ["echo", "hi"], "env": {}, "stream": false})),
+        )
+        .await;
+        exec_times.push(started.elapsed());
+        assert_eq!(status, StatusCode::OK, "{ran}");
+    }
+    report("create session", create_times);
+    report("exec echo", exec_times);
+
     // Idle sessions: memory per session, measured as the growth in resident memory.
     // A key holds 64 sessions and 32 snapshots, so keys take 30 sessions each.
     let before = rss_kib();
