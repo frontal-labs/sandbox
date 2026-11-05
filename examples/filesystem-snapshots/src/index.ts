@@ -15,11 +15,11 @@ async function main(): Promise<void> {
 
   // Session configuration
   const sessionConfig: SessionConfig = {
-    tenant_id: "fs-snapshots",
-    tier_preference: "auto",
+    tenantId: "fs-snapshots",
+    tierPreference: "auto",
     cwd: "/work",
     limits: {},
-    network: { default_deny: true, rules: [] },
+    network: { defaultDeny: true, rules: [] },
     env: {},
     labels: {},
   }

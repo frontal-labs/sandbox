@@ -5,9 +5,10 @@
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use reqwest::{Method, StatusCode};
+use sandbox_types::hash::ContentHash;
 use sandbox_types::{
-    ErrorCode, ExecEvent, ExecRequest, SandboxError, SessionConfig, SessionId, SessionState,
-    Snapshot, SnapshotId,
+    CheckpointPolicy, ErrorCode, ExecEvent, ExecRequest, SandboxError, SessionConfig, SessionId,
+    SessionState, Snapshot, SnapshotId,
 };
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -38,6 +39,52 @@ struct SessionIdBody {
 #[derive(Deserialize)]
 struct SnapshotIdBody {
     snapshot_id: SnapshotId,
+}
+
+/// The checkpoints a session holds, as GET reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CheckpointUsage {
+    pub policy: CheckpointPolicy,
+    /// Checkpoints pinned now.
+    pub count: u32,
+    /// The most that are pinned. Older checkpoints are unpinned.
+    pub retain: u32,
+    /// Logical bytes of the pinned roots.
+    pub bytes: u64,
+}
+
+/// The root now current after a checkpoint or an undo.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CheckpointResponse {
+    pub root: ContentHash,
+    pub checkpoints: CheckpointUsage,
+}
+
+/// What one child of `fork_command` did.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ForkedChild {
+    pub session_id: SessionId,
+    /// The exit code, or nothing when the command could not run.
+    pub exit_code: Option<i32>,
+    /// Why the command could not run, when it did not.
+    pub error: Option<String>,
+    pub changed_files: usize,
+}
+
+#[derive(Deserialize)]
+struct ForkedChildren {
+    children: Vec<ForkedChild>,
+}
+
+#[derive(Serialize)]
+struct UndoBody {
+    steps: u32,
+}
+
+#[derive(Serialize)]
+struct ForkCommandBody<'a> {
+    count: u32,
+    argv: &'a [String],
 }
 
 #[derive(Deserialize)]
@@ -236,6 +283,55 @@ impl Client {
             )
             .await?;
         Ok(body.session_ids)
+    }
+
+    /// Pins the session's current state as a checkpoint.
+    pub async fn checkpoint(&self, session: SessionId) -> Result<CheckpointResponse, SandboxError> {
+        self.send_json::<(), _>(
+            Method::POST,
+            &format!("/v1/sessions/{session}/checkpoint"),
+            None,
+        )
+        .await
+    }
+
+    /// Restores the filesystem from `steps` checkpoints ago. The current state is
+    /// pinned first, so the undo can be undone by undoing back to it.
+    pub async fn undo(
+        &self,
+        session: SessionId,
+        steps: u32,
+    ) -> Result<CheckpointResponse, SandboxError> {
+        self.send_json(
+            Method::POST,
+            &format!("/v1/sessions/{session}/undo"),
+            Some(&UndoBody { steps }),
+        )
+        .await
+    }
+
+    /// The session's environment: the contents of `/etc/agent/env.json`.
+    pub async fn info(&self, session: SessionId) -> Result<serde_json::Value, SandboxError> {
+        self.send_json::<(), _>(Method::GET, &format!("/v1/sessions/{session}/info"), None)
+            .await
+    }
+
+    /// Forks the session's current state into `count` children, and runs `argv` in
+    /// each. Returns what every child did.
+    pub async fn fork_command(
+        &self,
+        session: SessionId,
+        count: u32,
+        argv: &[String],
+    ) -> Result<Vec<ForkedChild>, SandboxError> {
+        let body: ForkedChildren = self
+            .send_json(
+                Method::POST,
+                &format!("/v1/sessions/{session}/fork"),
+                Some(&ForkCommandBody { count, argv }),
+            )
+            .await?;
+        Ok(body.children)
     }
 
     /// Destroys a session.

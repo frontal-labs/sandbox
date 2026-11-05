@@ -414,6 +414,7 @@ mod tests {
                 stdin: Some(vec![0u8; MAX_MESSAGE_BYTES]),
                 timeout_ms: None,
                 stream: false,
+                output_limit: None,
             };
             let err = worker.exec(req).await.unwrap_err();
             assert_eq!(err.code, ErrorCode::ResourceExhausted);

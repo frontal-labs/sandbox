@@ -12,6 +12,49 @@ const VERSION: &str = match option_env!("SANDBOX_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
+#[derive(Subcommand)]
+pub enum SandboxCommand {
+    /// Print the session's environment (/etc/agent/env.json) as JSON.
+    Info {
+        /// Session ID
+        session_id: String,
+    },
+
+    /// Pin the session's current state as a checkpoint, and print its root.
+    Checkpoint {
+        /// Session ID
+        session_id: String,
+    },
+
+    /// Restore the filesystem from N checkpoints ago. The current state is kept as a
+    /// checkpoint first. Processes are not kept.
+    Undo {
+        /// Session ID
+        session_id: String,
+
+        /// How many checkpoints back to restore
+        #[arg(default_value = "1")]
+        steps: u32,
+    },
+
+    /// Fork the session's current state into N children and run a command in each.
+    /// Prints one line per child. Exits 1 when a child's command failed.
+    ///
+    /// Example: frontal-sandbox sandbox fork <session> -c 3 -- touch /r
+    Fork {
+        /// Session ID
+        session_id: String,
+
+        /// Number of children
+        #[arg(short, long, default_value = "1")]
+        count: u32,
+
+        /// The command to run in each child
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+}
+
 #[derive(Parser)]
 #[command(name = "frontal-sandbox", version = VERSION, about = "Frontal Sandbox CLI")]
 pub struct Cli {
@@ -54,6 +97,13 @@ pub enum Commands {
         /// Number of forks
         #[arg(short, long, default_value = "1")]
         count: usize,
+    },
+
+    /// Tier 1 session tools: environment, checkpoints, undo, and fork-with-command.
+    /// Uses SANDBOX_BASE_URL and SANDBOX_API_KEY.
+    Sandbox {
+        #[command(subcommand)]
+        command: SandboxCommand,
     },
 
     /// Replay a trace in a fresh sandbox and report every run whose output
@@ -206,6 +256,7 @@ impl Cli {
             }
             Commands::Snapshot { session_id } => snapshot(session_id),
             Commands::Fork { snapshot_id, count } => fork(snapshot_id, *count),
+            Commands::Sandbox { command } => sandbox_session(command),
         }
     }
 }
@@ -227,9 +278,9 @@ fn run_script_once(script: &str, trace: Option<&Path>) -> Result<i32, SandboxErr
     let rt = runtime()?;
     rt.block_on(async {
         let session = IsolateBackend::new(SessionConfig::default()).await?;
-        let (result, files) = run_traced(&session, script).await;
+        let (random_state, result, files) = run_traced(&session, script).await;
         if let Some(path) = trace {
-            let runs = vec![record(1, script, &result, files)];
+            let runs = vec![record(1, script, &result, files, random_state)];
             write_trace(path, runs)?;
         }
         let out = result?;
@@ -251,9 +302,15 @@ fn interactive_shell(trace: Option<&Path>) -> Result<i32, SandboxError> {
             break;
         }
         // A bad line reports its error and the session continues.
-        let (result, files) = rt.block_on(run_traced(&session, &line));
+        let (random_state, result, files) = rt.block_on(run_traced(&session, &line));
         if trace.is_some() {
-            runs.push(record(runs.len() as u64 + 1, &line, &result, files));
+            runs.push(record(
+                runs.len() as u64 + 1,
+                &line,
+                &result,
+                files,
+                random_state,
+            ));
         }
         match result {
             Ok(out) => print_output(&out.stdout, &out.stderr)
@@ -321,10 +378,13 @@ async fn run_traced(
     session: &IsolateBackend,
     script: &str,
 ) -> (
+    Option<u64>,
     Result<ExecResult, SandboxError>,
     Result<Vec<FileChange>, SandboxError>,
 ) {
     let before = committed_root(session).await;
+    // The generator state before the run, so a replay draws the same $RANDOM values.
+    let random_state = Some(session.random_state().await);
     let result = session.run_script(script).await;
     let files = match before {
         Ok(before) => changed_since(session, before)
@@ -332,7 +392,7 @@ async fn run_traced(
             .map(|changes| changes.into_iter().map(FileChange::from).collect()),
         Err(e) => Err(e),
     };
-    (result, files)
+    (random_state, result, files)
 }
 
 /// One run as the trace records it. Files that could not be read leave the run
@@ -342,6 +402,7 @@ fn record(
     script: &str,
     result: &Result<ExecResult, SandboxError>,
     files: Result<Vec<FileChange>, SandboxError>,
+    random_state: Option<u64>,
 ) -> RunRecord {
     let files = files.unwrap_or_else(|e| {
         eprintln!(
@@ -362,6 +423,7 @@ fn record(
         fs: None,
         outcome,
         files,
+        random_state,
     }
 }
 
@@ -519,6 +581,59 @@ fn fork(snapshot_id: &str, count: usize) -> Result<i32, SandboxError> {
     Ok(0)
 }
 
+fn parse_session(raw: &str) -> Result<sandbox_types::SessionId, SandboxError> {
+    raw.parse()
+        .map_err(|_| SandboxError::invalid_argument(format!("not a session id: {raw}")))
+}
+
+fn sandbox_session(command: &SandboxCommand) -> Result<i32, SandboxError> {
+    let rt = runtime()?;
+    match command {
+        SandboxCommand::Info { session_id } => {
+            let env = rt.block_on(client()?.info(parse_session(session_id)?))?;
+            println!("{}", serde_json::to_string_pretty(&env).unwrap_or_default());
+            Ok(0)
+        }
+        SandboxCommand::Checkpoint { session_id } => {
+            let pinned = rt.block_on(client()?.checkpoint(parse_session(session_id)?))?;
+            println!("{}", pinned.root);
+            Ok(0)
+        }
+        SandboxCommand::Undo { session_id, steps } => {
+            let undone = rt.block_on(client()?.undo(parse_session(session_id)?, *steps))?;
+            println!("{}", undone.root);
+            Ok(0)
+        }
+        SandboxCommand::Fork {
+            session_id,
+            count,
+            command,
+        } => {
+            let children =
+                rt.block_on(client()?.fork_command(parse_session(session_id)?, *count, command))?;
+            let mut code = 0;
+            for child in &children {
+                let outcome = match (child.exit_code, &child.error) {
+                    (Some(0), _) => "ok".to_string(),
+                    (Some(exit), _) => {
+                        code = 1;
+                        format!("exit {exit}")
+                    }
+                    (None, error) => {
+                        code = 1;
+                        format!("error: {}", error.as_deref().unwrap_or("unknown"))
+                    }
+                };
+                println!(
+                    "{} {} changed={}",
+                    child.session_id, outcome, child.changed_files
+                );
+            }
+            Ok(code)
+        }
+    }
+}
+
 /// Chooses where `node` scripts run on this host.
 ///
 /// On Linux the top-level process runs each script in a child process with
@@ -560,6 +675,41 @@ fn install_script_runner(_command: &Commands) -> Result<(), SandboxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_fork_takes_the_command_after_a_separator() {
+        let cli = Cli::try_parse_from([
+            "frontal-sandbox",
+            "sandbox",
+            "fork",
+            "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+            "-c",
+            "3",
+            "--",
+            "touch",
+            "/r",
+        ])
+        .unwrap();
+        let Commands::Sandbox {
+            command: SandboxCommand::Fork { count, command, .. },
+        } = cli.command
+        else {
+            panic!("expected sandbox fork");
+        };
+        assert_eq!(count, 3);
+        assert_eq!(command, ["touch", "/r"]);
+    }
+
+    #[test]
+    fn sandbox_fork_needs_a_command() {
+        assert!(Cli::try_parse_from([
+            "frontal-sandbox",
+            "sandbox",
+            "fork",
+            "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        ])
+        .is_err());
+    }
 
     #[test]
     fn replay_refuses_a_missing_trace_as_invalid_argument() {

@@ -33,6 +33,22 @@ pub enum TierPreference {
     Vm,
 }
 
+/// When the VFS root is checkpointed (IMAGE.md §4.5). Each checkpoint is a root hash
+/// that `undo` can return to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum CheckpointPolicy {
+    /// Commit the VFS after every top-level exec.
+    #[default]
+    PerExec,
+    /// Commit only when `sandbox checkpoint` or the `checkpoint` API is called.
+    Manual,
+}
+
+/// Default number of checkpoint roots kept per session (IMAGE.md §4.5).
+pub const DEFAULT_CHECKPOINT_RETAIN: u32 = 50;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionConfig {
@@ -47,6 +63,16 @@ pub struct SessionConfig {
     pub initial_snapshot: Option<SnapshotId>,
     pub secrets: Option<SecretsConfig>,
     pub labels: HashMap<String, String>,
+    /// Checkpoint policy. Defaults to `per_exec`.
+    #[serde(default)]
+    pub checkpoint: CheckpointPolicy,
+    /// Number of checkpoint roots kept before older ones are unpinned.
+    #[serde(default = "default_checkpoint_retain")]
+    pub checkpoint_retain: u32,
+}
+
+fn default_checkpoint_retain() -> u32 {
+    DEFAULT_CHECKPOINT_RETAIN
 }
 
 impl Default for SessionConfig {
@@ -61,6 +87,8 @@ impl Default for SessionConfig {
             initial_snapshot: None,
             secrets: None,
             labels: HashMap::new(),
+            checkpoint: CheckpointPolicy::default(),
+            checkpoint_retain: DEFAULT_CHECKPOINT_RETAIN,
         }
     }
 }
@@ -161,6 +189,16 @@ pub struct ExecRequest {
     /// Stream the output while the command runs, as NDJSON. Set by the server
     /// from `?stream=true` or from this field. Buffered callers leave it `false`.
     pub stream: bool,
+    /// Maximum bytes kept per stream in the buffered result. `None` uses the
+    /// server default (8 KiB head + 8 KiB tail). The full stream stays in the trace.
+    pub output_limit: Option<u64>,
+}
+
+impl ExecRequest {
+    pub fn with_output_limit(mut self, limit: u64) -> Self {
+        self.output_limit = Some(limit);
+        self
+    }
 }
 
 /// Which output stream a streamed chunk came from.

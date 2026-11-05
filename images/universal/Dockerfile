@@ -13,7 +13,7 @@ RUN apt-get update && \
 ARG NODE_VERSION
 
 RUN mkdir -p /opt/node && \
-  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+  curl -fsSL --proto '=https' --tlsv1.2 --proto-redir '=https' "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
   | bsdtar -xJ --strip-components=1 -C /opt/node && \
   rm -f /opt/node/CHANGELOG.md /opt/node/LICENSE /opt/node/README.md
 
@@ -30,7 +30,7 @@ ARG PYTHON_VERSION=3.14
 RUN apt-get update && \
   apt-get install -y --no-install-recommends curl && \
   install -d -m 0755 /etc/apt/keyrings && \
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  curl -fsSL --proto '=https' --tlsv1.2 --proto-redir '=https' https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
   chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
@@ -72,13 +72,13 @@ RUN apt-get update && \
   zip && \
   rm -f /usr/lib/python3*/EXTERNALLY-MANAGED && \
   rm -rf /var/lib/apt/lists/* && \
-  pip install uv && \
+  pip install --only-binary :all: uv==0.13.6 && \
   rm -rf /root/.cache/pip && \
   git lfs install --system
 
 COPY --from=node /opt/node /usr/local
 
-RUN npm install -g pnpm@11 && \
+RUN npm install -g --ignore-scripts pnpm@11.28.9 && \
   npm cache clean --force
 
 # Bun.
@@ -89,11 +89,13 @@ RUN ln -s bun /usr/local/bin/bunx
 
 # Coding agents.
 
-RUN npm install -g \
-  opencode-ai \
-  @anthropic-ai/claude-code \
-  @openai/codex && \
-  npm install -g --ignore-scripts @earendil-works/pi-coding-agent && \
+# opencode-ai's own postinstall only copies its platform binary into place. Do that
+# copy here instead, so no lifecycle script runs. This image is linux-x64 only.
+# Versions are pinned.
+RUN npm install -g --ignore-scripts opencode-ai@1.19.5 opencode-linux-x64@1.19.5 && \
+  cp "$(npm root -g)/opencode-linux-x64/bin/opencode" "$(npm root -g)/opencode-ai/bin/opencode.exe" && \
+  chmod +x "$(npm root -g)/opencode-ai/bin/opencode.exe" && \
+  npm install -g --ignore-scripts @openai/codex@0.165.0 @earendil-works/pi-coding-agent@1.4.0 && \
   npm cache clean --force
 
 RUN chown -R ubuntu:ubuntu /vercel
@@ -120,6 +122,5 @@ RUN node --version && \
   gh --version && \
   sudo whoami && \
   opencode --version && \
-  claude --version && \
   codex --version && \
   pi --version

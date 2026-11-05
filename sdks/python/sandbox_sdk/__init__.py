@@ -33,6 +33,7 @@ from .errors import (
     vm_boot_failed,
     wasm_error,
 )
+from .tier1 import Tier1Client
 from .types import (
     ExecRequest,
     ExecResult,
@@ -102,4 +103,6 @@ __all__ = [
     # Embedded
     "EmbeddedSandbox",
     "EmbeddedSandboxConfig",
+    # Tier 1 session tools
+    "Tier1Client",
 ]

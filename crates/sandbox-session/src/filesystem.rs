@@ -76,6 +76,10 @@ pub async fn replay_run(
     session: &dyn Session,
     run: &RunRecord,
 ) -> Result<(i32, Vec<u8>, Vec<u8>), SandboxError> {
+    // A run that recorded its $RANDOM state draws the same values again.
+    if let Some(state) = run.random_state {
+        session.set_random_state(state).await;
+    }
     match &run.fs {
         Some(FsOp::Write { path, data }) => write_file(session, path, data)
             .await
@@ -87,5 +91,42 @@ pub async fn replay_run(
             .run_script(&run.script)
             .await
             .map(|out| (out.exit_code, out.stdout, out.stderr)),
+    }
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use super::*;
+    use crate::backend::IsolateBackend;
+    use sandbox_trace::{Outcome, RunRecord};
+    use sandbox_types::SessionConfig;
+
+    #[tokio::test]
+    async fn a_replayed_run_draws_the_same_random_values() {
+        let original = IsolateBackend::new(SessionConfig::default()).await.unwrap();
+        let state = original.random_state().await;
+        let out = original.run_script("echo $RANDOM $RANDOM").await.unwrap();
+        let run = RunRecord {
+            seq: 1,
+            script: "echo $RANDOM $RANDOM".to_string(),
+            fs: None,
+            outcome: Outcome::Completed {
+                exit_code: out.exit_code,
+                stdout: out.stdout.clone(),
+                stderr: out.stderr.clone(),
+            },
+            files: Vec::new(),
+            random_state: Some(state),
+        };
+
+        // A fresh session starts from a different clock seed, so it would draw other
+        // values without the recorded state.
+        let fresh = IsolateBackend::new(SessionConfig::default()).await.unwrap();
+        let (code, stdout, _) = replay_run(&fresh, &run).await.unwrap();
+        assert_eq!(code, out.exit_code);
+        assert_eq!(
+            stdout, out.stdout,
+            "the replay reproduces the recorded $RANDOM values"
+        );
     }
 }

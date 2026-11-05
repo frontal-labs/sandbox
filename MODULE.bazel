@@ -34,7 +34,7 @@ use_repo(pip, "pypi")
 npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
 npm.npm_translate_lock(
     name = "npm_sdk",
-    pnpm_lock = "//sdks/typescript:pnpm-lock.yaml",
+    pnpm_lock = "//:pnpm-lock.yaml",
     npmrc = "//:.npmrc",
 )
 use_repo(npm, "npm_sdk")

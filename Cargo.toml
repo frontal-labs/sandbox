@@ -45,10 +45,10 @@ dashmap = "6"
 ulid = { version = "1", features = ["serde"] }
 blake3 = "1"
 object_store = "0.14"
-zstd = "0.13"
+zstd = "0.14"
 # Wasmtime's default features minus `profiling`: that feature links ittapi
 # (GPL-2.0-only) and fxprof-processed-profile, which deny.toml rejects.
-wasmtime = { version = "36", default-features = false, features = ["async", "cache", "gc", "gc-drc", "gc-null", "wat", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "threads", "stack-switching", "std"] }
+wasmtime = { version = "36.0.19", default-features = false, features = ["async", "gc", "gc-drc", "gc-null", "wat", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "threads", "stack-switching", "std"] }
 deno_core = { version = "0.413", features = ["v8"] }
 deno_web = "0.291"
 deno_url = "0.222"

@@ -267,3 +267,75 @@ async fn parameter_operators_trim_and_default() {
         "bin local/bin\n"
     );
 }
+
+#[tokio::test]
+async fn sh_dash_c_runs_its_script_in_this_shell() {
+    let out = run("sh -c 'x=inside; echo $x'; echo ${x:-unset}")
+        .await
+        .unwrap();
+    assert_eq!(out.stdout, "inside\nunset\n", "sh -c has its own scope");
+    assert_eq!(out.status, 0);
+}
+
+#[tokio::test]
+async fn sh_dash_c_passes_its_status_and_refuses_other_forms() {
+    assert_eq!(
+        run("sh -c 'exit 3'; echo after $?").await.unwrap().stdout,
+        "after 3\n",
+        "exit ends only the sh"
+    );
+    assert_eq!(run("sh -c 'false'").await.unwrap().status, 1);
+    let out = run("sh script.sh").await.unwrap();
+    assert_eq!(out.status, 2);
+    assert!(out.stderr.contains("only -c"), "{:?}", out.stderr);
+}
+
+#[tokio::test]
+async fn sh_dash_c_respects_the_step_budget_of_the_outer_run() {
+    let fs = Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())));
+    let config = ShellConfig {
+        max_steps: 50,
+        ..ShellConfig::default()
+    };
+    let mut shell = Shell::new(fs, config);
+    let out = shell.run("sh -c 'while true; do :; done'").await;
+    assert!(
+        out.is_err() || out.unwrap().exit_code != 0,
+        "the loop must not run forever"
+    );
+}
+
+#[tokio::test]
+async fn random_is_a_number_in_range_and_varies() {
+    let out = run("a=$RANDOM; b=$RANDOM; c=$RANDOM; echo $a $b $c")
+        .await
+        .unwrap();
+    let values: Vec<u32> = out
+        .stdout
+        .split_whitespace()
+        .map(|v| v.parse().unwrap())
+        .collect();
+    assert_eq!(values.len(), 3);
+    assert!(values.iter().all(|v| *v < 32768));
+    assert!(
+        !(values[0] == values[1] && values[1] == values[2]),
+        "{values:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_assigned_random_is_not_replaced() {
+    assert_eq!(stdout_of("RANDOM=7; echo $RANDOM").await, "7\n");
+}
+
+#[tokio::test]
+async fn a_saved_random_state_draws_the_same_values_again() {
+    let fs = Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())));
+    let mut shell = Shell::new(fs, ShellConfig::default());
+    shell.set_random_state(12345);
+    let first = shell.run("echo $RANDOM $RANDOM").await.unwrap();
+    shell.set_random_state(12345);
+    let second = shell.run("echo $RANDOM $RANDOM").await.unwrap();
+    assert_eq!(first.stdout, second.stdout);
+    assert_ne!(shell.random_state(), 12345, "the sequence advanced");
+}

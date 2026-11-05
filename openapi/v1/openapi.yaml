@@ -149,6 +149,49 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
       security:
       - bearer: []
+  /v1/sessions/{id}/checkpoint:
+    post:
+      tags:
+      - sessions
+      summary: |-
+        Pins the session's current state as a checkpoint now. Manual checkpoints are
+        taken this way. A per-exec session also pins after each command.
+      operationId: checkpoint_session
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      responses:
+        '200':
+          description: Checkpoint pinned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointResponse'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: The key's checkpoint byte budget is full
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
   /v1/sessions/{id}/exec:
     post:
       tags:
@@ -180,6 +223,56 @@ paths:
                 $ref: '#/components/schemas/ExecResult'
         '400':
           description: Invalid request, such as an empty argv
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/sessions/{id}/fork:
+    post:
+      tags:
+      - sessions
+      summary: |-
+        Forks the session's current state into `count` children, and runs `argv` in each
+        (IMAGE.md §4.5, `sandbox fork N -- <cmd>`). Each child is an independent session,
+        and its command is recorded in the child's own trace.
+      operationId: fork_command
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForkCommandRequest'
+        required: true
+      responses:
+        '200':
+          description: Children created and their commands run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForkCommandResponse'
+        '400':
+          description: Invalid count or empty argv
           content:
             application/json:
               schema:
@@ -337,6 +430,40 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '404':
           description: No such session, or no such path
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
+  /v1/sessions/{id}/info:
+    get:
+      tags:
+      - sessions
+      summary: The session's `/etc/agent/env.json`, as `sandbox info --json` prints it.
+      operationId: session_info
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      responses:
+        '200':
+          description: The environment, as env.json (schema 1)
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session for this key
           content:
             application/json:
               schema:
@@ -539,6 +666,56 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
       security:
       - bearer: []
+  /v1/sessions/{id}/undo:
+    post:
+      tags:
+      - sessions
+      summary: |-
+        Restores the filesystem from `steps` checkpoints ago (IMAGE.md §4.5). The current
+        state is pinned first, so undo can return to it. Processes are not kept: a Tier 1
+        session has none between commands.
+      operationId: undo_session
+      parameters:
+      - name: id
+        in: path
+        description: Session ID (ULID)
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UndoRequest'
+        required: true
+      responses:
+        '200':
+          description: Filesystem restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointResponse'
+        '400':
+          description: Not enough checkpoints to undo that far
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No such session for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      security:
+      - bearer: []
   /v1/sessions/{id}/wake:
     post:
       tags:
@@ -654,6 +831,54 @@ paths:
       - bearer: []
 components:
   schemas:
+    CheckpointPolicy:
+      type: string
+      description: |-
+        When the VFS root is checkpointed (IMAGE.md §4.5). Each checkpoint is a root hash
+        that `undo` can return to.
+      enum:
+      - per_exec
+      - manual
+    CheckpointResponse:
+      type: object
+      description: The root now current, and the checkpoints the session holds.
+      required:
+      - root
+      - checkpoints
+      properties:
+        checkpoints:
+          $ref: '#/components/schemas/CheckpointUsage'
+        root:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    CheckpointUsage:
+      type: object
+      description: The checkpoints a session has pinned (IMAGE.md §4.5).
+      required:
+      - policy
+      - count
+      - retain
+      - bytes
+      properties:
+        bytes:
+          type: integer
+          format: int64
+          description: |-
+            Logical bytes of the pinned roots. A block shared by two roots counts twice.
+            Unpinned blocks are not freed until GC lands.
+          minimum: 0
+        count:
+          type: integer
+          format: int32
+          description: Checkpoints pinned now.
+          minimum: 0
+        policy:
+          $ref: '#/components/schemas/CheckpointPolicy'
+        retain:
+          type: integer
+          format: int32
+          description: The most that are pinned. Older checkpoints are unpinned.
+          minimum: 0
     Counters:
       type: object
       description: |-
@@ -819,6 +1044,15 @@ components:
             type: string
           propertyNames:
             type: string
+        output_limit:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: |-
+            Maximum bytes kept per stream in the buffered result. `None` uses the
+            server default (8 KiB head + 8 KiB tail). The full stream stays in the trace.
+          minimum: 0
         stdin:
           type:
           - array
@@ -873,6 +1107,31 @@ components:
           type: integer
           format: int64
           minimum: 0
+    ForkCommandRequest:
+      type: object
+      required:
+      - count
+      - argv
+      properties:
+        argv:
+          type: array
+          items:
+            type: string
+          description: The command each child runs, as argv.
+        count:
+          type: integer
+          format: int32
+          description: Children to create, from 1 to 64.
+          minimum: 0
+    ForkCommandResponse:
+      type: object
+      required:
+      - children
+      properties:
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForkedChild'
     ForkRequest:
       type: object
       required:
@@ -893,6 +1152,29 @@ components:
           items:
             type: string
             pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+    ForkedChild:
+      type: object
+      description: 'What one child did: the command''s outcome, and how many files it changed.'
+      required:
+      - session_id
+      - changed_files
+      properties:
+        changed_files:
+          type: integer
+          minimum: 0
+        error:
+          type:
+          - string
+          - 'null'
+          description: Why the command could not run, when it did not.
+        exit_code:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: The exit code, or nothing when the command could not run.
+        session_id:
+          type: string
     NetworkPolicy:
       type: object
       required:
@@ -1025,6 +1307,14 @@ components:
       - cwd
       - labels
       properties:
+        checkpoint:
+          $ref: '#/components/schemas/CheckpointPolicy'
+          description: Checkpoint policy. Defaults to `per_exec`.
+        checkpoint_retain:
+          type: integer
+          format: int32
+          description: Number of checkpoint roots kept before older ones are unpinned.
+          minimum: 0
         cwd:
           type: string
         env:
@@ -1108,6 +1398,16 @@ components:
       - promoting
       - destroyed
       - error
+    SessionView:
+      allOf:
+      - $ref: '#/components/schemas/SessionState'
+      - type: object
+        required:
+        - checkpoints
+        properties:
+          checkpoints:
+            $ref: '#/components/schemas/CheckpointUsage'
+      description: 'A session as GET returns it: its state, and what its checkpoints hold.'
     Snapshot:
       type: object
       required:
@@ -1173,6 +1473,14 @@ components:
       - auto
       - isolate
       - vm
+    UndoRequest:
+      type: object
+      properties:
+        steps:
+          type: integer
+          format: int32
+          description: How many checkpoints back to restore. Each step drops the newest one.
+          minimum: 0
   securitySchemes:
     bearer:
       type: http

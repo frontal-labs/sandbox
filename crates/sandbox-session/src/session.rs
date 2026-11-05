@@ -49,6 +49,13 @@ pub trait Session: Send + Sync {
     /// persist across calls.
     async fn run_script(&self, script: &str) -> Result<ExecResult, SandboxError>;
     fn fs(&self) -> &dyn SessionFs;
+    /// The generator state behind `$RANDOM`. A run records it at its start.
+    async fn random_state(&self) -> u64;
+    /// Sets the `$RANDOM` generator state, so a replayed run draws the same values.
+    async fn set_random_state(&self, state: u64);
+    /// Writes a host-owned file such as `/etc/agent/env.json`. The agent cannot
+    /// write these paths, so only the host calls this.
+    async fn write_system_file(&self, path: &str, data: &[u8]) -> Result<(), SandboxError>;
     /// Writes the filesystem's committed root and returns its hash. The caller
     /// keeps the hash, and `restore` starts a session from it. The session
     /// keeps running. Take snapshots while the session is idle.

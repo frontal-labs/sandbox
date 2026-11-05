@@ -1,7 +1,7 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project", "ts_config")
 load("@npm_sdk//:defs.bzl", "npm_link_all_packages")
 
-# Links the SDK's npm packages (from pnpm-lock.yaml) into this package.
+# Links the SDK's npm packages (from pnpm-lock.yaml at the root) into this package.
 npm_link_all_packages(name = "node_modules")
 
 

@@ -36,6 +36,8 @@ pub struct ShellConfig {
     /// calls. Exceeding it aborts the run.
     pub max_steps: u64,
     /// Bytes of stdout plus stderr one `run` may produce. Exceeding it aborts the run.
+    /// The default matches the trace's per-session cap, so a run that fits here can be
+    /// recorded in full.
     pub max_output_bytes: usize,
 }
 
@@ -45,7 +47,7 @@ impl Default for ShellConfig {
             cwd: "/".to_string(),
             env: HashMap::new(),
             max_steps: 1_000_000,
-            max_output_bytes: 1024 * 1024,
+            max_output_bytes: 8 * 1024 * 1024,
         }
     }
 }
@@ -173,6 +175,8 @@ pub struct Shell {
     depth: usize,
     output_used: usize,
     max_output_bytes: usize,
+    /// State of the generator behind `$RANDOM`. Not for secrets.
+    random: std::sync::atomic::AtomicU64,
     /// Input a compound command is reading. See `Input`.
     pub(crate) input: Option<Input>,
     /// Bytes of stdout a tool streamed while the simple command being run was
@@ -230,6 +234,7 @@ impl Shell {
             max_steps: config.max_steps,
             output_used: 0,
             max_output_bytes: config.max_output_bytes,
+            random: std::sync::atomic::AtomicU64::new(random_seed()),
         }
     }
 
@@ -392,6 +397,11 @@ impl Shell {
         if child.flow == Some(Flow::Abort) {
             self.flow = Some(Flow::Abort);
         }
+        // The child's $RANDOM sequence continues here, so repeated subshells do not repeat.
+        self.random.store(
+            child.random.load(std::sync::atomic::Ordering::Relaxed),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     fn fork(&self) -> Shell {
@@ -415,6 +425,9 @@ impl Shell {
             max_steps: self.max_steps,
             output_used: self.output_used,
             max_output_bytes: self.max_output_bytes,
+            random: std::sync::atomic::AtomicU64::new(
+                self.random.load(std::sync::atomic::Ordering::Relaxed),
+            ),
         }
     }
 
@@ -1309,6 +1322,7 @@ impl Shell {
         match name {
             "?" => Some(self.status.to_string()),
             "#" => Some(self.positional.len().to_string()),
+            "RANDOM" if !self.env.contains_key("RANDOM") => Some(self.next_random().to_string()),
             "@" | "*" => Some(self.positional.join(" ")),
             _ if !name.is_empty() && name.chars().all(|c| c.is_ascii_digit()) => {
                 let index: usize = name.parse().unwrap_or(usize::MAX);
@@ -1320,6 +1334,50 @@ impl Shell {
             }
             _ => self.env.get(name).cloned(),
         }
+    }
+
+    /// The generator state behind `$RANDOM`. A run that records it can be replayed
+    /// with the same `$RANDOM` values (IMAGE.md §4.5).
+    pub fn random_state(&self) -> u64 {
+        self.random.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Sets the generator state behind `$RANDOM`. A zero state would repeat 0 forever,
+    /// so it is replaced with a nonzero one.
+    pub fn set_random_state(&self, state: u64) {
+        self.random
+            .store(state.max(1), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The next value of `$RANDOM`, 0 to 32767. An xorshift generator: it is
+    /// predictable, so it is only for scripts that need variety, not secrets.
+    fn next_random(&self) -> u32 {
+        let mut x = self.random.load(std::sync::atomic::Ordering::Relaxed);
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.random.store(x, std::sync::atomic::Ordering::Relaxed);
+        ((x >> 16) % 32768) as u32
+    }
+
+    /// `sh -c <script> [name [args...]]`. The script runs in a subshell, as `( ... )`
+    /// does: its variables and directory changes do not reach this shell. Its step and
+    /// output budgets are this run's, and `exit` ends only the `sh`.
+    pub(crate) async fn sh_c(&mut self, args: &[String], stdin: Vec<u8>) -> ExecutionResult {
+        let (script, rest) = match args {
+            [flag, script, rest @ ..] if flag == "-c" => (script, rest),
+            _ => return failure_with("sh: only -c <script> is supported".to_string(), 2),
+        };
+        let parsed = match parser::parse(script) {
+            Ok(parsed) => parsed,
+            Err(e) => return failure_with(format!("sh: {}", e.message), 2),
+        };
+        let mut child = self.fork();
+        child.positional = rest.iter().skip(1).cloned().collect();
+        child.pending_stdin = Some(stdin);
+        let out = child.run_script(&parsed).await;
+        self.absorb(&child);
+        out
     }
 
     /// Evaluates the text of `$((...))`.
@@ -1482,6 +1540,15 @@ pub(crate) fn failure(message: String) -> ExecutionResult {
 }
 
 /// A failed command with a given exit code and a one-line message on stderr.
+/// A seed for `$RANDOM`, from the clock, so each shell differs. Never zero.
+fn random_seed() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    nanos | 1
+}
+
 pub(crate) fn failure_with(message: String, exit_code: i32) -> ExecutionResult {
     ExecutionResult {
         exit_code,

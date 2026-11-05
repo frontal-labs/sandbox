@@ -10,7 +10,7 @@
 use sandbox_cas::DiskStore;
 use sandbox_session::install_blob_store;
 use sandbox_types::hash::ContentHash;
-use sandbox_types::{SandboxError, SessionId, SessionState, SnapshotId};
+use sandbox_types::{CheckpointPolicy, SandboxError, SessionId, SessionState, SnapshotId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -64,6 +64,38 @@ pub struct SavedSession {
     /// The session's trace in the ADR 0007 format.
     pub trace: String,
     pub trace_complete: bool,
+    /// When the session checkpoints. Older state has none, so it takes the default.
+    #[serde(default)]
+    pub checkpoint_policy: CheckpointPolicy,
+    #[serde(default = "default_checkpoint_retain")]
+    pub checkpoint_retain: u32,
+    /// The pinned checkpoint roots, oldest first (IMAGE.md §4.5).
+    #[serde(default)]
+    pub roots: Vec<CheckpointRoot>,
+    /// Outputs of runs that did not fit in the trace.
+    #[serde(default)]
+    pub spilled: Vec<SpilledRun>,
+}
+
+fn default_checkpoint_retain() -> u32 {
+    sandbox_types::session::DEFAULT_CHECKPOINT_RETAIN
+}
+
+/// The outputs of a run that did not fit in the trace. They are kept as blobs, so the
+/// full stream stays readable at `trace/exec/<seq>.out` and `.err` (IMAGE.md §4.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpilledRun {
+    pub seq: u64,
+    pub stdout: ContentHash,
+    pub stderr: ContentHash,
+    pub bytes: u64,
+}
+
+/// A pinned checkpoint: a committed root and its logical size in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckpointRoot {
+    pub root: ContentHash,
+    pub bytes: u64,
 }
 
 fn root_dir() -> String {
@@ -639,6 +671,10 @@ mod tests {
             limits: Default::default(),
             trace: String::new(),
             trace_complete: true,
+            checkpoint_policy: Default::default(),
+            checkpoint_retain: 50,
+            roots: Vec::new(),
+            spilled: Vec::new(),
         };
         let saved = Saved {
             version: VERSION,
@@ -686,6 +722,10 @@ mod tests {
             limits: Default::default(),
             trace: String::new(),
             trace_complete: true,
+            checkpoint_policy: Default::default(),
+            checkpoint_retain: 50,
+            roots: Vec::new(),
+            spilled: Vec::new(),
         }
     }
 

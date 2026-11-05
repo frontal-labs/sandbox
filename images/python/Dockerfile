@@ -17,7 +17,7 @@ RUN apt-get update && \
   python-is-python3 && \
   rm -f /usr/lib/python3*/EXTERNALLY-MANAGED && \
   rm -rf /var/lib/apt/lists/* && \
-  pip install uv && \
+  pip install --only-binary :all: uv==0.13.6 && \
   rm -rf /root/.cache/pip
 
 RUN chown -R ubuntu:ubuntu /vercel

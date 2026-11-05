@@ -15,11 +15,11 @@ async function main(): Promise<void> {
 
   // Session configuration for the parent session
   const sessionConfig: SessionConfig = {
-    tenant_id: "fork-parallel",
-    tier_preference: "auto",
+    tenantId: "fork-parallel",
+    tierPreference: "auto",
     cwd: "/work",
     limits: {},
-    network: { default_deny: true, rules: [] },
+    network: { defaultDeny: true, rules: [] },
     env: {},
     labels: {},
   }

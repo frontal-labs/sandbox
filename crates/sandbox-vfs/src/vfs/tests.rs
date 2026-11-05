@@ -591,3 +591,59 @@ async fn closed_handle_is_rejected_and_handles_do_not_leak() {
     ));
     assert!(vfs.handles.read().is_empty());
 }
+
+/// A tree with `data` written at `path`, committed, and its root.
+async fn committed_tree(store: Arc<MemStore>, path: &str, data: &[u8]) -> ContentHash {
+    let writer = Vfs::new(ContentHash::nil(), store);
+    write_file(&writer, path, data).await;
+    writer.checkpoint().await.unwrap()
+}
+
+#[tokio::test]
+async fn a_host_file_within_the_cap_is_exempt_from_the_total() {
+    let store = Arc::new(MemStore::new());
+    let root = committed_tree(store.clone(), "/env.json", &[b'{'; 500]).await;
+    let quotas = Quotas {
+        total_bytes: 100,
+        ..Quotas::default()
+    };
+    let vfs = Vfs::new(root, store)
+        .with_quotas(quotas)
+        .with_exempt_files(&["/env.json"]);
+    write_file(&vfs, "/data.txt", &[b'x'; 90]).await;
+}
+
+#[tokio::test]
+async fn a_host_file_larger_than_the_cap_counts_past_it() {
+    // Legacy state: an env.json written before the file was protected. Only the cap
+    // is exempt, so the rest counts, and the total limit holds.
+    let store = Arc::new(MemStore::new());
+    let big = vec![b'{'; (SYSTEM_FILE_MAX_BYTES + 10_000) as usize];
+    let root = committed_tree(store.clone(), "/env.json", &big).await;
+    let quotas = Quotas {
+        total_bytes: 1000,
+        ..Quotas::default()
+    };
+    let vfs = Vfs::new(root, store)
+        .with_quotas(quotas)
+        .with_exempt_files(&["/env.json"]);
+    let h = vfs.open(Path::new("/data.txt"), rw()).await.unwrap();
+    let err = vfs.write(&h, 0, &[b'x'; 2000]).await.unwrap_err();
+    assert!(matches!(err, VfsError::QuotaExceeded(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn write_system_file_refuses_more_than_the_cap() {
+    let store = Arc::new(MemStore::new());
+    let root = committed_tree(store.clone(), "/env.json", b"{}").await;
+    let vfs = Vfs::new(root, store).with_exempt_files(&["/env.json"]);
+    let too_big = vec![b'x'; (SYSTEM_FILE_MAX_BYTES + 1) as usize];
+    let err = vfs
+        .write_system_file("/env.json", &too_big)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, VfsError::QuotaExceeded(_)), "{err:?}");
+    vfs.write_system_file("/env.json", b"{\"ok\":true}")
+        .await
+        .unwrap();
+}

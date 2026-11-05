@@ -16,11 +16,11 @@ async function main(): Promise<void> {
   // Session configuration with all fields explicitly provided
   // (Zod defaults are runtime-only, so we provide all fields for type safety)
   const sessionConfig: SessionConfig = {
-    tenant_id: "sandbox-basics-example",
-    tier_preference: "auto",
+    tenantId: "sandbox-basics-example",
+    tierPreference: "auto",
     cwd: "/work",
     limits: {},
-    network: { default_deny: true, rules: [] },
+    network: { defaultDeny: true, rules: [] },
     env: {},
     labels: {},
   }
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   if (isSandboxError(infoResult)) {
     throw infoResult
   }
-  console.log("Exit code:", infoResult.exit_code)
+  console.log("Exit code:", infoResult.exitCode)
   console.log("Stdout:", new TextDecoder().decode(infoResult.stdout))
 
   // Write a file to the sandbox filesystem

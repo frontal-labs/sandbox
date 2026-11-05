@@ -70,6 +70,9 @@ What is the change that we're proposing and/or doing?
 | [0026](0026-package-layers-and-lockfile.md) | Package layers and lockfile | Proposed | 2026-10-25 |
 | [0027](0027-guest-protocol-v1.md) | Guest protocol v1 | Proposed | 2026-10-25 |
 
+| [0026](0026-package-layers-and-lockfile.md) | Package layers and lockfile | Accepted | 2026-10-25 |
+| [0027](0027-guest-protocol-v1.md) | Guest protocol v1 | Accepted | 2026-10-25 |
+
 Add rows here as `NNNN-title.md` files are created.
 
 ## Process

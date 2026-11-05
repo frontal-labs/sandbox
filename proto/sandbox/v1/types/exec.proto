@@ -10,6 +10,7 @@ message ExecRequest {
   optional bytes stdin = 4;
   optional uint64 timeout_ms = 5;
   bool stream = 6;
+  optional uint64 output_limit = 7;
 }
 
 // Mirrors sandbox_types::ExecResult.

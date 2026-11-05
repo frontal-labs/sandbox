@@ -11,11 +11,11 @@ async function main(): Promise<void> {
 
   // Session configuration
   const sessionConfig: SessionConfig = {
-    tenant_id: "install-packages",
-    tier_preference: "auto",
+    tenantId: "install-packages",
+    tierPreference: "auto",
     cwd: "/work",
     limits: {},
-    network: { default_deny: true, rules: [] },
+    network: { defaultDeny: true, rules: [] },
     env: {},
     labels: {},
   }

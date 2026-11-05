@@ -9,8 +9,8 @@ use std::path::Path;
 /// Every builtin name. `type` reports these, so keep it in step with `builtin`.
 const BUILTINS: &[&str] = &[
     "true", "false", "echo", "printf", "read", "pwd", "cd", "cat", "ls", "mkdir", "rm", "mv", "cp",
-    "touch", "head", "tail", "wc", "grep", "node", "wasm", "tools", ":", "test", "[", "break",
-    "continue", "return", "exit", "export", "unset", "type",
+    "touch", "head", "tail", "wc", "grep", "node", "wasm", "tools", "sandbox", "sh", ":", "test",
+    "[", "break", "continue", "return", "exit", "export", "unset", "type",
 ];
 
 /// Whether `name` is a builtin.
@@ -138,6 +138,8 @@ impl Shell {
             "node" => self.node(args, stdin).await,
             "wasm" => self.wasm(args, stdin).await,
             "tools" => self.tools().await,
+            "sandbox" => self.sandbox(args).await,
+            "sh" => self.sh_c(args, stdin).await,
             ":" => ok(Vec::new()),
             "test" => self.test(args).await,
             "[" => match args.split_last() {
@@ -393,6 +395,34 @@ impl Shell {
         match self.chdir(target).await {
             Ok(()) => ok(Vec::new()),
             Err(e) => failure(format!("cd: {}", e.message)),
+        }
+    }
+
+    /// `sandbox info` prints the session's env.json (IMAGE.md §4.5). Checkpoint, undo
+    /// and fork need the server, so the shell refuses them and names the host tool.
+    async fn sandbox(&self, args: &[String]) -> ExecutionResult {
+        match args.first().map(String::as_str) {
+            Some("info") => match self.read_file("/etc/agent/env.json").await {
+                Ok(data) => ok(data),
+                Err(e) => ExecutionResult {
+                    exit_code: 1,
+                    stdout: Vec::new(),
+                    stderr: format!("sandbox: {}\n", describe(&e)).into_bytes(),
+                },
+            },
+            Some(other @ ("checkpoint" | "undo" | "fork")) => ExecutionResult {
+                exit_code: 2,
+                stdout: Vec::new(),
+                stderr: format!(
+                    "sandbox {other}: needs the server; run `frontal-sandbox sandbox {other}` from the host\n"
+                )
+                .into_bytes(),
+            },
+            _ => ExecutionResult {
+                exit_code: 2,
+                stdout: Vec::new(),
+                stderr: b"usage: sandbox info | checkpoint | undo | fork\n".to_vec(),
+            },
         }
     }
 

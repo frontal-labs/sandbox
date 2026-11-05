@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Client } from "../src/client/index.js"
 import { isSandboxError } from "../src/errors/index.js"
-import { ExecResultSchema, SessionStateSchema } from "../src/types/index.js"
+import { wireResponseSchemas } from "../src/types/index.js"
 
 // These tests check the wire format against the server's JSON shapes, using a
 // stubbed fetch. The integration test at the bottom runs against a live server.
@@ -15,7 +15,7 @@ afterEach(() => {
 
 describe("wire format", () => {
   it("parses a session state with snake_case keys and RFC 3339 timestamps", () => {
-    const parsed = SessionStateSchema.parse({
+    const parsed = wireResponseSchemas.SessionState.parse({
       id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
       tenant_id: "00000000000000000000000000",
       tier: "isolate",
@@ -25,11 +25,11 @@ describe("wire format", () => {
       updated_at: "2026-10-15T12:00:00.000Z",
       labels: {},
     })
-    expect(parsed.tenant_id).toBe("00000000000000000000000000")
+    expect(parsed.tenantId).toBe("00000000000000000000000000")
   })
 
   it("turns the server's byte arrays into Uint8Array", () => {
-    const parsed = ExecResultSchema.parse({ exit_code: 0, stdout: [104, 105], stderr: [], cpu_ms: 0, wall_ms: 1 })
+    const parsed = wireResponseSchemas.ExecResult.parse({ exit_code: 0, stdout: [104, 105], stderr: [], cpu_ms: 0, wall_ms: 1 })
     expect(parsed.stdout).toBeInstanceOf(Uint8Array)
     expect(new TextDecoder().decode(parsed.stdout)).toBe("hi")
   })
@@ -40,10 +40,10 @@ describe("wire format", () => {
     const client = new Client({ baseUrl: "http://server.test", apiKey: "k" })
 
     const result = await client.createSession({
-      tenant_id: "00000000000000000000000000",
-      tier_preference: "isolate",
+      tenantId: "00000000000000000000000000",
+      tierPreference: "isolate",
       limits: {},
-      network: { default_deny: true, rules: [] },
+      network: { defaultDeny: true, rules: [] },
       env: {},
       cwd: "/work",
       labels: {},
@@ -93,7 +93,6 @@ describe("wire format", () => {
     const fetchMock = vi.fn()
     vi.stubGlobal("fetch", fetchMock)
     const client = new Client({ baseUrl: "http://server.test" })
-
     const chunks = []
     for await (const chunk of client.execStream("01ARZ3NDEKTSV4RRFFQ69G5FAV", { argv: ["echo"], env: {}, stream: true })) {
       chunks.push(chunk)
@@ -112,10 +111,10 @@ describe.skipIf(!live)("live server", () => {
   it("creates a session, runs a command, and destroys it", async () => {
     const client = Client.fromEnv()
     const id = await client.createSession({
-      tenant_id: "00000000000000000000000000",
-      tier_preference: "isolate",
+      tenantId: "00000000000000000000000000",
+      tierPreference: "isolate",
       limits: {},
-      network: { default_deny: true, rules: [] },
+      network: { defaultDeny: true, rules: [] },
       env: {},
       cwd: "/work",
       labels: {},
@@ -124,7 +123,7 @@ describe.skipIf(!live)("live server", () => {
 
     const out = await client.exec(id, { argv: ["echo", "hello"], env: {}, stream: false })
     if (isSandboxError(out)) throw out
-    expect(out.exit_code).toBe(0)
+    expect(out.exitCode).toBe(0)
     expect(new TextDecoder().decode(out.stdout).trim()).toBe("hello")
 
     const destroyed = await client.destroySession(id)
@@ -134,10 +133,10 @@ describe.skipIf(!live)("live server", () => {
   it("sleeps a session, wakes on demand, and resumes work", async () => {
     const client = Client.fromEnv()
     const id = await client.createSession({
-      tenant_id: "00000000000000000000000000",
-      tier_preference: "isolate",
+      tenantId: "00000000000000000000000000",
+      tierPreference: "isolate",
       limits: {},
-      network: { default_deny: true, rules: [] },
+      network: { defaultDeny: true, rules: [] },
       env: {},
       cwd: "/work",
       labels: {},
