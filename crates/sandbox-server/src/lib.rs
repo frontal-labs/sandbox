@@ -13,8 +13,8 @@ pub mod pg_store;
 
 pub use api::{
     create_router, create_router_with_options, create_router_with_python, create_router_with_state,
-    create_router_with_telemetry, create_router_with_vm, open_durable, open_durable_with_state,
-    open_durable_with_vm, AppState, ServerOptions, VmConfig,
+    create_router_with_telemetry, create_router_with_vm, open_durable, open_durable_with_options,
+    open_durable_with_state, open_durable_with_vm, AppState, ServerOptions, VmConfig,
 };
 #[cfg(feature = "clustered")]
 pub use api::{open_clustered_with_state, open_clustered_with_vm};

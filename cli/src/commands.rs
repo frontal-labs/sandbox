@@ -309,11 +309,6 @@ impl Cli {
                 let otel = otel_endpoint
                     .clone()
                     .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok());
-                if data_dir.is_some() && (python.is_some() || otel.is_some()) {
-                    return Err(SandboxError::invalid_argument(
-                        "--python-artifacts and span export are not yet combined with --data-dir",
-                    ));
-                }
                 let telemetry = otel
                     .as_deref()
                     .map(sandbox_server::otel::SpanExporter::start);
@@ -589,9 +584,15 @@ fn serve(
     let rt = runtime()?;
     let (app, state, new_key) = match (data_dir, database_url) {
         (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir, vm)?,
-        (Some(dir), None) => {
-            rt.block_on(sandbox_server::open_durable_with_vm(scheduler, dir, vm))?
-        }
+        (Some(dir), None) => rt.block_on(sandbox_server::open_durable_with_options(
+            scheduler,
+            dir,
+            sandbox_server::ServerOptions {
+                vm,
+                python,
+                telemetry,
+            },
+        ))?,
         (None, _) => {
             let auth = Arc::new(sandbox_server::auth::AuthManager::new());
             let key = auth.create_key();

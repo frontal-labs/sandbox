@@ -657,12 +657,37 @@ pub async fn open_durable_with_vm(
     dir: &std::path::Path,
     vm: Option<VmConfig>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
+    open_durable_with_options(
+        scheduler,
+        dir,
+        ServerOptions {
+            vm,
+            ..ServerOptions::default()
+        },
+    )
+    .await
+}
+
+/// Like [`open_durable_with_state`], with the given options. Span export is not yet wired into
+/// the durable server, so `telemetry` is refused rather than ignored.
+pub async fn open_durable_with_options(
+    scheduler: Arc<Scheduler>,
+    dir: &std::path::Path,
+    options: ServerOptions,
+) -> Result<(Router, AppState, Option<String>), SandboxError> {
+    if options.telemetry.is_some() {
+        return Err(SandboxError::new(
+            ErrorCode::Unsupported,
+            "span export is not yet wired into the durable server",
+        ));
+    }
     let (store, saved) = crate::persist::Store::open(dir)?;
     attach_store(
         scheduler,
         crate::persist::Persistence::Files(store),
         saved,
-        vm.map(Arc::new),
+        options.vm.map(Arc::new),
+        options.python.map(Arc::new),
     )
     .await
 }
@@ -696,6 +721,7 @@ pub async fn open_clustered_with_vm(
         crate::persist::Persistence::Clustered(store),
         saved,
         vm.map(Arc::new),
+        None,
     )
     .await
 }
@@ -707,6 +733,7 @@ async fn attach_store(
     store: crate::persist::Persistence,
     saved: crate::persist::Saved,
     vm: Option<Arc<VmConfig>>,
+    python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
@@ -729,7 +756,7 @@ async fn attach_store(
         usage: UsageTable::default(),
         vm_pool: pool_for(&vm),
         vm,
-        python: None,
+        python,
         otel: None,
         store: Some(Arc::new(store)),
     };

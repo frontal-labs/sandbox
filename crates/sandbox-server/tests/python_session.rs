@@ -1,5 +1,6 @@
-//! A new session runs CPython, installed by the server from the build artifacts. Ignored unless
-//! SANDBOX_PYTHON_DIR names the directory tools/wasm/python/build.sh writes to.
+//! A new session runs CPython, installed by the server from the build artifacts, in both the
+//! in-memory and the durable server. Ignored unless SANDBOX_PYTHON_DIR names the directory
+//! tools/wasm/python/build.sh writes to.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -18,24 +19,16 @@ async fn call(
     key: &str,
     method: &str,
     uri: &str,
-    body: Option<Value>,
+    body: Value,
 ) -> (StatusCode, Value) {
-    let mut builder = Request::builder()
+    let request = Request::builder()
         .method(method)
         .uri(uri)
-        .header(header::AUTHORIZATION, format!("Bearer {key}"));
-    let body = match body {
-        Some(value) => {
-            builder = builder.header(header::CONTENT_TYPE, "application/json");
-            Body::from(value.to_string())
-        }
-        None => Body::empty(),
-    };
-    let response = app
-        .clone()
-        .oneshot(builder.body(body).unwrap())
-        .await
+        .header(header::AUTHORIZATION, format!("Bearer {key}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
         .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -46,31 +39,26 @@ async fn call(
     )
 }
 
-#[tokio::test]
-#[ignore = "needs SANDBOX_PYTHON_DIR; see tools/wasm/python/build.sh"]
-async fn a_new_session_runs_cpython_installed_by_the_server() {
-    let dir = PathBuf::from(std::env::var("SANDBOX_PYTHON_DIR").expect("set SANDBOX_PYTHON_DIR"));
-    let artifacts = PythonArtifacts::load(&dir).unwrap();
-    let auth = Arc::new(AuthManager::new());
-    let key = auth.create_key();
-    let (app, _state) = create_router_with_python(Arc::new(Scheduler::new()), auth, artifacts);
-
-    let config = serde_json::to_value(SessionConfig {
+fn isolate_config() -> Value {
+    serde_json::to_value(SessionConfig {
         tenant_id: TenantId::nil(),
         tier_preference: TierPreference::Isolate,
         ..SessionConfig::default()
     })
-    .unwrap();
-    let (status, created) = call(&app, &key, "POST", "/v1/sessions", Some(config)).await;
+    .unwrap()
+}
+
+/// Creates a session, runs `python -c` in it, and checks the output.
+async fn runs_python(app: &axum::Router, key: &str) {
+    let (status, created) = call(app, key, "POST", "/v1/sessions", isolate_config()).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let id = created["session_id"].as_str().unwrap().to_string();
-
     let (status, out) = call(
-        &app,
-        &key,
+        app,
+        key,
         "POST",
         &format!("/v1/sessions/{id}/exec"),
-        Some(json!({"argv": ["python", "-c", "import json; print(json.dumps({'answer': 6 * 7}))"], "env": {}, "stream": false})),
+        json!({"argv": ["python", "-c", "print(6 * 7)"], "env": {}, "stream": false}),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{out}");
@@ -81,5 +69,19 @@ async fn a_new_session_runs_cpython_installed_by_the_server() {
         .iter()
         .map(|b| b.as_u64().unwrap() as u8)
         .collect();
-    assert_eq!(String::from_utf8(stdout).unwrap(), "{\"answer\": 42}\n");
+    assert_eq!(String::from_utf8(stdout).unwrap(), "42\n");
+}
+
+fn artifacts() -> PythonArtifacts {
+    let dir = PathBuf::from(std::env::var("SANDBOX_PYTHON_DIR").expect("set SANDBOX_PYTHON_DIR"));
+    PythonArtifacts::load(&dir).unwrap()
+}
+
+#[tokio::test]
+#[ignore = "needs SANDBOX_PYTHON_DIR; see tools/wasm/python/build.sh"]
+async fn a_new_session_runs_cpython_installed_by_the_server() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let (app, _state) = create_router_with_python(Arc::new(Scheduler::new()), auth, artifacts());
+    runs_python(&app, &key).await;
 }

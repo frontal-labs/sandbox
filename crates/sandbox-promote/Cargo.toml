@@ -27,6 +27,7 @@ tonic = { workspace = true }
 default = []
 
 [dev-dependencies]
+sandbox-wasm = { path = "../sandbox-wasm" }
 sandbox-cas = { path = "../sandbox-cas" }
 sandbox-proto = { path = "../sandbox-proto" }
 sandbox-vmm = { path = "../sandbox-vmm" }

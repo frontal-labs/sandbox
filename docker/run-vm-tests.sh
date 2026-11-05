@@ -20,6 +20,7 @@ fi
 
 exec docker run --rm --user 0:0 $kvm \
   -e SANDBOX_VM_ACCEL="${SANDBOX_VM_ACCEL:-tcg}" \
+  -e SANDBOX_PYTHON_DIR=/src/tools/wasm/python/out \
   -v "$ROOT:/src" \
   -v frontal-sandbox-cargo-registry:/usr/local/cargo/registry \
   -v frontal-sandbox-linux-target:/cache/target \
@@ -36,5 +37,6 @@ exec docker run --rm --user 0:0 $kvm \
     cargo test -p sandbox-server --test vm_fallback -- --ignored --nocapture "$@"
     cargo test -p sandbox-promote --test real_programs -- --ignored --nocapture "$@"
     cargo test -p sandbox-vmm --test warm_pool -- --ignored --nocapture "$@"
+    cargo test -p sandbox-promote --test python_in_guest -- --ignored --nocapture "$@"
     cargo test -p sandbox-promote --test timings -- --ignored --nocapture "$@"
   ' sh "$@"
