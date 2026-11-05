@@ -46,10 +46,10 @@ measured in this pass. Otherwise it says "not measured".
 | Item | Status | Evidence / gap |
 | --- | --- | --- |
 | Clustered scheduler with Postgres | partial | `ClusterScheduler` and a Postgres store exist. Not tested against a live Postgres here. |
-| Object-store CAS | not started | Only the disk and tiered stores exist. |
+| Object-store CAS | done for one durable node | `serve --object-store-bucket` keeps every blob in an S3 bucket behind the disk store (ADR 0035). Tested against adobe/s3mock in Docker (`docker/object-store-test.sh`), and a smoke run read a file back from the bucket after its local blobs were deleted. MinIO was not pullable here, so it is untested. Not wired into the clustered server. |
 | Garbage collection | done | Mark and sweep, ADR 0013. |
-| Multi-tenant quotas | partial | Per-session limits are enforced (ADR 0014). Tenant-level quotas are not built. |
-| Billing export | not started | Usage events to a durable queue are not built. |
+| Multi-tenant quotas | partial | Per-session limits are enforced (ADR 0014). Counts are capped per key (64 sessions, 32 snapshots), per tenant (256 sessions, tested), and for the server (4096 sessions). Checkpoint bytes are capped per key. Tenant byte and CPU quotas are not built. |
+| Billing export | partial | `GET /v1/usage/export` returns each key's counters as NDJSON, with the server start time. On a durable server each snapshot is kept in `usage.jsonl`. Tested in memory and durably. Not built: a durable event queue, and memory-time or CPU-time metering. |
 | Dashboards and runbooks | not started | No runbooks in the repository. |
 | Metrics and tracing | not started | No Prometheus or OpenTelemetry code. |
 | Chaos suite | not started | No code. |
@@ -66,7 +66,7 @@ measured in this pass. Otherwise it says "not measured".
    or chaos result means much, and both are standard crates.
 3. **Postgres tests** against a Postgres container, to move the clustered scheduler from partial
    to done.
-4. **Object-store CAS** against an S3-compatible container (MinIO) in Docker.
+4. **Object-store CAS** is wired and tested against adobe/s3mock. Run it against MinIO when its images can be pulled.
 5. **Chaos suite** for the cluster paths, once 3 and 4 are tested.
 6. **Runbooks and SLO measurement**, after the metrics exist.
 
