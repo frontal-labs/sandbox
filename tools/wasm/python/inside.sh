@@ -22,10 +22,12 @@ make -j3 python >/tmp/make-build.log 2>&1
 
 # 2. The WASI build. wasi-env sets the SDK's compiler and archiver for configure.
 cd "$SRC" && mkdir -p builddir/wasi && cd builddir/wasi
+# --without-mimalloc: mimalloc seeds its random cookies from the platform's randomness during
+# initialisation, and Wizer would snapshot that seed, so no two builds would match.
 CONFIG_SITE=../../Tools/wasm/config.site-wasm32-wasi \
   ../../Tools/wasm/wasi-env ../../configure -C \
     --host=wasm32-unknown-wasi --build="$(../../config.guess)" \
-    --with-build-python="$SRC/builddir/build/python" >/tmp/configure-wasi.log 2>&1
+    --with-build-python="$SRC/builddir/build/python" --without-mimalloc >/tmp/configure-wasi.log 2>&1
 make -j3 python.wasm >/tmp/make-wasi.log 2>&1
 "$WASI_SDK_PATH/bin/llvm-strip" -o /out/python.wasm python.wasm
 

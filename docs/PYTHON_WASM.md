@@ -103,11 +103,13 @@ process, and it is the same for both modules):
 All eleven conformance cases match native CPython through the reactor, and through the command
 module.
 
-Reproducibility: `python.wasm` and `python313.zip` rebuild to the same bytes (`SOURCE_DATE_EPOCH`
-is fixed, the zip has fixed times and sorted entries). `python-init.wasm` does not yet. Its
-initialised data differs by about 100 bytes between builds, and the source of that difference is
-not known. So it is not pinned in `pins.toml`. It is checked by the conformance cases, and by the
-`reactor_hash` the install records.
+Reproducibility: `python.wasm` and `python313.zip` rebuild to the same bytes. The three causes
+were `SOURCE_DATE_EPOCH` (clang's `__DATE__` and `__TIME__`), the zip's entry times and order, and
+mimalloc, which seeds its random cookies from the platform's randomness at initialisation, so the
+WASI build is configured `--without-mimalloc`. `python-init.wasm` is nearly reproducible: two
+builds differ in four bytes of initialised data, which look like a clock reading captured during
+start-up. The cause is not confirmed. It is not pinned, and it is checked by the conformance cases
+and by the `reactor_hash` the install records.
 
 ## Still open
 
@@ -118,8 +120,8 @@ not known. So it is not pinned in `pins.toml`. It is checked by the conformance 
    first copy.
 2. **Pin the artifacts.** `pins.toml` pins `python.wasm` and the zip. The reactor is checked by
    its install-time hash, not a committed pin (see above).
-3. **Reactor reproducibility.** `python-init.wasm` differs by about 100 bytes between builds (see
-   above). Finding the source is the next step before it can be pinned.
+3. **Reactor reproducibility.** `python-init.wasm` differs by four bytes between builds (see
+   above). The source is probably a clock reading taken at initialisation.
 4. **Stdlib size.** A subset of the stdlib, without `idlelib`, `tkinter` and `ensurepip`,
    would shrink the zip. The subset needs a list of which modules scripts need.
 5. **Performance.** Measured above for the host path. The first compile of a module is about
