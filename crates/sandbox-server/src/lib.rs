@@ -7,6 +7,7 @@ pub mod idle;
 pub mod middleware;
 pub mod openapi;
 pub mod otel;
+pub mod parked;
 pub mod persist;
 #[cfg(feature = "clustered")]
 pub mod pg_store;

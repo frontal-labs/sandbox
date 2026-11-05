@@ -508,7 +508,7 @@ fn append_line(out: &mut Vec<u8>, record: serde_json::Value) -> Result<(), Sandb
 }
 
 /// Writes `bytes` to `path` atomically: a temporary file, synced, then renamed.
-async fn write_file_atomic(path: PathBuf, bytes: Vec<u8>) -> Result<(), SandboxError> {
+pub(crate) async fn write_file_atomic(path: PathBuf, bytes: Vec<u8>) -> Result<(), SandboxError> {
     // A unique name, created exclusively, so a file planted at a predictable
     // path cannot be followed or overwritten.
     let tmp = path.with_file_name(format!(
@@ -591,7 +591,7 @@ impl Persistence {
     }
 }
 
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir(path: &Path) -> std::io::Result<()> {
     // The mode is applied when the directory is created, so there is no window in
     // which it exists with default permissions. An existing directory is left alone.
     let mut builder = std::fs::DirBuilder::new();

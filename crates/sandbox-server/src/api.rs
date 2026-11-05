@@ -121,6 +121,9 @@ pub struct AppState {
     pub(crate) epoch_ms: u64,
     /// Where usage snapshots are kept, on a durable server. `None` keeps them only in the reply.
     pub(crate) usage_log: Option<std::path::PathBuf>,
+    /// Sleeping sessions parked on disk, on a durable server. `None` keeps a sleeping
+    /// session in the table, as a memory-only or clustered server does.
+    pub(crate) parked: Option<crate::parked::ParkedStore>,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -188,10 +191,11 @@ pub const MAX_SNAPSHOTS_TOTAL: usize = 4096;
 async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<(), ApiError> {
     let id = entry.state.id;
     let mut table = state.sessions.0.write().await;
-    if table.len() >= MAX_SESSIONS_TOTAL {
+    let parked = parked_counts(state);
+    if table.len() + parked.total() >= MAX_SESSIONS_TOTAL {
         return Err(SandboxError::resource_exhausted("the server is at its session limit").into());
     }
-    let held = table.values().filter(|e| e.owner == *owner).count();
+    let held = table.values().filter(|e| e.owner == *owner).count() + parked.sessions_of_key(owner);
     if held >= MAX_SESSIONS_PER_KEY {
         return Err(SandboxError::resource_exhausted(format!(
             "this key already holds {MAX_SESSIONS_PER_KEY} sessions"
@@ -202,7 +206,8 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
     let tenant_held = table
         .values()
         .filter(|e| e.state.tenant_id == tenant)
-        .count();
+        .count()
+        + parked.sessions_of_tenant(tenant);
     if tenant_held >= MAX_SESSIONS_PER_TENANT {
         return Err(SandboxError::resource_exhausted(format!(
             "this tenant already holds {MAX_SESSIONS_PER_TENANT} sessions"
@@ -215,7 +220,227 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
 
 /// Live sessions, keyed by ID, each with the key that owns it.
 #[derive(Clone, Default)]
-pub struct SessionTable(pub(crate) Arc<RwLock<HashMap<SessionId, Entry>>>);
+pub struct SessionTable(
+    pub(crate) Arc<RwLock<HashMap<SessionId, Entry>>>,
+    pub(crate) Arc<std::sync::Mutex<ParkedCounts>>,
+);
+
+/// Sleeping sessions parked on disk, counted per key and per tenant, so the session limits
+/// and the checkpoint budget still see them. The counts are per key and per tenant, not per
+/// session, so a parked session costs the server no memory. They change only under the
+/// session table's lock.
+#[derive(Default)]
+pub(crate) struct ParkedCounts {
+    total: usize,
+    by_key: HashMap<KeyId, ParkedUse>,
+    by_tenant: HashMap<TenantId, usize>,
+}
+
+#[derive(Default, Clone, Copy)]
+struct ParkedUse {
+    sessions: usize,
+    pinned_bytes: u64,
+}
+
+impl ParkedCounts {
+    fn total(&self) -> usize {
+        self.total
+    }
+
+    fn sessions_of_key(&self, owner: &KeyId) -> usize {
+        self.by_key.get(owner).map_or(0, |usage| usage.sessions)
+    }
+
+    fn sessions_of_tenant(&self, tenant: TenantId) -> usize {
+        self.by_tenant.get(&tenant).copied().unwrap_or(0)
+    }
+
+    fn pinned_bytes_of_key(&self, owner: &KeyId) -> u64 {
+        self.by_key.get(owner).map_or(0, |usage| usage.pinned_bytes)
+    }
+
+    fn add(&mut self, owner: &KeyId, tenant: TenantId, pinned_bytes: u64) {
+        self.total += 1;
+        let usage = self.by_key.entry(owner.clone()).or_default();
+        usage.sessions += 1;
+        usage.pinned_bytes += pinned_bytes;
+        *self.by_tenant.entry(tenant).or_default() += 1;
+    }
+
+    fn remove(&mut self, owner: &KeyId, tenant: TenantId, pinned_bytes: u64) {
+        self.total = self.total.saturating_sub(1);
+        let key_empty = match self.by_key.get_mut(owner) {
+            Some(usage) => {
+                usage.sessions = usage.sessions.saturating_sub(1);
+                usage.pinned_bytes = usage.pinned_bytes.saturating_sub(pinned_bytes);
+                usage.sessions == 0
+            }
+            None => false,
+        };
+        if key_empty {
+            self.by_key.remove(owner);
+        }
+        let tenant_empty = match self.by_tenant.get_mut(&tenant) {
+            Some(held) => {
+                *held = held.saturating_sub(1);
+                *held == 0
+            }
+            None => false,
+        };
+        if tenant_empty {
+            self.by_tenant.remove(&tenant);
+        }
+    }
+}
+
+/// The parked counts. They are read and changed under the session table's lock, and the
+/// guard is never held across an await.
+fn parked_counts(state: &AppState) -> std::sync::MutexGuard<'_, ParkedCounts> {
+    state
+        .sessions
+        .1
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The bytes a parked record pins as checkpoints. The checkpoint budget counts them.
+fn pinned_bytes(record: &crate::persist::SavedSession) -> u64 {
+    record.roots.iter().map(|root| root.bytes).sum()
+}
+
+/// The durable record of an entry, with the given checkpoint and state. Environment values
+/// are never written to disk (ADR 0010).
+fn saved_of(
+    entry: &Entry,
+    checkpoint: &Checkpoint,
+    state: &SessionState,
+    sleeping: bool,
+) -> Result<crate::persist::SavedSession, SandboxError> {
+    let trace = Trace {
+        runs: entry.trace.clone(),
+    }
+    .to_jsonl()
+    .map_err(|err| {
+        SandboxError::internal(format!("cannot encode the trace of a session: {err}"))
+    })?;
+    Ok(crate::persist::SavedSession {
+        owner: entry.owner.as_str().to_string(),
+        state: state.clone(),
+        root: checkpoint.root,
+        cwd: checkpoint.cwd.clone(),
+        env: HashMap::new(),
+        sleeping,
+        limits: entry.limits.clone(),
+        trace,
+        trace_complete: entry.trace_complete,
+        checkpoint_policy: entry.checkpoint_policy,
+        checkpoint_retain: entry.checkpoint_retain,
+        roots: entry.roots.clone(),
+        spilled: entry.spilled.clone(),
+    })
+}
+
+/// The table entry for a saved session. `session` is its live session, or `None` while it sleeps.
+fn entry_of(
+    saved: crate::persist::SavedSession,
+    session: Option<Arc<dyn Session>>,
+) -> Result<Entry, SandboxError> {
+    let trace = Trace::parse(&saved.trace)
+        .map_err(|e| SandboxError::internal(format!("a session's saved trace is damaged: {e}")))?;
+    let next_seq = next_seq_after(&trace.runs, &saved.spilled);
+    let spilled_bytes = saved.spilled.iter().map(|s| s.bytes).sum();
+    // Saved state is not trusted to respect the retention bounds, so clamp them.
+    let retain = saved.checkpoint_retain.clamp(1, MAX_CHECKPOINT_RETAIN);
+    let mut roots = saved.roots;
+    let excess = roots.len().saturating_sub(retain as usize);
+    roots.drain(..excess);
+    Ok(Entry {
+        owner: KeyId::from_stored(saved.owner),
+        state: saved.state,
+        session,
+        checkpoint: Some(Checkpoint {
+            root: saved.root,
+            cwd: saved.cwd,
+            env: saved.env,
+        }),
+        trace_bytes: trace_size(&trace.runs),
+        trace: trace.runs,
+        trace_complete: saved.trace_complete,
+        gate: Arc::new(tokio::sync::Mutex::new(())),
+        limits: saved.limits,
+        checkpoint_policy: saved.checkpoint_policy,
+        checkpoint_retain: retain,
+        roots,
+        next_seq,
+        spilled: saved.spilled,
+        spilled_bytes,
+        last_active: Arc::new(std::sync::atomic::AtomicU64::new(now_millis())),
+    })
+}
+
+/// A sleeping session's parked record. A session that is not parked is not found.
+async fn parked_record(
+    state: &AppState,
+    id: SessionId,
+) -> Result<crate::persist::SavedSession, ApiError> {
+    let record = match &state.parked {
+        Some(parked) => parked.get(id).await?,
+        None => None,
+    };
+    record.ok_or_else(|| SandboxError::not_found(format!("session {id} not found")).into())
+}
+
+/// The trace's runs and whether it is complete: from memory while the session is awake,
+/// from its parked record while it sleeps.
+async fn trace_of(state: &AppState, id: SessionId) -> Result<(Vec<RunRecord>, bool), ApiError> {
+    let live = {
+        let table = state.sessions.0.read().await;
+        table
+            .get(&id)
+            .map(|entry| (entry.trace.clone(), entry.trace_complete))
+    };
+    if let Some(found) = live {
+        return Ok(found);
+    }
+    let record = parked_record(state, id).await?;
+    let trace = Trace::parse(&record.trace)
+        .map_err(|e| SandboxError::internal(format!("a session's saved trace is damaged: {e}")))?;
+    Ok((trace.runs, record.trace_complete))
+}
+
+/// The trace's runs and spilled outputs: from memory while the session is awake, from its
+/// parked record while it sleeps.
+async fn trace_outputs_of(
+    state: &AppState,
+    id: SessionId,
+) -> Result<(Vec<RunRecord>, Vec<crate::persist::SpilledRun>), ApiError> {
+    let live = {
+        let table = state.sessions.0.read().await;
+        table
+            .get(&id)
+            .map(|entry| (entry.trace.clone(), entry.spilled.clone()))
+    };
+    if let Some(found) = live {
+        return Ok(found);
+    }
+    let record = parked_record(state, id).await?;
+    let trace = Trace::parse(&record.trace)
+        .map_err(|e| SandboxError::internal(format!("a session's saved trace is damaged: {e}")))?;
+    Ok((trace.runs, record.spilled))
+}
+
+/// The error for a session the table does not hold: asleep when it is parked, missing otherwise.
+async fn absent(state: &AppState, id: SessionId) -> ApiError {
+    let parked = match &state.parked {
+        Some(parked) => parked.get(id).await,
+        None => Ok(None),
+    };
+    match parked {
+        Ok(Some(_)) => asleep().into(),
+        Ok(None) => SandboxError::not_found(format!("session {id} not found")).into(),
+        Err(error) => error.into(),
+    }
+}
 
 pub(crate) struct Entry {
     owner: KeyId,
@@ -454,19 +679,39 @@ struct Owned {
 async fn lookup(state: &AppState, owner: &KeyId, raw: &str) -> Result<Lookup, ApiError> {
     let not_found = || SandboxError::not_found(format!("session {raw} not found"));
     let id: SessionId = raw.parse().map_err(|_| not_found())?;
-    let table = state.sessions.0.read().await;
-    match table.get(&id) {
-        Some(entry) if entry.owner == *owner => {
-            entry.touch();
-            Ok(Lookup {
-                session: entry.session.clone(),
-                state: entry.state.clone(),
-                gate: entry.gate.clone(),
-                limits: entry.limits.clone(),
-            })
+    let live = {
+        let table = state.sessions.0.read().await;
+        match table.get(&id) {
+            Some(entry) if entry.owner == *owner => {
+                entry.touch();
+                Some(Lookup {
+                    session: entry.session.clone(),
+                    state: entry.state.clone(),
+                    gate: entry.gate.clone(),
+                    limits: entry.limits.clone(),
+                })
+            }
+            Some(_) => return Err(not_found().into()),
+            None => None,
         }
-        _ => Err(not_found().into()),
+    };
+    if let Some(found) = live {
+        return Ok(found);
     }
+    // A sleeping session is parked on disk, and its record answers for it.
+    if let Some(parked) = &state.parked {
+        if let Some(record) = parked.get(id).await? {
+            if record.owner == owner.as_str() {
+                return Ok(Lookup {
+                    session: None,
+                    state: record.state,
+                    gate: Arc::new(tokio::sync::Mutex::new(())),
+                    limits: record.limits,
+                });
+            }
+        }
+    }
+    Err(not_found().into())
 }
 
 /// Finds a live session the caller owns. A sleeping session is refused until
@@ -628,6 +873,7 @@ fn router_with_options(
         usage: UsageTable::default(),
         epoch_ms: now_millis(),
         usage_log: None,
+        parked: None,
         store: None,
         vm_pool: pool_for(&vm),
         vm,
@@ -689,6 +935,7 @@ pub async fn open_durable_with_options(
         ));
     }
     let (store, saved) = crate::persist::Store::open(dir)?;
+    let parked = crate::parked::ParkedStore::open(dir)?;
     attach_store(
         scheduler,
         crate::persist::Persistence::Files(store),
@@ -696,6 +943,7 @@ pub async fn open_durable_with_options(
         options.vm.map(Arc::new),
         options.python.map(Arc::new),
         Some(dir.join("usage.jsonl")),
+        Some(parked),
     )
     .await
 }
@@ -731,6 +979,7 @@ pub async fn open_clustered_with_vm(
         vm.map(Arc::new),
         None,
         None,
+        None,
     )
     .await
 }
@@ -744,6 +993,7 @@ async fn attach_store(
     vm: Option<Arc<VmConfig>>,
     python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
     usage_log: Option<std::path::PathBuf>,
+    parked: Option<crate::parked::ParkedStore>,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
@@ -770,6 +1020,7 @@ async fn attach_store(
         otel: None,
         epoch_ms: now_millis(),
         usage_log,
+        parked,
         store: Some(Arc::new(store)),
     };
     restore(&state, saved).await?;
@@ -818,64 +1069,55 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
         });
     let mut table = state.sessions.0.write().await;
     for saved_session in saved.sessions.into_iter().chain(legacy) {
-        let trace = Trace::parse(&saved_session.trace).map_err(|e| {
-            SandboxError::internal(format!("a session's saved trace is damaged: {e}"))
-        })?;
-        let checkpoint = Checkpoint {
-            root: saved_session.root,
-            cwd: saved_session.cwd,
-            env: saved_session.env,
-        };
-        // A live session comes back running from its checkpoint. A sleeping one
-        // waits for a wake.
-        let session: Option<Arc<dyn Session>> = if saved_session.sleeping {
-            None
-        } else {
-            Some(
-                restore_checkpoint_limited(checkpoint.clone(), &saved_session.limits)
-                    .await?
-                    .into(),
-            )
-        };
-        let id = saved_session.state.id;
-        let next_seq = next_seq_after(&trace.runs, &saved_session.spilled);
-        let spilled_bytes = saved_session.spilled.iter().map(|s| s.bytes).sum();
-        let spilled = saved_session.spilled;
-        // Saved state is not trusted to respect the retention bounds, so clamp them.
-        let retain = saved_session
-            .checkpoint_retain
-            .clamp(1, MAX_CHECKPOINT_RETAIN);
-        let mut roots = saved_session.roots;
-        let excess = roots.len().saturating_sub(retain as usize);
-        roots.drain(..excess);
-        table.insert(
-            id,
-            Entry {
-                owner: KeyId::from_stored(saved_session.owner),
-                state: saved_session.state,
-                session,
-                checkpoint: Some(checkpoint),
-                trace_bytes: trace_size(&trace.runs),
-                trace: trace.runs,
-                trace_complete: saved_session.trace_complete,
-                gate: Arc::new(tokio::sync::Mutex::new(())),
-                limits: saved_session.limits,
-                checkpoint_policy: saved_session.checkpoint_policy,
-                checkpoint_retain: retain,
-                roots,
-                next_seq,
-                spilled,
-                spilled_bytes,
-                last_active: Arc::new(std::sync::atomic::AtomicU64::new(now_millis())),
-            },
-        );
+        match &state.parked {
+            Some(parked) if saved_session.sleeping => {
+                // A sleeping session waits on disk. A record already there is newer than the state log.
+                if parked.get(saved_session.state.id).await?.is_none() {
+                    parked.put(saved_session.state.id, &saved_session).await?;
+                }
+            }
+            _ => {
+                let id = saved_session.state.id;
+                // A live session comes back running from its checkpoint. A sleeping one waits for a wake.
+                let session: Option<Arc<dyn Session>> = if saved_session.sleeping {
+                    None
+                } else {
+                    let checkpoint = Checkpoint {
+                        root: saved_session.root,
+                        cwd: saved_session.cwd.clone(),
+                        env: saved_session.env.clone(),
+                    };
+                    Some(
+                        restore_checkpoint_limited(checkpoint, &saved_session.limits)
+                            .await?
+                            .into(),
+                    )
+                };
+                table.insert(id, entry_of(saved_session, session)?);
+            }
+        }
+    }
+    if let Some(parked) = &state.parked {
+        // A session the saved state has awake stands, and its parked record is stale.
+        // Every other parked record is counted against its key and tenant.
+        for id in parked.ids().await? {
+            if table.contains_key(&id) {
+                parked.remove(id).await?;
+            } else if let Some(record) = parked.get(id).await? {
+                parked_counts(state).add(
+                    &KeyId::from_stored(record.owner.clone()),
+                    record.state.tenant_id,
+                    pinned_bytes(&record),
+                );
+            }
+        }
     }
     Ok(())
 }
 
 /// The durable state as it is now.
 async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError> {
-    use crate::persist::{Saved, SavedKey, SavedSession, SavedSnapshot};
+    use crate::persist::{Saved, SavedKey, SavedSnapshot};
     let keys = state
         .auth
         .export_digests()
@@ -901,34 +1143,11 @@ async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError
         let table = state.sessions.0.read().await;
         table
             .values()
+            // An entry without a checkpoint has no state to bring back.
             .filter_map(|e| {
-                // An entry without a checkpoint has no state to bring back.
-                let checkpoint = e.checkpoint.as_ref()?;
-                let saved = Trace {
-                    runs: e.trace.clone(),
-                }
-                .to_jsonl()
-                .map(|trace| SavedSession {
-                    owner: e.owner.as_str().to_string(),
-                    state: e.state.clone(),
-                    root: checkpoint.root,
-                    cwd: checkpoint.cwd.clone(),
-                    // Environment values are often secrets, so they are never written
-                    // to disk. A restored session starts with an empty environment (ADR 0010).
-                    env: HashMap::new(),
-                    sleeping: e.session.is_none(),
-                    limits: e.limits.clone(),
-                    trace,
-                    trace_complete: e.trace_complete,
-                    checkpoint_policy: e.checkpoint_policy,
-                    checkpoint_retain: e.checkpoint_retain,
-                    roots: e.roots.clone(),
-                    spilled: e.spilled.clone(),
-                })
-                .map_err(|err| {
-                    SandboxError::internal(format!("cannot encode the trace of a session: {err}"))
-                });
-                Some(saved)
+                e.checkpoint
+                    .as_ref()
+                    .map(|checkpoint| saved_of(e, checkpoint, &e.state, e.session.is_none()))
             })
             .collect::<Result<Vec<_>, _>>()?
     };
@@ -1055,7 +1274,7 @@ pub async fn get_usage(
 /// The route requires an API key, so the totals are not public.
 pub async fn get_metrics(State(state): State<AppState>) -> impl axum::response::IntoResponse {
     let total = state.usage.total();
-    let sessions = state.sessions.0.read().await.len();
+    let sessions = state.sessions.0.read().await.len() + parked_counts(&state).total();
     let snapshots = state.snapshots.records.read().await.len();
     let counters = [
         (
@@ -1399,7 +1618,22 @@ pub async fn destroy_session(
     let session_id: SessionId = id
         .parse()
         .map_err(|_| SandboxError::not_found(format!("session {id} not found")))?;
-    state.sessions.0.write().await.remove(&session_id);
+    {
+        let mut table = state.sessions.0.write().await;
+        let was_live = table.remove(&session_id).is_some();
+        if let Some(parked) = &state.parked {
+            if let Some(record) = parked.get(session_id).await? {
+                if !was_live {
+                    parked_counts(&state).remove(
+                        &KeyId::from_stored(record.owner.clone()),
+                        record.state.tenant_id,
+                        pinned_bytes(&record),
+                    );
+                }
+                parked.remove(session_id).await?;
+            }
+        }
+    }
     persist(&state).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -2013,13 +2247,7 @@ pub async fn get_trace(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let found = lookup(&state, &owner, &id).await?;
-    let (runs, complete) = {
-        let table = state.sessions.0.read().await;
-        let entry = table
-            .get(&found.state.id)
-            .ok_or_else(|| SandboxError::not_found(format!("session {id} not found")))?;
-        (entry.trace.clone(), entry.trace_complete)
-    };
+    let (runs, complete) = trace_of(&state, found.state.id).await?;
     let body = Trace { runs }
         .to_jsonl()
         .map_err(|e| SandboxError::internal(format!("cannot encode the trace: {e}")))?;
@@ -2119,29 +2347,22 @@ async fn trace_output(
     stream: OutputStream,
 ) -> Result<Response, ApiError> {
     // The trace's copy is preferred. A run that did not fit there keeps its output as a blob.
-    let stored = {
-        let table = state.sessions.0.read().await;
-        let entry = table
-            .get(id)
-            .ok_or_else(|| SandboxError::not_found("session not found"))?;
-        if let Some(run) = entry.trace.iter().find(|run| run.seq == seq) {
-            let sandbox_trace::Outcome::Completed { stdout, stderr, .. } = &run.outcome else {
-                return Err(
-                    SandboxError::not_found(format!("command {seq} did not complete")).into(),
-                );
-            };
-            Ok(match stream {
-                OutputStream::Stdout => stdout.clone(),
-                OutputStream::Stderr => stderr.clone(),
-            })
-        } else if let Some(spill) = entry.spilled.iter().find(|run| run.seq == seq) {
-            Err(match stream {
-                OutputStream::Stdout => spill.stdout,
-                OutputStream::Stderr => spill.stderr,
-            })
-        } else {
-            return Err(SandboxError::not_found(format!("no recorded command {seq}")).into());
-        }
+    let (runs, spilled) = trace_outputs_of(state, *id).await?;
+    let stored = if let Some(run) = runs.iter().find(|run| run.seq == seq) {
+        let sandbox_trace::Outcome::Completed { stdout, stderr, .. } = &run.outcome else {
+            return Err(SandboxError::not_found(format!("command {seq} did not complete")).into());
+        };
+        Ok(match stream {
+            OutputStream::Stdout => stdout.clone(),
+            OutputStream::Stderr => stderr.clone(),
+        })
+    } else if let Some(spill) = spilled.iter().find(|run| run.seq == seq) {
+        Err(match stream {
+            OutputStream::Stdout => spill.stdout,
+            OutputStream::Stderr => spill.stderr,
+        })
+    } else {
+        return Err(SandboxError::not_found(format!("no recorded command {seq}")).into());
     };
     let bytes = match stored {
         Ok(bytes) => bytes,
@@ -2360,39 +2581,77 @@ pub(crate) async fn sleep_locked(
     state: &AppState,
     session_id: SessionId,
 ) -> Result<SnapshotId, ApiError> {
-    let (owner, session, live_state, limits) = {
+    let live = {
         let table = state.sessions.0.read().await;
-        let entry = table
-            .get(&session_id)
-            .ok_or_else(|| SandboxError::not_found(format!("session {session_id} not found")))?;
-        let session = entry.session.clone().ok_or_else(asleep)?;
-        (
-            entry.owner.clone(),
-            session,
-            entry.state.clone(),
-            entry.limits.clone(),
-        )
+        table.get(&session_id).map(|entry| {
+            (
+                entry.owner.clone(),
+                entry.session.clone(),
+                entry.state.clone(),
+                entry.limits.clone(),
+            )
+        })
     };
+    let Some((owner, session, live_state, limits)) = live else {
+        return Err(absent(state, session_id).await);
+    };
+    let session = session.ok_or_else(asleep)?;
 
     let _admit = admit_snapshot(state, &owner).await?;
     let checkpoint = session.checkpoint().await?;
     let root = checkpoint.root;
     let snapshot_id = store_snapshot(state, owner.clone(), &live_state, root, limits).await;
+    // Dropping the live session releases its VFS once no other handle to it remains.
+    drop(session);
 
-    {
-        let mut table = state.sessions.0.write().await;
-        if let Some(entry) = table.get_mut(&session_id) {
-            // Dropping the live session here releases its VFS once no other handle
-            // to it remains.
-            entry.session = None;
-            entry.checkpoint = Some(checkpoint);
-            entry.state.status = SessionStatus::Sleeping;
-            entry.state.updated_at = SystemTime::now();
+    let mut sleeping = live_state;
+    sleeping.status = SessionStatus::Sleeping;
+    sleeping.updated_at = SystemTime::now();
+    match &state.parked {
+        Some(parked) => park(state, parked, session_id, &checkpoint, &sleeping).await?,
+        None => {
+            let mut table = state.sessions.0.write().await;
+            if let Some(entry) = table.get_mut(&session_id) {
+                entry.session = None;
+                entry.checkpoint = Some(checkpoint);
+                entry.state = sleeping;
+            }
         }
     }
     state.usage.add(&owner, |c| c.sessions_slept += 1);
     persist(state).await?;
     Ok(snapshot_id)
+}
+
+/// Parks a sleeping session on disk. Its record is written first, and only then does its
+/// entry leave the table, so an interruption leaves the session awake, never lost.
+async fn park(
+    state: &AppState,
+    parked: &crate::parked::ParkedStore,
+    id: SessionId,
+    checkpoint: &Checkpoint,
+    sleeping: &SessionState,
+) -> Result<(), ApiError> {
+    let record = {
+        let table = state.sessions.0.read().await;
+        let entry = table
+            .get(&id)
+            .ok_or_else(|| SandboxError::not_found(format!("session {id} not found")))?;
+        saved_of(entry, checkpoint, sleeping, true)?
+    };
+    parked.put(id, &record).await?;
+    let mut table = state.sessions.0.write().await;
+    match table.remove(&id) {
+        Some(entry) => {
+            parked_counts(state).add(&entry.owner, entry.state.tenant_id, pinned_bytes(&record));
+            Ok(())
+        }
+        None => {
+            drop(table);
+            parked.remove(id).await?;
+            Err(SandboxError::not_found(format!("session {id} not found")).into())
+        }
+    }
 }
 
 /// Wake a sleeping session. The filesystem is restored from the root that
@@ -2431,6 +2690,11 @@ pub(crate) async fn wake_entry(
     session_id: SessionId,
     explicit_owner: Option<&KeyId>,
 ) -> Result<SessionState, ApiError> {
+    if let Some(parked) = &state.parked {
+        if !state.sessions.0.read().await.contains_key(&session_id) {
+            return wake_parked(state, parked, session_id, explicit_owner).await;
+        }
+    }
     let mut table = state.sessions.0.write().await;
     let entry = match table.get_mut(&session_id) {
         Some(entry) if explicit_owner.is_none_or(|owner| entry.owner == *owner) => entry,
@@ -2462,6 +2726,53 @@ pub(crate) async fn wake_entry(
     // The VFS keeps /etc/agent/env.json across sleep, so a wake does not rewrite it.
     state.usage.add(&owner, |c| c.sessions_woken += 1);
     persist(state).await?;
+    Ok(woken)
+}
+
+/// Wakes a parked session: its record is restored into the table, and the record is removed
+/// only once the state log holds the session awake. An interruption before that leaves the
+/// session parked, and one after it leaves the record stale, which startup discards.
+async fn wake_parked(
+    state: &AppState,
+    parked: &crate::parked::ParkedStore,
+    session_id: SessionId,
+    explicit_owner: Option<&KeyId>,
+) -> Result<SessionState, ApiError> {
+    let record = match parked.get(session_id).await? {
+        Some(record) if explicit_owner.is_none_or(|owner| record.owner == owner.as_str()) => record,
+        _ => return Err(SandboxError::not_found(format!("session {session_id} not found")).into()),
+    };
+    let pinned = pinned_bytes(&record);
+    let checkpoint = Checkpoint {
+        root: record.root,
+        cwd: record.cwd.clone(),
+        env: HashMap::new(),
+    };
+    let session: Arc<dyn Session> = restore_checkpoint_limited(checkpoint, &record.limits)
+        .await?
+        .into();
+    let mut entry = entry_of(record, Some(session))?;
+    entry.state.status = SessionStatus::Running;
+    entry.state.updated_at = SystemTime::now();
+    let owner = entry.owner.clone();
+    let tenant = entry.state.tenant_id;
+    let woken = entry.state.clone();
+    {
+        let mut table = state.sessions.0.write().await;
+        if let Some(current) = table.get(&session_id) {
+            // Another request woke it first.
+            return if explicit_owner.is_some() {
+                Err(SandboxError::new(ErrorCode::InvalidState, "the session is not asleep").into())
+            } else {
+                Ok(current.state.clone())
+            };
+        }
+        table.insert(session_id, entry);
+        parked_counts(state).remove(&owner, tenant, pinned);
+    }
+    persist(state).await?;
+    parked.remove(session_id).await?;
+    state.usage.add(&owner, |c| c.sessions_woken += 1);
     Ok(woken)
 }
 
@@ -2604,7 +2915,9 @@ async fn checkpoint_now(
         .map(|entry| &mut entry.roots)
         .collect();
     let budget = checkpoint_budget_per_key();
-    if !evict_to_budget(&mut lists, budget) {
+    // Parked checkpoints of this key take their share of the budget, and are not evicted here.
+    let parked_bytes = parked_counts(state).pinned_bytes_of_key(owner);
+    if !evict_to_budget(&mut lists, budget.saturating_sub(parked_bytes)) {
         drop(lists);
         if let Some(entry) = table.get_mut(&id) {
             entry.roots = before;
@@ -2659,13 +2972,34 @@ async fn checkpoint_after_exec(
 }
 
 async fn checkpoint_usage_of(state: &AppState, id: SessionId) -> CheckpointUsage {
-    let table = state.sessions.0.read().await;
-    match table.get(&id) {
-        Some(entry) => CheckpointUsage {
+    let live = {
+        let table = state.sessions.0.read().await;
+        table.get(&id).map(|entry| CheckpointUsage {
             policy: entry.checkpoint_policy,
             count: entry.roots.len() as u32,
             retain: entry.checkpoint_retain,
             bytes: entry.roots.iter().map(|root| root.bytes).sum(),
+        })
+    };
+    if let Some(usage) = live {
+        return usage;
+    }
+    let parked = match &state.parked {
+        Some(parked) => match parked.get(id).await {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::warn!(session = %id, ?error, "cannot read a sleeping session's checkpoints");
+                None
+            }
+        },
+        None => None,
+    };
+    match parked {
+        Some(record) => CheckpointUsage {
+            policy: record.checkpoint_policy,
+            count: record.roots.len() as u32,
+            retain: record.checkpoint_retain,
+            bytes: pinned_bytes(&record),
         },
         None => CheckpointUsage {
             policy: CheckpointPolicy::default(),

@@ -117,6 +117,21 @@ async fn sweep_once(
                 .flat_map(|run| [run.stdout, run.stderr]),
         );
     }
+    // A parked session is not in the table, but its record still pins roots and blobs.
+    if let Some(parked) = &state.parked {
+        for id in parked.ids().await? {
+            if let Some(record) = parked.get(id).await? {
+                roots.push(record.root);
+                roots.extend(record.roots.iter().map(|pinned| pinned.root));
+                raw_blobs.extend(
+                    record
+                        .spilled
+                        .iter()
+                        .flat_map(|run| [run.stdout, run.stderr]),
+                );
+            }
+        }
+    }
     {
         let records = state.snapshots.records.read().await;
         roots.extend(records.values().map(|record| record.root));
