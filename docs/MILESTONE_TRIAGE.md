@@ -35,7 +35,7 @@ measured in this pass. Otherwise it says "not measured".
 | `export_ext4` | not started | No code. |
 | `sandbox-promote` | not started | The plan says promotion logic is not built. |
 | VM warm pool | done (emulated) | `VmPool` boots guests ahead of promotions, and the server takes from it. Measured under QEMU TCG: a warm handout takes under 1 ms, against a cold boot of 19.1 s. |
-| Firecracker snapshots | blocked | Needs KVM. This host and the Docker VM have none. |
+| Firecracker snapshots | not built | Firecracker is not used: Tier 2 runs on QEMU, with KVM on the hosted runner (`vm-kvm` workflow, passing on `aed112c`) and software emulation elsewhere. Memory snapshots are not working (see VM resume). |
 | **Accept:** ffmpeg and headless Chromium via auto-promotion | not started | Depends on promotion and images. |
 | **Accept:** promotion under 400 ms | measured, emulated | Promoting a 64 KiB file takes 128 ms under QEMU TCG (`crates/sandbox-promote/tests/timings.rs`). That size is not the ffmpeg-scale promotion the criterion means, and TCG is not the target hardware. |
 | **Accept:** VM resume under 150 ms | not met | Resume from a memory snapshot is not working. QEMU's migration stream reaches its full size, but the host never sees the end of the stream, so the snapshot hangs (`crates/sandbox-vmm` history). Cold boot under KVM on a hosted runner is 7.8 s, and under TCG 19–31 s. |
@@ -70,6 +70,6 @@ measured in this pass. Otherwise it says "not measured".
 5. **Chaos suite** for the cluster paths, once 3 and 4 are tested.
 6. **Runbooks and SLO measurement**, after the metrics exist.
 
-Blocked: Tier 2 Firecracker and its acceptance criteria (KVM), and the external review.
+Blocked: the external review. The KVM runner now runs the Tier 2 suite; the VM resume criterion is not met.
 Not started and needing a decision first: billing export, tenant quotas, and the Tier 2
 images, which depend on promotion.

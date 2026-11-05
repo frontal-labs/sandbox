@@ -36,6 +36,11 @@ impl Accel {
         }
     }
 
+    /// The accelerator's name, for reports.
+    pub fn name(self) -> &'static str {
+        self.arg()
+    }
+
     fn arg(self) -> &'static str {
         match self {
             Accel::Tcg => "tcg",
