@@ -583,6 +583,12 @@ fn serve(
     let scheduler = Arc::new(sandbox_scheduler::Scheduler::new());
     let rt = runtime()?;
     let (app, state, new_key) = match (data_dir, database_url) {
+        (Some(_), Some(_)) if telemetry.is_some() => {
+            return Err(sandbox_types::SandboxError::new(
+                sandbox_types::ErrorCode::Unsupported,
+                "span export is not yet wired into the clustered server",
+            ))
+        }
         (Some(dir), Some(url)) => clustered_open(&rt, scheduler, url, dir, vm)?,
         (Some(dir), None) => rt.block_on(sandbox_server::open_durable_with_options(
             scheduler,

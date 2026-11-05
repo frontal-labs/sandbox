@@ -973,19 +973,12 @@ pub async fn open_durable_with_vm(
     .await
 }
 
-/// Like [`open_durable_with_state`], with the given options. Span export is not yet wired into
-/// the durable server, so `telemetry` is refused rather than ignored.
+/// Like [`open_durable_with_state`], with the given options.
 pub async fn open_durable_with_options(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
     options: ServerOptions,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
-    if options.telemetry.is_some() {
-        return Err(SandboxError::new(
-            ErrorCode::Unsupported,
-            "span export is not yet wired into the durable server",
-        ));
-    }
     let (store, saved) = crate::persist::Store::open(dir)?;
     let parked = crate::parked::parked_store(dir)?;
     let snapshot_files = crate::parked::snapshot_files(dir)?;
@@ -993,11 +986,14 @@ pub async fn open_durable_with_options(
         scheduler,
         crate::persist::Persistence::Files(store),
         saved,
-        options.vm.map(Arc::new),
-        options.python.map(Arc::new),
-        Some(dir.join("usage.jsonl")),
-        Some(parked),
-        Some(snapshot_files),
+        Attachments {
+            vm: options.vm.map(Arc::new),
+            python: options.python.map(Arc::new),
+            otel: options.telemetry,
+            usage_log: Some(dir.join("usage.jsonl")),
+            parked: Some(parked),
+            snapshot_files: Some(snapshot_files),
+        },
     )
     .await
 }
@@ -1030,27 +1026,45 @@ pub async fn open_clustered_with_vm(
         scheduler,
         crate::persist::Persistence::Clustered(store),
         saved,
-        vm.map(Arc::new),
-        None,
-        None,
-        None,
-        None,
+        Attachments {
+            vm: vm.map(Arc::new),
+            python: None,
+            otel: None,
+            usage_log: None,
+            parked: None,
+            snapshot_files: None,
+        },
     )
     .await
 }
 
-/// Builds the server around a durable store and its saved state: restores the
-/// keys, snapshots, and sessions, then saves the restored state.
+/// What a server is attached with besides its store. The file-backed parts (the usage log, the
+/// parked sessions, the snapshot records) are set only on a durable server.
+struct Attachments {
+    vm: Option<Arc<VmConfig>>,
+    python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
+    otel: Option<crate::otel::SpanExporter>,
+    usage_log: Option<std::path::PathBuf>,
+    parked: Option<crate::parked::ParkedStore>,
+    snapshot_files: Option<crate::parked::SnapshotFiles>,
+}
+
+/// Builds the server around a store and its saved state: restores the keys, snapshots, and
+/// sessions, then saves the restored state.
 async fn attach_store(
     scheduler: Arc<Scheduler>,
     store: crate::persist::Persistence,
     saved: crate::persist::Saved,
-    vm: Option<Arc<VmConfig>>,
-    python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
-    usage_log: Option<std::path::PathBuf>,
-    parked: Option<crate::parked::ParkedStore>,
-    snapshot_files: Option<crate::parked::SnapshotFiles>,
+    attachments: Attachments,
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
+    let Attachments {
+        vm,
+        python,
+        otel,
+        usage_log,
+        parked,
+        snapshot_files,
+    } = attachments;
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
         Some(auth.create_key())
@@ -1076,7 +1090,7 @@ async fn attach_store(
         vm_pool: pool_for(&vm),
         vm,
         python,
-        otel: None,
+        otel,
         epoch_ms: now_millis(),
         usage_log,
         parked,
