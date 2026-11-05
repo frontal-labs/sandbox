@@ -29,6 +29,7 @@ exec docker run --rm --user 0:0 $kvm \
   -e SANDBOX_PYTHON_DIR=/src/tools/wasm/python/out \
   -e PY_VERSION="$PY_VERSION" -e PY_SHA256="$PY_SHA256" \
   -e WASI_SDK_PATH=/opt/wasi-sdk \
+  -v "$ROOT/tools/wasm/python:/stage:ro" \
   -v "$ROOT/tools/wasm/python/out:/out" \
   -v frontal-cpython-cache:/cache \
   -v "$ROOT:/src" \
