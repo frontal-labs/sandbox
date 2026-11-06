@@ -13,7 +13,7 @@ macro_rules! ulid_newtype {
 
         impl $name {
             pub fn new() -> Self {
-                Self(Ulid::new())
+                Self(Ulid::generate())
             }
 
             pub fn from_ulid(ulid: Ulid) -> Self {

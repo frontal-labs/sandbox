@@ -116,7 +116,7 @@ async fn run_contained(
         memory_bytes: limits.max_heap_bytes as u64 + SCRIPT_OVERHEAD_BYTES,
         ..CgroupLimits::default()
     };
-    let name = format!("sbx-script-{}", &ulid::Ulid::new().to_string()[10..]);
+    let name = format!("sbx-script-{}", &ulid::Ulid::generate().to_string()[10..]);
     let cgroup = CgroupGuard::create(&name, cgroup_limits)?;
 
     let mut command = Command::new(program);
