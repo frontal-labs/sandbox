@@ -20,6 +20,8 @@ rust_library(
         "@crates//:deno_url",
         "@crates//:deno_webidl",
         "@crates//:swc_core",
+        "@crates//:serde_json",
+        "@crates//:deno_error",
 ],
     proc_macro_deps = [
         "@crates//:async-trait",
