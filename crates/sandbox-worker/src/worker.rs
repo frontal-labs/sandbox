@@ -154,7 +154,7 @@ impl Worker {
         #[cfg(target_os = "linux")]
         let cgroup = match isolation.cgroup {
             Some(limits) => {
-                let name = format!("sbx-{}", &ulid::Ulid::new().to_string()[10..]);
+                let name = format!("sbx-{}", &ulid::Ulid::generate().to_string()[10..]);
                 match CgroupGuard::create(&name, limits) {
                     Ok(guard) => Some(guard),
                     Err(e) => {
@@ -318,7 +318,7 @@ fn private_dir() -> Result<PathBuf, SandboxError> {
     // A ULID starts with 10 timestamp characters, so only the last 16 are random.
     // Keeping just a short prefix made two workers started in the same millisecond
     // collide.
-    let name = format!("sbx-{}", &ulid::Ulid::new().to_string()[10..]);
+    let name = format!("sbx-{}", &ulid::Ulid::generate().to_string()[10..]);
     let dir = std::env::temp_dir().join(name);
     std::fs::DirBuilder::new()
         .mode(0o700)
