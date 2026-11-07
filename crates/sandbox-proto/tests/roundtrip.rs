@@ -463,10 +463,10 @@ fn unspecified_enums_are_rejected() {
 fn unknown_enum_numbers_are_rejected() {
     let bad = pb::SessionState {
         id: Some(pb::SessionId {
-            value: Ulid::new().to_string(),
+            value: Ulid::generate().to_string(),
         }),
         tenant_id: Some(pb::TenantId {
-            value: Ulid::new().to_string(),
+            value: Ulid::generate().to_string(),
         }),
         tier: 999,
         status: 2,
