@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod config;
 pub mod gc;
 pub mod idle;
 pub mod middleware;
@@ -19,3 +20,4 @@ pub use api::{
 };
 #[cfg(feature = "clustered")]
 pub use api::{open_clustered_with_remote, open_clustered_with_state, open_clustered_with_vm};
+pub use config::{load as load_config, ConfigError, ResolvedServeConfig};
