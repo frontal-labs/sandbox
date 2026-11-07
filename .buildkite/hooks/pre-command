@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# pre-command hook — runs once per build, before any step.
+#
+# Installs the pinned toolchains and warms the caches the pipeline depends on.
+# The hook is also runnable locally: `./.buildkite/hooks/pre-command`.
+
+# Surface the agent's identity for the OIDC trust chain.
+echo "buildkite-agent: $(buildkite-agent version 2>/dev/null || echo unknown)"
+echo "agent queue: ${BUILDKITE_AGENT_QUEUE:-default}"
+echo "agent tags: ${BUILDKITE_AGENT_TAGS:-<none>}"
+
+# Export the environment the build steps expect. These are mirrored in the
+# pipeline file so local runs match CI.
+export RUSTY_V8_MIRROR="https://github.com/denoland/rusty_v8/releases/download"
+export RUSTY_V8_MIRROR_FALLBACK="1"
+export V8_FROM_SOURCE="0"
+export CARGO_TERM_COLOR="always"
+export RUSTFLAGS="-D warnings"
+
+# Run the shared setup script.
+. ./.buildkite/scripts/setup.sh
+
+# Cache the Bazel external repositories between builds.
+export BUILDKITE_CACHE_DIR="${BUILDKITE_CACHE_DIR:-/var/cache/bazel}"
+mkdir -p "$BUILDKITE_CACHE_DIR"
+
+echo "pre-command: ready"
