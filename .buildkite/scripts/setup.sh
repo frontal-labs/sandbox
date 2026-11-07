@@ -18,7 +18,7 @@ export RUSTY_V8_MIRROR_FALLBACK="1"
 export V8_FROM_SOURCE="0"
 
 echo "setup: installing Bazelisk"
-curl -fsSL "https://bazel.build/bazelisk/releases/latest/bazelisk-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)" \
+curl --proto '=https' --tlsv1.2 -fsSL "https://bazel.build/bazelisk/releases/latest/bazelisk-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)" \
   -o /usr/local/bin/bazelisk \
   && chmod +x /usr/local/bin/bazelisk \
   && ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
@@ -47,7 +47,7 @@ case "$(uname -m)" in
   arm64|aarch64) ARCH=aarch64 ;;
   *) echo "setup: unsupported arch $(uname -m)" >&2; exit 1 ;;
 esac
-curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${OS}-${ARCH}.zip" \
+curl --proto '=https' --tlsv1.2 -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${OS}-${ARCH}.zip" \
   -o /tmp/protoc.zip
 python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/usr/local')"
 protoc --version
@@ -71,6 +71,10 @@ if ! command -v python3.12 >/dev/null 2>&1; then
       ;;
     Darwin)
       brew install python@3.12
+      ;;
+    *)
+      echo "setup: unsupported OS $(uname -s); install Python 3.12 manually" >&2
+      exit 1
       ;;
   esac
 fi

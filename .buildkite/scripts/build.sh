@@ -21,7 +21,7 @@ echo "build: release CLI binary"
 cargo build --release -p cli --bin frontal-sandbox
 
 echo "build: TypeScript SDK"
-bun install --frozen-lockfile
+bun install --frozen-lockfile --ignore-scripts
 bun run ts:build
 
 echo "build: Docker image (smoke test of the compose path)"

@@ -17,7 +17,7 @@ echo "lint: Rust clippy"
 cargo clippy --workspace --all-targets -- -D warnings
 
 echo "lint: TypeScript / JS (biome)"
-bun install --frozen-lockfile
+bun install --frozen-lockfile --ignore-scripts
 bun run lint
 
 echo "lint: Python (ruff)"

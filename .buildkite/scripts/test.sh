@@ -20,7 +20,7 @@ echo "test: Bazel test suite (unit + integration)"
 bazel test //... --test_output=errors
 
 echo "test: TypeScript SDK"
-bun install --frozen-lockfile
+bun install --frozen-lockfile --ignore-scripts
 mkdir -p sdks/typescript/junit
 bun test --reporter=junit --reporter-file=sdks/typescript/junit/typescript.xml \
   --workspace @frontal-labs/sandbox-sdk \
