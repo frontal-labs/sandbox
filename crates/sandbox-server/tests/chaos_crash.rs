@@ -107,8 +107,19 @@ async fn acknowledged_writes_survive_a_crash_under_concurrent_load() {
         }));
     }
 
-    // The crash comes while the writers are still going.
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    // The crash comes while the writers are still going. Wait until at least one
+    // write is acknowledged (or a generous bound) so the test is not flaky on slow hosts.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if !acknowledged.lock().unwrap().is_empty() {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     for task in &tasks {
         task.abort();
     }

@@ -565,7 +565,10 @@ mod tests {
             "-c",
             "i=0; while [ $i -lt 200000 ]; do i=$((i+1)); done",
         ]);
-        let out = backend.exec(busy).await.unwrap();
+        let out = tokio::time::timeout(std::time::Duration::from_secs(30), backend.exec(busy))
+            .await
+            .expect("cpu_ms busy loop should finish within 30s")
+            .unwrap();
         assert!(out.cpu_ms > 0, "a busy loop must report CPU time: {out:?}");
         // One command runs on one thread at a time, so its CPU cannot exceed its wall time.
         assert!(out.cpu_ms <= out.wall_ms + 1, "{out:?}");
