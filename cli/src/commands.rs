@@ -63,6 +63,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Run a command in a new sandbox. Arguments are joined with spaces and run
     /// as one shell script, so quote the whole script if it has spaces.
@@ -144,21 +145,25 @@ pub enum Commands {
 
     /// Start the sandbox server in the foreground. Prints one API key to stderr.
     Serve {
+        /// Load serve settings from this TOML file (infrastructure/PLAN.md §4). CLI flags
+        /// override mapped fields; SANDBOX_* / OTLP env override file values.
+        #[arg(long)]
+        config: Option<PathBuf>,
         /// Bind address
-        #[arg(long, default_value = "0.0.0.0:8080")]
-        addr: String,
+        #[arg(long)]
+        addr: Option<String>,
         /// Keep keys, snapshots, and sleeping sessions in this directory, so they
         /// survive a restart (ADR 0008). Without it the server is in memory only.
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Collect unreachable blobs every this many seconds (ADR 0013). 0 turns
         /// the schedule off, and `POST /v1/gc` remains available.
-        #[arg(long, default_value_t = 600)]
-        gc_interval_secs: u64,
+        #[arg(long)]
+        gc_interval_secs: Option<u64>,
         /// Put a session to sleep after this many seconds with no request (PLAN
         /// §4.14). A request to a sleeping session wakes it. 0 turns idle sleep off.
-        #[arg(long, default_value_t = 300)]
-        idle_sleep_secs: u64,
+        #[arg(long)]
+        idle_sleep_secs: Option<u64>,
         /// Keep the state in this Postgres database, shared by every node that uses
         /// it, instead of in `--data-dir` alone (PLAN §4.8). `--data-dir` still holds
         /// the blobs, so it must be a directory every node can reach.
@@ -170,20 +175,20 @@ pub enum Commands {
         #[arg(long)]
         vm_image: Option<PathBuf>,
         /// The QEMU binary that runs the guest.
-        #[arg(long, default_value = "qemu-system-x86_64")]
-        qemu: PathBuf,
+        #[arg(long)]
+        qemu: Option<PathBuf>,
         /// How QEMU runs the guest: `tcg` (software, works in Docker without KVM) or `kvm`.
-        #[arg(long, default_value = "tcg")]
-        vm_accel: String,
+        #[arg(long)]
+        vm_accel: Option<String>,
         /// Guest memory in MiB.
-        #[arg(long, default_value_t = 2048)]
-        vm_memory_mib: u32,
+        #[arg(long)]
+        vm_memory_mib: Option<u32>,
         /// Seconds to wait for a guest's agent to answer after boot.
-        #[arg(long, default_value_t = 180)]
-        vm_boot_timeout_secs: u64,
+        #[arg(long)]
+        vm_boot_timeout_secs: Option<u64>,
         /// Guests kept booted ahead of promotions, so a promotion skips the boot.
-        #[arg(long, default_value_t = 1)]
-        vm_warm_guests: usize,
+        #[arg(long)]
+        vm_warm_guests: Option<usize>,
         /// A directory with `python.wasm` and `python313.zip` (tools/wasm/python/build.sh). New
         /// isolate sessions get CPython installed, so `python` runs in them. Not yet combined
         /// with --data-dir or a VM image.
@@ -273,6 +278,7 @@ impl Cli {
                 Ok(0)
             }
             Commands::Serve {
+                config,
                 addr,
                 data_dir,
                 gc_interval_secs,
@@ -289,16 +295,53 @@ impl Cli {
                 object_store_bucket,
                 object_store_endpoint,
             } => {
-                // The URL may also come from the environment, so a secret need not be on the command line.
-                let url = database_url
+                let mut resolved = sandbox_server::load_config(config.as_deref())
+                    .map_err(|e| SandboxError::invalid_argument(e.to_string()))?;
+                if let Some(a) = addr {
+                    resolved.addr = a.clone();
+                }
+                if let Some(d) = data_dir {
+                    resolved.data_dir = Some(d.clone());
+                }
+                if let Some(n) = gc_interval_secs {
+                    resolved.gc_interval_secs = *n;
+                }
+                if let Some(n) = idle_sleep_secs {
+                    resolved.idle_sleep_secs = *n;
+                }
+                if let Some(u) = database_url {
+                    if !u.is_empty() {
+                        resolved.database_url = Some(u.clone());
+                    }
+                }
+                if let Some(p) = python_artifacts {
+                    resolved.python_artifacts = Some(p.clone());
+                }
+                if let Some(e) = otel_endpoint {
+                    if !e.is_empty() {
+                        resolved.otel_endpoint = Some(e.clone());
+                    }
+                }
+                if let Some(b) = object_store_bucket {
+                    resolved.object_store_bucket = Some(b.clone());
+                }
+                if let Some(e) = object_store_endpoint {
+                    resolved.object_store_endpoint = Some(e.clone());
+                }
+                let qemu_bin = qemu
                     .clone()
-                    .or_else(|| std::env::var("SANDBOX_DATABASE_URL").ok());
+                    .unwrap_or_else(|| PathBuf::from("qemu-system-x86_64"));
+                let accel_name = vm_accel.clone().unwrap_or_else(|| "tcg".to_string());
+                let memory_mib = vm_memory_mib.unwrap_or(2048);
+                let boot_timeout_secs = vm_boot_timeout_secs.unwrap_or(180);
+                let warm_guests = vm_warm_guests.unwrap_or(1);
+
                 let vm = match vm_image {
                     None => None,
                     Some(image) => Some(sandbox_server::VmConfig {
-                        qemu: qemu.clone(),
+                        qemu: qemu_bin,
                         image: image.clone(),
-                        accel: match vm_accel.as_str() {
+                        accel: match accel_name.as_str() {
                             "tcg" => sandbox_vmm::Accel::Tcg,
                             "kvm" => sandbox_vmm::Accel::Kvm,
                             other => {
@@ -307,39 +350,34 @@ impl Cli {
                                 )))
                             }
                         },
-                        memory_mib: *vm_memory_mib,
-                        boot_timeout: std::time::Duration::from_secs(*vm_boot_timeout_secs),
-                        warm_guests: *vm_warm_guests,
+                        memory_mib,
+                        boot_timeout: std::time::Duration::from_secs(boot_timeout_secs),
+                        warm_guests,
                     }),
                 };
-                let python = match python_artifacts {
+                let python = match resolved.python_artifacts.as_deref() {
                     None => None,
                     Some(dir) => Some(sandbox_wasm::PythonArtifacts::load(dir)?),
                 };
-                let otel = otel_endpoint
-                    .clone()
-                    .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok());
-                let telemetry = otel
-                    .as_deref()
-                    .map(sandbox_server::otel::SpanExporter::start);
-                if object_store_bucket.is_some() && data_dir.is_none() {
+                let telemetry = sandbox_server::config::telemetry_from_resolved(&resolved);
+                if resolved.object_store_bucket.is_some() && resolved.data_dir.is_none() {
                     return Err(SandboxError::invalid_argument(
                         "--object-store-bucket needs --data-dir, because the blobs live there",
                     ));
                 }
-                let blob_remote = match object_store_bucket {
+                let blob_remote = match resolved.object_store_bucket.as_deref() {
                     None => None,
                     Some(bucket) => Some(object_store_remote(
                         bucket,
-                        object_store_endpoint.as_deref(),
+                        resolved.object_store_endpoint.as_deref(),
                     )?),
                 };
                 serve(
-                    addr,
-                    data_dir.as_deref(),
-                    *gc_interval_secs,
-                    *idle_sleep_secs,
-                    url.as_deref(),
+                    &resolved.addr,
+                    resolved.data_dir.as_deref(),
+                    resolved.gc_interval_secs,
+                    resolved.idle_sleep_secs,
+                    resolved.database_url.as_deref(),
                     sandbox_server::ServerOptions {
                         vm,
                         python,

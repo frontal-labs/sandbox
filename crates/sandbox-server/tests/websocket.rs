@@ -58,6 +58,7 @@ async fn create_session(app: &axum::Router, key: &str) -> String {
 }
 
 /// Opens the socket for `session` with `key` as the bearer token.
+#[allow(clippy::result_large_err)]
 async fn connect(
     addr: SocketAddr,
     session: &str,
