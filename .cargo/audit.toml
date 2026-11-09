@@ -18,4 +18,9 @@ ignore = [
     # Transitive via sqlx-core -> sha2 0.10 -> digest 0.10 -> ctutils 0.4.3
     # sqlx 0.9.0 pins sha2 0.10; no fix available yet.
     "RUSTSEC-2026-0385",
+    # Lockfile only. sqlx-sqlite 0.9.0 caps libsqlite3-sys below 0.38, so the
+    # fix (>=0.39.0) cannot be selected without leaving sqlx 0.9. No build
+    # compiles libsqlite3-sys (`cargo tree --all-features` shows no path).
+    # Remove this ignore once sqlx pulls a patched libsqlite3-sys.
+    "RUSTSEC-2026-0459",
 ]
