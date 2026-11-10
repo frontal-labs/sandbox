@@ -2007,16 +2007,37 @@ fn error_event(error: SandboxError) -> ExecEvent {
 struct ClientMessage {
     #[serde(rename = "type")]
     kind: String,
+    /// The signal name of a `signal` message, such as `"INT"`.
+    #[serde(default)]
+    name: Option<String>,
 }
 
-/// Watches the client during a command. A cancel message cancels it, and so does the
-/// end of the connection, whether a close frame, an error, or the stream ending.
+/// Signals a client may send. The shell has no processes or PIDs (PLAN §4.4), so
+/// each one stops the command the same way a cancel does. A signal names the reason
+/// the client gave, and that reason is not sent back.
+const STOPPING_SIGNALS: [&str; 4] = ["INT", "TERM", "KILL", "HUP"];
+
+/// Whether a client message stops the running command: a cancel, or a stopping signal.
+fn stops_command(message: &ClientMessage) -> bool {
+    match message.kind.as_str() {
+        "cancel" => true,
+        "signal" => message
+            .name
+            .as_deref()
+            .is_some_and(|name| STOPPING_SIGNALS.contains(&name)),
+        _ => false,
+    }
+}
+
+/// Watches the client during a command. A cancel or stopping signal cancels it, and
+/// so does the end of the connection, whether a close frame, an error, or the stream
+/// ending. Other messages are ignored.
 async fn watch_client(mut rx: SocketRx, cancel: CancellationToken) {
     loop {
         match futures::StreamExt::next(&mut rx).await {
             Some(Ok(Message::Text(text)))
                 if serde_json::from_str::<ClientMessage>(&text)
-                    .is_ok_and(|message| message.kind == "cancel") =>
+                    .is_ok_and(|m| stops_command(&m)) =>
             {
                 return cancel.cancel();
             }
