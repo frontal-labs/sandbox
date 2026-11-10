@@ -26,6 +26,7 @@ mod arith;
 mod printf;
 
 pub use ast::Script;
+pub use builtins::command_may_read_stdin;
 pub use interpreter::{ExecutionResult, OutputChunk, OutputObserver, Shell, ShellConfig};
 pub use parser::parse;
 

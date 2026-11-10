@@ -14,6 +14,23 @@ const BUILTINS: &[&str] = &[
 ];
 
 /// Whether `name` is a builtin.
+/// Whether a command, run by name as `argv[0]`, may read its standard input. A
+/// builtin that never reads its input (`echo`, `printf`, `pwd`, and the others that
+/// take only arguments) returns false. `sh` may run a script that reads, so it
+/// returns true, and so does anything that is not a builtin.
+pub fn command_may_read_stdin(name: &str) -> bool {
+    if name == "sh" {
+        return true;
+    }
+    if !is_builtin(name) {
+        return true;
+    }
+    matches!(
+        name,
+        "cat" | "head" | "tail" | "wc" | "grep" | "node" | "wasm"
+    )
+}
+
 pub(crate) fn is_builtin(name: &str) -> bool {
     BUILTINS.contains(&name)
 }
