@@ -1616,9 +1616,9 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fc-api"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d62d3c8c7d8cd465049e24dcf8945676616b7b2b7aba5ce4d3718bdfeca1c3f4"
+checksum = "e8e97fce992ee72f577b927e012f769bdd401143d1dc5bee870105bcd353accf"
 dependencies = [
  "futures",
  "openapiv3",
@@ -1633,11 +1633,12 @@ dependencies = [
 
 [[package]]
 name = "fc-sdk"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f95ddbe13e1c5c3d1348a84a7fdc12ca07485fa41c6de939f7c34c9126c54c5"
+checksum = "8f527f191f67fbc2e056e1fb4e891256faf9c6d2c2b54e6e585da6e365b04058"
 dependencies = [
  "fc-api",
+ "libc",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -1653,9 +1654,9 @@ checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "firecracker"
-version = "0.1.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14869ec5236a85bfab228dacdc1c289284186f710b075dba2e80ddd40edb7e13"
+checksum = "471c3d9ce8d6acca9a152a833008e69fa9d7cbd8e8c06896f0eab124b67da7e7"
 dependencies = [
  "fc-api",
  "fc-sdk",
