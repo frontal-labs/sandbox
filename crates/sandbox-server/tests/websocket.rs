@@ -121,7 +121,7 @@ async fn a_command_streams_its_output_then_exits() {
     let request =
         json!({"argv": ["sh", "-c", "echo hi; echo oops >&2"], "env": {}, "stream": true});
     socket
-        .send(Message::Text(request.to_string()))
+        .send(Message::Text(request.to_string().into()))
         .await
         .unwrap();
     let events = events_until_close(&mut socket).await;
@@ -154,7 +154,7 @@ async fn a_first_message_that_is_not_a_request_is_an_error() {
 
     let mut socket = connect(addr, &session, &key).await.unwrap();
     socket
-        .send(Message::Text("not json".to_string()))
+        .send(Message::Text("not json".to_string().into()))
         .await
         .unwrap();
     let events = events_until_close(&mut socket).await;
@@ -174,7 +174,9 @@ async fn an_empty_argv_is_an_error_and_runs_nothing() {
     let mut socket = connect(addr, &session, &key).await.unwrap();
     socket
         .send(Message::Text(
-            json!({"argv": [], "env": {}, "stream": true}).to_string(),
+            json!({"argv": [], "env": {}, "stream": true})
+                .to_string()
+                .into(),
         ))
         .await
         .unwrap();
@@ -233,12 +235,12 @@ async fn a_cancel_message_stops_the_command_with_a_cancelled_error() {
 
     let mut socket = connect(addr, &session, &key).await.unwrap();
     socket
-        .send(Message::Text(long_running_request()))
+        .send(Message::Text(long_running_request().into()))
         .await
         .unwrap();
     until_first_output(&mut socket).await;
     socket
-        .send(Message::Text(json!({"type": "cancel"}).to_string()))
+        .send(Message::Text(json!({"type": "cancel"}).to_string().into()))
         .await
         .unwrap();
 
@@ -265,20 +267,20 @@ async fn a_stopping_signal_stops_the_command_with_a_cancelled_error() {
 
     let mut socket = connect(addr, &session, &key).await.unwrap();
     socket
-        .send(Message::Text(long_running_request()))
+        .send(Message::Text(long_running_request().into()))
         .await
         .unwrap();
     until_first_output(&mut socket).await;
     // A signal the server does not stop on is ignored, so the command keeps running.
     socket
         .send(Message::Text(
-            json!({"type": "signal", "name": "USR1"}).to_string(),
+            json!({"type": "signal", "name": "USR1"}).to_string().into(),
         ))
         .await
         .unwrap();
     socket
         .send(Message::Text(
-            json!({"type": "signal", "name": "INT"}).to_string(),
+            json!({"type": "signal", "name": "INT"}).to_string().into(),
         ))
         .await
         .unwrap();
@@ -304,7 +306,7 @@ async fn closing_the_connection_cancels_the_command_and_frees_the_session() {
 
     let mut socket = connect(addr, &session, &key).await.unwrap();
     socket
-        .send(Message::Text(long_running_request()))
+        .send(Message::Text(long_running_request().into()))
         .await
         .unwrap();
     until_first_output(&mut socket).await;
@@ -358,23 +360,29 @@ async fn live_stdin_is_read_once_the_client_sends_eof() {
         .unwrap();
     let request = json!({"argv": ["cat"], "env": {}, "stream": true});
     socket
-        .send(Message::Text(request.to_string()))
+        .send(Message::Text(request.to_string().into()))
         .await
         .unwrap();
     socket
         .send(Message::Text(
-            json!({"type": "stdin", "data": "hello\n"}).to_string(),
+            json!({"type": "stdin", "data": "hello\n"})
+                .to_string()
+                .into(),
         ))
         .await
         .unwrap();
     socket
         .send(Message::Text(
-            json!({"type": "stdin", "data": "world\n"}).to_string(),
+            json!({"type": "stdin", "data": "world\n"})
+                .to_string()
+                .into(),
         ))
         .await
         .unwrap();
     socket
-        .send(Message::Text(json!({"type": "stdin_eof"}).to_string()))
+        .send(Message::Text(
+            json!({"type": "stdin_eof"}).to_string().into(),
+        ))
         .await
         .unwrap();
 
@@ -401,7 +409,7 @@ async fn a_command_that_reads_no_input_starts_without_eof() {
         .unwrap();
     let request = json!({"argv": ["echo", "hi"], "env": {}, "stream": true});
     socket
-        .send(Message::Text(request.to_string()))
+        .send(Message::Text(request.to_string().into()))
         .await
         .unwrap();
 
@@ -428,17 +436,17 @@ async fn a_cancel_while_waiting_for_input_runs_nothing() {
         .unwrap();
     let request = json!({"argv": ["cat"], "env": {}, "stream": true});
     socket
-        .send(Message::Text(request.to_string()))
+        .send(Message::Text(request.to_string().into()))
         .await
         .unwrap();
     socket
         .send(Message::Text(
-            json!({"type": "stdin", "data": "x"}).to_string(),
+            json!({"type": "stdin", "data": "x"}).to_string().into(),
         ))
         .await
         .unwrap();
     socket
-        .send(Message::Text(json!({"type": "cancel"}).to_string()))
+        .send(Message::Text(json!({"type": "cancel"}).to_string().into()))
         .await
         .unwrap();
 
@@ -459,7 +467,7 @@ async fn without_the_live_query_a_reader_does_not_wait() {
     let mut socket = connect(addr, &session, &key).await.unwrap();
     let request = json!({"argv": ["cat"], "env": {}, "stream": true});
     socket
-        .send(Message::Text(request.to_string()))
+        .send(Message::Text(request.to_string().into()))
         .await
         .unwrap();
 
