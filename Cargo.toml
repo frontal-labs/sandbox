@@ -39,7 +39,7 @@ toml = "0.8"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 proptest = "1"
 criterion = "0.5"
 dashmap = "6"
