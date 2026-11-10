@@ -527,3 +527,9 @@ This section records what the code does today against the plan above. Update it 
 ### Blocked on the operator
 
 - **Package visibility:** the GHCR SDK packages (`sandbox-sdk-ts`, `-py`, `-rs`) and the npm packages (`@frontal-labs/sandbox-cli` and its platform packages) are published as `internal`. GitHub provides no API or GraphQL mutation for changing organization package visibility, so an organization owner must change it in the web UI before anonymous pulls and installs work.
+
+### Status update (2026-11-09)
+
+- **CI on main restored (PR #59).** `main` had two red required jobs at `60033b5`: `cargo fmt` (one test function) and `cargo audit` (RUSTSEC-2026-0459 on `libsqlite3-sys` 0.37.0). The format fix is applied. The advisory is lockfile-only: `sqlx-sqlite` 0.9.0 caps `libsqlite3-sys` below 0.38, and no build compiles it. It is ignored in `.cargo/audit.toml` and `deny.toml` with that reason, the same way `rsa` is handled. Remove the ignore when sqlx pulls a patched version.
+- **Verified locally on 2026-11-09:** `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace` (493 passed, 0 failed, 21 ignored), `cargo bench --workspace --no-run`, `cargo audit --deny warnings`, and `cargo deny check`.
+- **Bazel build fixed (2026-11-10).** `sandbox-wasm` referenced `@crates//:toml`, but the generated crate repo names toml 1.2.1 as `toml-1.2.1+spec-1.1.0`, so every Bazel load failed on `main`. The label is corrected, and the lockfiles Bazel regenerates are committed (PR #71). `sandbox-server` also gained the `toml-0.8.23` dependency its TOML config loading (bd6e514) needs. CI's `bazel build //...` and `bazel test //...` pass. Locally, `bazel query //...` loads with 0 errors and the two sandbox-wasm Bazel tests pass. A local `sandbox-server` Bazel build hit a crate-splice timeout in this environment, so CI is the verification for that target.
