@@ -15,7 +15,7 @@ rust_library(
         "@crates//:serde",
         "@crates//:wasmtime",
         "@crates//:futures",
-        "@crates//:toml",
+        "@crates//:toml-1.2.1+spec-1.1.0",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
@@ -35,7 +35,7 @@ rust_test(
         "@crates//:parking_lot",
         "@crates//:serde",
         "@crates//:thiserror",
-        "@crates//:toml",
+        "@crates//:toml-1.2.1+spec-1.1.0",
         "@crates//:tracing",
         "@crates//:wasmtime",
         ":sandbox_wasm",
