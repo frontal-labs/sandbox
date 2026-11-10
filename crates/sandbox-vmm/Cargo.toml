@@ -23,7 +23,7 @@ nix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-firecracker = { version = "0.1", optional = true }
+firecracker = { version = "0.2", optional = true }
 tokio-util = { workspace = true, features = ["codec"] }
 tonic = { workspace = true }
 which = "5"
