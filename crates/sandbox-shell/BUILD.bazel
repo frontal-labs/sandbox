@@ -18,9 +18,31 @@ rust_library(
         "@crates//:serde",
 
         "@crates//:regex",
-],
+        "@crates//:chrono",
+        "@crates//:base64",
+    ],
     proc_macro_deps = [
         "@crates//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_coreutils_conformance_test",
+    srcs = ["tests/coreutils_conformance.rs"],
+    crate_root = "tests/coreutils_conformance.rs",
+    edition = "2021",
+    # Reads conformance/coreutils.json through CARGO_MANIFEST_DIR, as the bash corpus does.
+    data = glob(["conformance/**"]),
+    rustc_env = {"CARGO_MANIFEST_DIR": "crates/sandbox-shell"},
+    deps = [
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:tokio",
+        ":sandbox_shell",
     ],
     visibility = ["//visibility:public"],
 )
