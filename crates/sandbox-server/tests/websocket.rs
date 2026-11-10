@@ -239,6 +239,47 @@ async fn a_cancel_message_stops_the_command_with_a_cancelled_error() {
     assert_eq!(last["code"], "CANCELLED", "{events:?}");
 }
 
+/// Each stopping signal ends the command the way a cancel does. A signal that is
+/// not a stopping signal, such as `USR1`, leaves the command running.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stopping_signal_stops_the_command_with_a_cancelled_error() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await.unwrap();
+    socket
+        .send(Message::Text(long_running_request()))
+        .await
+        .unwrap();
+    until_first_output(&mut socket).await;
+    // A signal the server does not stop on is ignored, so the command keeps running.
+    socket
+        .send(Message::Text(
+            json!({"type": "signal", "name": "USR1"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    socket
+        .send(Message::Text(
+            json!({"type": "signal", "name": "INT"}).to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let events = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        events_until_close(&mut socket),
+    )
+    .await
+    .expect("a signalled command must end promptly");
+    let last = events.last().expect("the stream ends with an event");
+    assert_eq!(last["type"], "error", "{events:?}");
+    assert_eq!(last["code"], "CANCELLED", "{events:?}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn closing_the_connection_cancels_the_command_and_frees_the_session() {
     let auth = Arc::new(AuthManager::new());
