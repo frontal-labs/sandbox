@@ -1965,14 +1965,31 @@ async fn exec_websocket(
     State(state): State<AppState>,
     Extension(owner): Extension<KeyId>,
     Path(id): Path<String>,
+    Query(query): Query<ExecSocketQuery>,
 ) -> Result<Response, ApiError> {
     let own = owned(&state, &owner, &id).await?;
-    Ok(ws.on_upgrade(move |socket: WebSocket| serve_exec_socket(socket, state, owner, own)))
+    let live_stdin = query.stdin.as_deref() == Some("live");
+    Ok(ws.on_upgrade(move |socket: WebSocket| {
+        serve_exec_socket(socket, state, owner, own, live_stdin)
+    }))
 }
 
-async fn serve_exec_socket(socket: WebSocket, state: AppState, owner: KeyId, own: Owned) {
+/// Query parameters of the WebSocket exec route. `stdin=live` lets the client send
+/// its input as `stdin` messages after the request (ADR 0038).
+#[derive(Debug, Deserialize)]
+struct ExecSocketQuery {
+    stdin: Option<String>,
+}
+
+async fn serve_exec_socket(
+    socket: WebSocket,
+    state: AppState,
+    owner: KeyId,
+    own: Owned,
+    live_stdin: bool,
+) {
     let (mut tx, mut rx) = futures::StreamExt::split(socket);
-    let request = match read_exec_request(&mut rx).await {
+    let mut request = match read_exec_request(&mut rx).await {
         Ok(request) => request,
         Err(error) => {
             send_event(&mut tx, &error_event(error)).await;
@@ -1985,6 +2002,16 @@ async fn serve_exec_socket(socket: WebSocket, state: AppState, owner: KeyId, own
         send_event(&mut tx, &error_event(error)).await;
         close(&mut tx).await;
         return;
+    }
+    if live_stdin && sandbox_session::command_may_read_stdin(&request.argv[0]) {
+        let initial = request.stdin.take().unwrap_or_default();
+        match collect_live_stdin(&mut rx, &mut tx, initial).await {
+            LiveInput::Ready(input) => request.stdin = Some(input),
+            LiveInput::Stopped => {
+                close(&mut tx).await;
+                return;
+            }
+        }
     }
     let gate = own.gate.clone().lock_owned().await;
     let cancel = CancellationToken::new();
@@ -2045,6 +2072,61 @@ async fn watch_client(mut rx: SocketRx, cancel: CancellationToken) {
                 Message::Text(_) | Message::Binary(_) | Message::Ping(_) | Message::Pong(_),
             )) => {}
             _ => return cancel.cancel(),
+        }
+    }
+}
+
+/// What a live-stdin request waits for before it runs.
+enum LiveInput {
+    /// The input is complete: the request's `stdin` followed by every chunk.
+    Ready(Vec<u8>),
+    /// The request was stopped or the connection ended. Nothing ran.
+    Stopped,
+}
+
+/// A message the client sends while a live-stdin command waits for its input.
+#[derive(Deserialize)]
+struct LiveStdinMessage {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    data: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Collects a live-stdin command's input until `stdin_eof`. A `stdin` message adds its
+/// text as UTF-8 bytes. A cancel or stopping signal ends the request with a
+/// `CANCELLED` error and nothing runs. The end of the connection ends it without
+/// sending anything, since there is no one to read it.
+async fn collect_live_stdin(rx: &mut SocketRx, tx: &mut SocketTx, mut input: Vec<u8>) -> LiveInput {
+    loop {
+        match futures::StreamExt::next(rx).await {
+            Some(Ok(Message::Text(text))) => {
+                let Ok(message) = serde_json::from_str::<LiveStdinMessage>(&text) else {
+                    continue;
+                };
+                match message.kind.as_str() {
+                    "stdin" => input.extend_from_slice(message.data.unwrap_or_default().as_bytes()),
+                    "stdin_eof" => return LiveInput::Ready(input),
+                    kind => {
+                        let stops = stops_command(&ClientMessage {
+                            kind: kind.to_string(),
+                            name: message.name,
+                        });
+                        if stops {
+                            let cancelled = ExecEvent::Error {
+                                code: ErrorCode::Cancelled,
+                                message: "the command was cancelled before it ran".to_string(),
+                            };
+                            send_event(tx, &cancelled).await;
+                            return LiveInput::Stopped;
+                        }
+                    }
+                }
+            }
+            Some(Ok(Message::Binary(_) | Message::Ping(_) | Message::Pong(_))) => {}
+            _ => return LiveInput::Stopped,
         }
     }
 }
