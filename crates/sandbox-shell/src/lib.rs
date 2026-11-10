@@ -17,6 +17,9 @@
 
 pub mod ast;
 pub mod builtins;
+pub mod coreutils;
+mod coreutils_fs;
+mod coreutils_text;
 pub mod cpu;
 pub mod expand;
 pub mod interpreter;

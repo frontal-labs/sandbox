@@ -1,5 +1,5 @@
 {
- "recorded_with": "GNU bash, version 5.3.8(1)-release (aarch64-apple-darwin24.6.0)",
+ "recorded_with": "GNU bash, version 5.3.8(1)-release (aarch64-apple-darwin24.6.0); sort (GNU coreutils) 9.11",
  "cases": [
   {
    "name": "echo_plain_0",
@@ -238,7 +238,7 @@
   {
    "name": "var_status_after_failure",
    "script": "ls /nonexistent_dir_xyz >/dev/null 2>&1; echo $?",
-   "stdout": "1\n",
+   "stdout": "2\n",
    "status": 0
   },
   {
@@ -442,19 +442,19 @@
   {
    "name": "wc_lines",
    "script": "printf 'a\\nb\\nc\\n' > w.txt; wc -l w.txt",
-   "stdout": "       3 w.txt\n",
+   "stdout": "3 w.txt\n",
    "status": 0
   },
   {
    "name": "wc_words",
    "script": "echo one two three > w.txt; wc -w w.txt",
-   "stdout": "       3 w.txt\n",
+   "stdout": "3 w.txt\n",
    "status": 0
   },
   {
    "name": "wc_chars",
    "script": "printf 'abc' > w.txt; wc -c w.txt",
-   "stdout": "       3 w.txt\n",
+   "stdout": "3 w.txt\n",
    "status": 0
   },
   {
@@ -634,7 +634,7 @@
   {
    "name": "pipe_wc",
    "script": "printf 'a\\nb\\n' | wc -l",
-   "stdout": "       2\n",
+   "stdout": "2\n",
    "status": 0
   },
   {
@@ -658,13 +658,13 @@
   {
    "name": "redirect_both_to_file",
    "script": "ls no_such_zz > out.txt 2>&1; cat out.txt | wc -l",
-   "stdout": "       1\n",
+   "stdout": "1\n",
    "status": 0
   },
   {
    "name": "redirect_stderr_to_null",
    "script": "ls no_such_zz 2>/dev/null; echo $?",
-   "stdout": "1\n",
+   "stdout": "2\n",
    "status": 0
   },
   {
@@ -1078,7 +1078,7 @@
   {
    "name": "script_file_roundtrip",
    "script": "mkdir -p proj/src; echo 'int x;' > proj/src/a.c; echo 'int y;' > proj/src/b.c; cat proj/src/*.c | wc -l",
-   "stdout": "       2\n",
+   "stdout": "2\n",
    "status": 0
   },
   {
@@ -1126,7 +1126,7 @@
   {
    "name": "script_append_then_read",
    "script": "for i in 1 2 3; do echo row$i >> log.txt; done; wc -l log.txt; tail -n 1 log.txt",
-   "stdout": "       3 log.txt\nrow3\n",
+   "stdout": "3 log.txt\nrow3\n",
    "status": 0
   },
   {
@@ -1234,7 +1234,7 @@
   {
    "name": "wc_empty_file",
    "script": "touch e; wc -l e",
-   "stdout": "       0 e\n",
+   "stdout": "0 e\n",
    "status": 0
   },
   {

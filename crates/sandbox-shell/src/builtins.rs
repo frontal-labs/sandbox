@@ -10,10 +10,11 @@ use std::path::Path;
 const BUILTINS: &[&str] = &[
     "true", "false", "echo", "printf", "read", "pwd", "cd", "cat", "ls", "mkdir", "rm", "mv", "cp",
     "touch", "head", "tail", "wc", "grep", "node", "wasm", "tools", "sandbox", "sh", ":", "test",
-    "[", "break", "continue", "return", "exit", "export", "unset", "type",
+    "[", "break", "continue", "return", "exit", "export", "unset", "type", "sort", "uniq", "cut",
+    "tr", "tee", "seq", "paste", "rev", "basename", "dirname", "printenv", "cmp", "find", "xargs",
+    "du", "stat", "realpath", "sed", "diff", "nl", "base64", "date",
 ];
 
-/// Whether `name` is a builtin.
 /// Whether a command, run by name as `argv[0]`, may read its standard input. A
 /// builtin that never reads its input (`echo`, `printf`, `pwd`, and the others that
 /// take only arguments) returns false. `sh` may run a script that reads, so it
@@ -27,15 +28,33 @@ pub fn command_may_read_stdin(name: &str) -> bool {
     }
     matches!(
         name,
-        "cat" | "head" | "tail" | "wc" | "grep" | "node" | "wasm"
+        "cat"
+            | "head"
+            | "tail"
+            | "wc"
+            | "grep"
+            | "node"
+            | "wasm"
+            | "sort"
+            | "uniq"
+            | "cut"
+            | "tr"
+            | "tee"
+            | "paste"
+            | "rev"
+            | "sed"
+            | "nl"
+            | "base64"
+            | "xargs"
     )
 }
 
+/// Whether `name` is a builtin.
 pub(crate) fn is_builtin(name: &str) -> bool {
     BUILTINS.contains(&name)
 }
 
-fn ok(stdout: Vec<u8>) -> ExecutionResult {
+pub(crate) fn ok(stdout: Vec<u8>) -> ExecutionResult {
     ExecutionResult {
         exit_code: 0,
         stdout,
@@ -44,7 +63,7 @@ fn ok(stdout: Vec<u8>) -> ExecutionResult {
 }
 
 /// Splits `-abc` style flags from operands. Only letters in `allowed` are accepted.
-fn parse_flags<'a>(
+pub(crate) fn parse_flags<'a>(
     command: &str,
     args: &'a [String],
     allowed: &str,
@@ -168,6 +187,28 @@ impl Shell {
             "return" => self.return_(args),
             "export" => self.export(args),
             "unset" => self.unset(args),
+            "sort" => self.sort(args, stdin).await,
+            "uniq" => self.uniq(args, stdin).await,
+            "cut" => self.cut(args, stdin).await,
+            "tr" => self.tr(args, stdin),
+            "tee" => self.tee(args, stdin).await,
+            "seq" => self.seq(args),
+            "paste" => self.paste(args, stdin).await,
+            "rev" => self.rev(args, stdin).await,
+            "basename" => self.basename(args),
+            "dirname" => self.dirname(args),
+            "printenv" => self.printenv(args),
+            "cmp" => self.cmp(args).await,
+            "find" => self.find(args).await,
+            "xargs" => self.xargs(args, stdin).await,
+            "du" => self.du(args).await,
+            "stat" => self.stat(args).await,
+            "realpath" => self.realpath(args).await,
+            "sed" => self.sed(args, stdin).await,
+            "diff" => self.diff(args).await,
+            "nl" => self.nl(args, stdin).await,
+            "base64" => self.base64(args, stdin).await,
+            "date" => self.date(args),
             _ => return None,
         };
         Some(out)
@@ -496,7 +537,8 @@ impl Shell {
             }
         }
         ExecutionResult {
-            exit_code: i32::from(!errors.is_empty()),
+            // GNU ls reports an inaccessible operand with status 2.
+            exit_code: if errors.is_empty() { 0 } else { 2 },
             stdout: out.into_bytes(),
             stderr: errors
                 .iter()
@@ -760,6 +802,9 @@ impl Shell {
         };
         // With no flags, all three counts are shown.
         let all = flags.is_empty();
+        // GNU prints one count bare, and pads several counts into columns.
+        let columns = if all { 3 } else { flags.len() };
+        let width = if columns > 1 { 8 } else { 0 };
         let inputs = self
             .read_inputs(
                 "wc",
@@ -772,13 +817,21 @@ impl Shell {
             let text = String::from_utf8_lossy(data);
             let mut line = String::new();
             if all || flags.contains(&'l') {
-                line.push_str(&format!("{:>8}", text.matches('\n').count()));
+                line.push_str(&format!(
+                    "{:>width$}",
+                    text.matches('\n').count(),
+                    width = width
+                ));
             }
             if all || flags.contains(&'w') {
-                line.push_str(&format!("{:>8}", text.split_whitespace().count()));
+                line.push_str(&format!(
+                    "{:>width$}",
+                    text.split_whitespace().count(),
+                    width = width
+                ));
             }
             if all || flags.contains(&'c') {
-                line.push_str(&format!("{:>8}", data.len()));
+                line.push_str(&format!("{:>width$}", data.len(), width = width));
             }
             if let Some(name) = operands.get(i) {
                 line.push_str(&format!(" {name}"));
@@ -794,7 +847,12 @@ impl Shell {
     }
 
     /// Reads each file operand, or stdin when there are none.
-    async fn read_inputs(&self, command: &str, operands: &[String], stdin: Vec<u8>) -> Inputs {
+    pub(crate) async fn read_inputs(
+        &self,
+        command: &str,
+        operands: &[String],
+        stdin: Vec<u8>,
+    ) -> Inputs {
         if operands.is_empty() {
             return Inputs {
                 data: vec![stdin],
@@ -816,7 +874,7 @@ impl Shell {
         inputs
     }
 
-    async fn write_resolved(&self, resolved: &str, data: &[u8]) -> Result<(), VfsError> {
+    pub(crate) async fn write_resolved(&self, resolved: &str, data: &[u8]) -> Result<(), VfsError> {
         let flags = sandbox_vfs::OpenFlags {
             read: false,
             write: true,
@@ -1041,7 +1099,7 @@ impl Shell {
     }
 }
 
-struct Inputs {
-    data: Vec<Vec<u8>>,
-    errors: Vec<String>,
+pub(crate) struct Inputs {
+    pub(crate) data: Vec<Vec<u8>>,
+    pub(crate) errors: Vec<String>,
 }
