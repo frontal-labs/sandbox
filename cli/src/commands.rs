@@ -107,6 +107,10 @@ pub enum Commands {
         command: SandboxCommand,
     },
 
+    /// Serve the sandbox to an MCP client over stdio: `exec`, `read_file`,
+    /// `write_file`, and `list_dir`, backed by one in-process session.
+    Mcp,
+
     /// Replay a trace in a fresh sandbox and report every run whose output
     /// differs from the recorded one. Exits 1 when any run diverges.
     Replay {
@@ -240,6 +244,7 @@ impl Cli {
                 run_script_once(&command.join(" "), trace.as_deref())
             }
             Commands::Shell { trace } => interactive_shell(trace.as_deref()),
+            Commands::Mcp => crate::mcp::serve_stdio(),
             Commands::Replay { trace_file } => replay_trace(trace_file),
             Commands::Bench { name } => {
                 let rt = runtime()?;

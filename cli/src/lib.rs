@@ -2,5 +2,6 @@
 
 pub mod bench;
 pub mod commands;
+pub mod mcp;
 
 pub use commands::Cli;
