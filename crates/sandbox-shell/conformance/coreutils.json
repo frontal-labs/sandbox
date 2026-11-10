@@ -1,0 +1,869 @@
+{
+ "recorded_with": "sort (GNU coreutils) 9.11",
+ "cases": [
+  {
+   "name": "sort_plain",
+   "script": "printf 'pear\\napple\\nfig\\n' > f; sort f",
+   "stdout": "apple\nfig\npear\n",
+   "status": 0
+  },
+  {
+   "name": "sort_reverse",
+   "script": "printf 'pear\\napple\\nfig\\n' > f; sort -r f",
+   "stdout": "pear\nfig\napple\n",
+   "status": 0
+  },
+  {
+   "name": "sort_numeric",
+   "script": "printf '10\\n9\\n-3\\n2.5\\nx\\n' > f; sort -n f",
+   "stdout": "-3\nx\n2.5\n9\n10\n",
+   "status": 0
+  },
+  {
+   "name": "sort_numeric_reverse",
+   "script": "printf '10\\n9\\n-3\\n2.5\\n' > f; sort -nr f",
+   "stdout": "10\n9\n2.5\n-3\n",
+   "status": 0
+  },
+  {
+   "name": "sort_unique",
+   "script": "printf 'b\\na\\nb\\na\\n' > f; sort -u f",
+   "stdout": "a\nb\n",
+   "status": 0
+  },
+  {
+   "name": "sort_numeric_unique",
+   "script": "printf '1\\n01\\n2\\n' > f; sort -nu f",
+   "stdout": "1\n2\n",
+   "status": 0
+  },
+  {
+   "name": "sort_stdin",
+   "script": "printf 'c\\na\\nb\\n' | sort",
+   "stdout": "a\nb\nc\n",
+   "status": 0
+  },
+  {
+   "name": "sort_two_files",
+   "script": "printf 'b\\n' > a; printf 'a\\n' > b; sort a b",
+   "stdout": "a\nb\n",
+   "status": 0
+  },
+  {
+   "name": "sort_empty",
+   "script": "printf '' > f; sort f; echo done",
+   "stdout": "done\n",
+   "status": 0
+  },
+  {
+   "name": "sort_no_trailing_newline",
+   "script": "printf 'b\\na' > f; sort f",
+   "stdout": "a\nb\n",
+   "status": 0
+  },
+  {
+   "name": "sort_missing_file",
+   "script": "sort nope.txt; echo \"status $?\"",
+   "stdout": "status 2\n",
+   "status": 0
+  },
+  {
+   "name": "uniq_plain",
+   "script": "printf 'a\\na\\nb\\nb\\nb\\na\\n' > f; uniq f",
+   "stdout": "a\nb\na\n",
+   "status": 0
+  },
+  {
+   "name": "uniq_count",
+   "script": "printf 'a\\na\\nb\\n' > f; uniq -c f",
+   "stdout": "      2 a\n      1 b\n",
+   "status": 0
+  },
+  {
+   "name": "uniq_repeated_only",
+   "script": "printf 'a\\na\\nb\\nc\\nc\\n' > f; uniq -d f",
+   "stdout": "a\nc\n",
+   "status": 0
+  },
+  {
+   "name": "uniq_unique_only",
+   "script": "printf 'a\\na\\nb\\nc\\nc\\n' > f; uniq -u f",
+   "stdout": "b\n",
+   "status": 0
+  },
+  {
+   "name": "uniq_stdin",
+   "script": "printf 'x\\nx\\ny\\n' | uniq",
+   "stdout": "x\ny\n",
+   "status": 0
+  },
+  {
+   "name": "uniq_nonadjacent_kept",
+   "script": "printf 'a\\nb\\na\\n' > f; uniq f",
+   "stdout": "a\nb\na\n",
+   "status": 0
+  },
+  {
+   "name": "cut_field_one",
+   "script": "printf 'a:b:c\\nd:e:f\\n' > f; cut -d: -f1 f",
+   "stdout": "a\nd\n",
+   "status": 0
+  },
+  {
+   "name": "cut_field_range",
+   "script": "printf 'a:b:c:d\\n' > f; cut -d: -f2-3 f",
+   "stdout": "b:c\n",
+   "status": 0
+  },
+  {
+   "name": "cut_field_open_start",
+   "script": "printf 'a:b:c:d\\n' > f; cut -d: -f-2 f",
+   "stdout": "a:b\n",
+   "status": 0
+  },
+  {
+   "name": "cut_field_open_end",
+   "script": "printf 'a:b:c:d\\n' > f; cut -d: -f3- f",
+   "stdout": "c:d\n",
+   "status": 0
+  },
+  {
+   "name": "cut_field_list",
+   "script": "printf 'a:b:c:d\\n' > f; cut -d: -f1,3 f",
+   "stdout": "a:c\n",
+   "status": 0
+  },
+  {
+   "name": "cut_tab_default",
+   "script": "printf 'a\\tb\\tc\\n' > f; cut -f2 f",
+   "stdout": "b\n",
+   "status": 0
+  },
+  {
+   "name": "cut_suppress_undelimited",
+   "script": "printf 'abc\\nx:y\\n' > f; cut -s -d: -f2 f",
+   "stdout": "y\n",
+   "status": 0
+  },
+  {
+   "name": "cut_passes_undelimited",
+   "script": "printf 'abc\\nx:y\\n' > f; cut -d: -f2 f",
+   "stdout": "abc\ny\n",
+   "status": 0
+  },
+  {
+   "name": "cut_chars",
+   "script": "printf 'abcdef\\n' > f; cut -c2-4 f",
+   "stdout": "bcd\n",
+   "status": 0
+  },
+  {
+   "name": "cut_chars_list",
+   "script": "printf 'abcdef\\n' > f; cut -c1,3,5 f",
+   "stdout": "ace\n",
+   "status": 0
+  },
+  {
+   "name": "cut_no_list",
+   "script": "printf 'a\\n' > f; cut f; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "tr_translate",
+   "script": "printf 'hello\\n' | tr a-z A-Z",
+   "stdout": "HELLO\n",
+   "status": 0
+  },
+  {
+   "name": "tr_delete",
+   "script": "printf 'a1b2c3\\n' | tr -d 0-9",
+   "stdout": "abc\n",
+   "status": 0
+  },
+  {
+   "name": "tr_squeeze_set1",
+   "script": "printf 'aaabbbccc\\n' | tr -s a-c",
+   "stdout": "abc\n",
+   "status": 0
+  },
+  {
+   "name": "tr_newline_to_space",
+   "script": "printf 'one\\ntwo\\n' | tr '\\n' ' '",
+   "stdout": "one two ",
+   "status": 0
+  },
+  {
+   "name": "tr_short_set2",
+   "script": "printf 'abcd\\n' | tr abcd xy",
+   "stdout": "xyyy\n",
+   "status": 0
+  },
+  {
+   "name": "tr_translate_and_squeeze",
+   "script": "printf 'aabbcc\\n' | tr -s ab xy",
+   "stdout": "xycc\n",
+   "status": 0
+  },
+  {
+   "name": "tr_escape_tab",
+   "script": "printf 'a\\tb\\n' | tr '\\t' '_'",
+   "stdout": "a_b\n",
+   "status": 0
+  },
+  {
+   "name": "tee_writes_file_and_stdout",
+   "script": "printf 'hi\\n' | tee out; cat out",
+   "stdout": "hi\nhi\n",
+   "status": 0
+  },
+  {
+   "name": "tee_append",
+   "script": "printf 'one\\n' > out; printf 'two\\n' | tee -a out; cat out",
+   "stdout": "two\none\ntwo\n",
+   "status": 0
+  },
+  {
+   "name": "tee_overwrite",
+   "script": "printf 'one\\n' > out; printf 'two\\n' | tee out; cat out",
+   "stdout": "two\ntwo\n",
+   "status": 0
+  },
+  {
+   "name": "seq_last_only",
+   "script": "seq 3",
+   "stdout": "1\n2\n3\n",
+   "status": 0
+  },
+  {
+   "name": "seq_first_last",
+   "script": "seq 2 5",
+   "stdout": "2\n3\n4\n5\n",
+   "status": 0
+  },
+  {
+   "name": "seq_increment",
+   "script": "seq 1 2 7",
+   "stdout": "1\n3\n5\n7\n",
+   "status": 0
+  },
+  {
+   "name": "seq_descending",
+   "script": "seq 5 -2 1",
+   "stdout": "5\n3\n1\n",
+   "status": 0
+  },
+  {
+   "name": "seq_separator",
+   "script": "seq -s, 3",
+   "stdout": "1,2,3\n",
+   "status": 0
+  },
+  {
+   "name": "seq_equal_width",
+   "script": "seq -w 8 10",
+   "stdout": "08\n09\n10\n",
+   "status": 0
+  },
+  {
+   "name": "seq_empty_range",
+   "script": "seq 5 1; echo done",
+   "stdout": "done\n",
+   "status": 0
+  },
+  {
+   "name": "seq_zero_increment",
+   "script": "seq 1 0 3; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "paste_two_files",
+   "script": "printf 'a\\nb\\n' > x; printf '1\\n2\\n' > y; paste x y",
+   "stdout": "a\t1\nb\t2\n",
+   "status": 0
+  },
+  {
+   "name": "paste_delimiter",
+   "script": "printf 'a\\nb\\n' > x; printf '1\\n2\\n' > y; paste -d, x y",
+   "stdout": "a,1\nb,2\n",
+   "status": 0
+  },
+  {
+   "name": "paste_unequal",
+   "script": "printf 'a\\nb\\nc\\n' > x; printf '1\\n' > y; paste x y",
+   "stdout": "a\t1\nb\t\nc\t\n",
+   "status": 0
+  },
+  {
+   "name": "paste_serial",
+   "script": "printf 'a\\nb\\nc\\n' > x; paste -s x",
+   "stdout": "a\tb\tc\n",
+   "status": 0
+  },
+  {
+   "name": "paste_serial_delimiter",
+   "script": "printf 'a\\nb\\nc\\n' > x; paste -s -d: x",
+   "stdout": "a:b:c\n",
+   "status": 0
+  },
+  {
+   "name": "rev_lines",
+   "script": "printf 'abc\\nxy\\n' | rev",
+   "stdout": "cba\nyx\n",
+   "status": 0
+  },
+  {
+   "name": "rev_empty_line",
+   "script": "printf 'a\\n\\nb\\n' | rev",
+   "stdout": "a\n\nb\n",
+   "status": 0
+  },
+  {
+   "name": "basename_plain",
+   "script": "basename a/b/c.txt",
+   "stdout": "c.txt\n",
+   "status": 0
+  },
+  {
+   "name": "basename_suffix",
+   "script": "basename a/b/c.txt .txt",
+   "stdout": "c\n",
+   "status": 0
+  },
+  {
+   "name": "basename_s_option",
+   "script": "basename -s .txt a/b/c.txt",
+   "stdout": "c\n",
+   "status": 0
+  },
+  {
+   "name": "basename_trailing_slash",
+   "script": "basename a/b/",
+   "stdout": "b\n",
+   "status": 0
+  },
+  {
+   "name": "basename_root",
+   "script": "basename /",
+   "stdout": "/\n",
+   "status": 0
+  },
+  {
+   "name": "basename_multiple",
+   "script": "basename -a x/a y/b",
+   "stdout": "a\nb\n",
+   "status": 0
+  },
+  {
+   "name": "dirname_nested",
+   "script": "dirname a/b/c",
+   "stdout": "a/b\n",
+   "status": 0
+  },
+  {
+   "name": "dirname_bare",
+   "script": "dirname file",
+   "stdout": ".\n",
+   "status": 0
+  },
+  {
+   "name": "dirname_absolute",
+   "script": "dirname /usr",
+   "stdout": "/\n",
+   "status": 0
+  },
+  {
+   "name": "dirname_double_slash",
+   "script": "dirname a//b//",
+   "stdout": "a\n",
+   "status": 0
+  },
+  {
+   "name": "dirname_root",
+   "script": "dirname /",
+   "stdout": "/\n",
+   "status": 0
+  },
+  {
+   "name": "dirname_multiple",
+   "script": "dirname a/b x/y/z",
+   "stdout": "a\nx/y\n",
+   "status": 0
+  },
+  {
+   "name": "printenv_named",
+   "script": "export GREETING=hello; printenv GREETING",
+   "stdout": "hello\n",
+   "status": 0
+  },
+  {
+   "name": "printenv_missing",
+   "script": "printenv NOT_SET_ANYWHERE; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "cmp_equal",
+   "script": "printf 'abc\\n' > a; printf 'abc\\n' > b; cmp a b; echo \"status $?\"",
+   "stdout": "status 0\n",
+   "status": 0
+  },
+  {
+   "name": "cmp_differ",
+   "script": "printf 'abc\\n' > a; printf 'abd\\n' > b; cmp a b; echo \"status $?\"",
+   "stdout": "a b differ: char 3, line 1\nstatus 1\n",
+   "status": 0
+  },
+  {
+   "name": "cmp_differ_line_two",
+   "script": "printf 'x\\ny\\n' > a; printf 'x\\nz\\n' > b; cmp a b; echo \"status $?\"",
+   "stdout": "a b differ: char 3, line 2\nstatus 1\n",
+   "status": 0
+  },
+  {
+   "name": "cmp_silent",
+   "script": "printf 'abc\\n' > a; printf 'abd\\n' > b; cmp -s a b; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "cmp_eof",
+   "script": "printf 'abc\\n' > a; printf 'ab' > b; cmp a b; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "sed_first_match",
+   "script": "printf 'aaa\\n' | sed 's/a/b/'",
+   "stdout": "baa\n",
+   "status": 0
+  },
+  {
+   "name": "sed_global",
+   "script": "printf 'aaa\\n' | sed 's/a/b/g'",
+   "stdout": "bbb\n",
+   "status": 0
+  },
+  {
+   "name": "sed_bre_groups",
+   "script": "printf 'ab12\\n' | sed 's/\\([a-z]*\\)\\([0-9]*\\)/[\\2\\1]/'",
+   "stdout": "[12ab]\n",
+   "status": 0
+  },
+  {
+   "name": "sed_ere_groups",
+   "script": "printf 'hello world\\n' | sed -E 's/(\\w+) (\\w+)/\\2 \\1/'",
+   "stdout": "world hello\n",
+   "status": 0
+  },
+  {
+   "name": "sed_ampersand",
+   "script": "printf 'cat\\n' | sed 's/cat/[&]/'",
+   "stdout": "[cat]\n",
+   "status": 0
+  },
+  {
+   "name": "sed_other_delimiter",
+   "script": "printf '/usr/bin\\n' | sed 's|/usr|/opt|'",
+   "stdout": "/opt/bin\n",
+   "status": 0
+  },
+  {
+   "name": "sed_no_match",
+   "script": "printf 'x\\n' | sed 's/y/z/'",
+   "stdout": "x\n",
+   "status": 0
+  },
+  {
+   "name": "sed_each_line",
+   "script": "printf 'a1\\na2\\n' | sed 's/[0-9]/#/g'",
+   "stdout": "a#\na#\n",
+   "status": 0
+  },
+  {
+   "name": "sed_ere_plus",
+   "script": "printf 'aaa b\\n' | sed -E 's/a+/X/'",
+   "stdout": "X b\n",
+   "status": 0
+  },
+  {
+   "name": "sed_bre_plus_is_literal",
+   "script": "printf 'a+b\\n' | sed 's/a+b/X/'",
+   "stdout": "X\n",
+   "status": 0
+  },
+  {
+   "name": "sed_ignore_case",
+   "script": "printf 'Hello\\n' | sed 's/hello/X/i'",
+   "stdout": "X\n",
+   "status": 0
+  },
+  {
+   "name": "sed_quiet_with_p",
+   "script": "printf 'a\\nb\\n' | sed -n 's/a/X/p'",
+   "stdout": "X\n",
+   "status": 0
+  },
+  {
+   "name": "sed_from_file",
+   "script": "printf 'foo\\n' > f; sed 's/foo/bar/' f",
+   "stdout": "bar\n",
+   "status": 0
+  },
+  {
+   "name": "diff_same",
+   "script": "printf 'a\\n' > x; printf 'a\\n' > y; diff x y; echo \"status $?\"",
+   "stdout": "status 0\n",
+   "status": 0
+  },
+  {
+   "name": "diff_change",
+   "script": "printf 'a\\nb\\nc\\n' > x; printf 'a\\nB\\nc\\n' > y; diff x y; echo \"status $?\"",
+   "stdout": "2c2\n< b\n---\n> B\nstatus 1\n",
+   "status": 0
+  },
+  {
+   "name": "diff_add",
+   "script": "printf 'a\\nc\\n' > x; printf 'a\\nb\\nc\\n' > y; diff x y; echo \"status $?\"",
+   "stdout": "1a2\n> b\nstatus 1\n",
+   "status": 0
+  },
+  {
+   "name": "diff_delete",
+   "script": "printf 'a\\nb\\nc\\n' > x; printf 'a\\nc\\n' > y; diff x y; echo \"status $?\"",
+   "stdout": "2d1\n< b\nstatus 1\n",
+   "status": 0
+  },
+  {
+   "name": "diff_multi_line_change",
+   "script": "printf 'a\\nb\\nc\\nd\\n' > x; printf 'a\\nX\\nY\\nd\\n' > y; diff x y; echo \"status $?\"",
+   "stdout": "2,3c2,3\n< b\n< c\n---\n> X\n> Y\nstatus 1\n",
+   "status": 0
+  },
+  {
+   "name": "diff_from_empty",
+   "script": "printf '' > x; printf 'z\\n' > y; diff x y; echo \"status $?\"",
+   "stdout": "0a1\n> z\nstatus 1\n",
+   "status": 0
+  },
+  {
+   "name": "nl_default_skips_empty",
+   "script": "printf 'a\\n\\nb\\n' | nl",
+   "stdout": "     1\ta\n       \n     2\tb\n",
+   "status": 0
+  },
+  {
+   "name": "nl_number_all",
+   "script": "printf 'a\\n\\nb\\n' | nl -b a",
+   "stdout": "     1\ta\n     2\t\n     3\tb\n",
+   "status": 0
+  },
+  {
+   "name": "nl_from_file",
+   "script": "printf 'x\\ny\\n' > f; nl f",
+   "stdout": "     1\tx\n     2\ty\n",
+   "status": 0
+  },
+  {
+   "name": "base64_encode",
+   "script": "printf 'hello' | base64",
+   "stdout": "aGVsbG8=\n",
+   "status": 0
+  },
+  {
+   "name": "base64_wrap",
+   "script": "printf 'abcdefghijklmnopqrstuvwxyz0123456789' | base64 -w 10",
+   "stdout": "YWJjZGVmZ2\nhpamtsbW5v\ncHFyc3R1dn\nd4eXowMTIz\nNDU2Nzg5\n",
+   "status": 0
+  },
+  {
+   "name": "base64_no_wrap",
+   "script": "printf 'abcdefgh' | base64 -w 0",
+   "stdout": "YWJjZGVmZ2g=",
+   "status": 0
+  },
+  {
+   "name": "base64_decode",
+   "script": "printf 'aGVsbG8=\\n' | base64 -d",
+   "stdout": "hello",
+   "status": 0
+  },
+  {
+   "name": "base64_empty",
+   "script": "printf '' | base64; echo \"status $?\"",
+   "stdout": "status 0\n",
+   "status": 0
+  },
+  {
+   "name": "date_epoch_day",
+   "script": "date -u -d @0 +%Y-%m-%d",
+   "stdout": "1970-01-01\n",
+   "status": 0
+  },
+  {
+   "name": "date_instant",
+   "script": "date -u -d @1700000000 '+%Y-%m-%d %H:%M:%S'",
+   "stdout": "2023-11-14 22:13:20\n",
+   "status": 0
+  },
+  {
+   "name": "date_weekday",
+   "script": "date -u -d @0 +%a",
+   "stdout": "Thu\n",
+   "status": 0
+  },
+  {
+   "name": "date_day_of_year",
+   "script": "date -u -d @86400 +%j",
+   "stdout": "002\n",
+   "status": 0
+  },
+  {
+   "name": "find_all",
+   "script": "mkdir -p d/sub; printf x > d/a.txt; printf y > d/sub/b.txt; printf z > d/c.md; find d | sort",
+   "stdout": "d\nd/a.txt\nd/c.md\nd/sub\nd/sub/b.txt\n",
+   "status": 0
+  },
+  {
+   "name": "find_name_glob",
+   "script": "mkdir -p d/sub; printf x > d/a.txt; printf y > d/sub/b.txt; printf z > d/c.md; find d -name '*.txt' | sort",
+   "stdout": "d/a.txt\nd/sub/b.txt\n",
+   "status": 0
+  },
+  {
+   "name": "find_type_f",
+   "script": "mkdir -p d/sub; printf x > d/a.txt; printf y > d/sub/b.txt; find d -type f | sort",
+   "stdout": "d/a.txt\nd/sub/b.txt\n",
+   "status": 0
+  },
+  {
+   "name": "find_type_d",
+   "script": "mkdir -p d/sub; printf x > d/a.txt; find d -type d | sort",
+   "stdout": "d\nd/sub\n",
+   "status": 0
+  },
+  {
+   "name": "find_maxdepth",
+   "script": "mkdir -p d/sub; printf x > d/a.txt; printf y > d/sub/b.txt; find d -maxdepth 1 | sort",
+   "stdout": "d\nd/a.txt\nd/sub\n",
+   "status": 0
+  },
+  {
+   "name": "find_missing_start",
+   "script": "find nope; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "xargs_default_echo",
+   "script": "printf 'x y\\n' | xargs",
+   "stdout": "x y\n",
+   "status": 0
+  },
+  {
+   "name": "xargs_echo_lines",
+   "script": "printf 'a b\\nc\\n' | xargs echo",
+   "stdout": "a b c\n",
+   "status": 0
+  },
+  {
+   "name": "xargs_one_per_run",
+   "script": "printf 'a b c\\n' | xargs -n 1 echo",
+   "stdout": "a\nb\nc\n",
+   "status": 0
+  },
+  {
+   "name": "xargs_fixed_prefix",
+   "script": "printf 'b\\n' | xargs echo a",
+   "stdout": "a b\n",
+   "status": 0
+  },
+  {
+   "name": "xargs_quoted_word",
+   "script": "printf \"'x y' z\\n\" | xargs echo",
+   "stdout": "x y z\n",
+   "status": 0
+  },
+  {
+   "name": "xargs_cat_file",
+   "script": "printf 'hello\\n' > f; echo f | xargs cat",
+   "stdout": "hello\n",
+   "status": 0
+  },
+  {
+   "name": "xargs_empty_input",
+   "script": "printf '' | xargs echo done",
+   "stdout": "done\n",
+   "status": 0
+  },
+  {
+   "name": "du_file_bytes",
+   "script": "printf '12345' > f; du -sb f",
+   "stdout": "5\tf\n",
+   "status": 0
+  },
+  {
+   "name": "du_two_files",
+   "script": "printf 'ab' > x; printf 'cde' > y; du -sb x y",
+   "stdout": "2\tx\n3\ty\n",
+   "status": 0
+  },
+  {
+   "name": "stat_size_and_name",
+   "script": "printf 'abcd' > f; stat -c '%s %n' f",
+   "stdout": "4 f\n",
+   "status": 0
+  },
+  {
+   "name": "stat_regular_file",
+   "script": "printf 'abcd' > f; stat -c %F f",
+   "stdout": "regular file\n",
+   "status": 0
+  },
+  {
+   "name": "stat_directory",
+   "script": "mkdir d; stat -c %F d",
+   "stdout": "directory\n",
+   "status": 0
+  },
+  {
+   "name": "realpath_relative",
+   "script": "mkdir -p a/b; realpath --relative-to=a a/b",
+   "stdout": "b\n",
+   "status": 0
+  },
+  {
+   "name": "realpath_parent",
+   "script": "mkdir -p a/b; realpath --relative-to=a/b a",
+   "stdout": "..\n",
+   "status": 0
+  },
+  {
+   "name": "realpath_missing_last",
+   "script": "realpath nope >/dev/null; echo \"status $?\"",
+   "stdout": "status 0\n",
+   "status": 0
+  },
+  {
+   "name": "realpath_missing_parent",
+   "script": "realpath nope/x >/dev/null; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "cat_files",
+   "script": "printf 'a\\n' > x; printf 'b\\n' > y; cat x y",
+   "stdout": "a\nb\n",
+   "status": 0
+  },
+  {
+   "name": "cat_stdin_dash",
+   "script": "printf 'in\\n' | cat",
+   "stdout": "in\n",
+   "status": 0
+  },
+  {
+   "name": "cat_missing_status",
+   "script": "cat nope; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "cp_file",
+   "script": "printf 'data\\n' > a; cp a b; cat b",
+   "stdout": "data\n",
+   "status": 0
+  },
+  {
+   "name": "cp_into_dir",
+   "script": "printf 'data\\n' > a; mkdir d; cp a d; cat d/a",
+   "stdout": "data\n",
+   "status": 0
+  },
+  {
+   "name": "mv_file",
+   "script": "printf 'data\\n' > a; mv a b; cat b; echo \"status $?\"",
+   "stdout": "data\nstatus 0\n",
+   "status": 0
+  },
+  {
+   "name": "rm_file",
+   "script": "printf 'x\\n' > a; rm a; echo \"status $?\"",
+   "stdout": "status 0\n",
+   "status": 0
+  },
+  {
+   "name": "rm_missing",
+   "script": "rm nope; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "mkdir_parents",
+   "script": "mkdir -p a/b/c; find a | sort",
+   "stdout": "a\na/b\na/b/c\n",
+   "status": 0
+  },
+  {
+   "name": "mkdir_exists",
+   "script": "mkdir d; mkdir d; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "touch_creates",
+   "script": "touch new; echo \"status $?\"",
+   "stdout": "status 0\n",
+   "status": 0
+  },
+  {
+   "name": "head_default",
+   "script": "printf '1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n' > f; head f",
+   "stdout": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n",
+   "status": 0
+  },
+  {
+   "name": "head_n",
+   "script": "printf 'a\\nb\\nc\\n' > f; head -n 2 f",
+   "stdout": "a\nb\n",
+   "status": 0
+  },
+  {
+   "name": "tail_n",
+   "script": "printf 'a\\nb\\nc\\n' > f; tail -n 2 f",
+   "stdout": "b\nc\n",
+   "status": 0
+  },
+  {
+   "name": "wc_lines",
+   "script": "printf 'a\\nb\\n' | wc -l",
+   "stdout": "2\n",
+   "status": 0
+  },
+  {
+   "name": "wc_words_chars",
+   "script": "printf 'one two\\nthree\\n' | wc -w",
+   "stdout": "3\n",
+   "status": 0
+  },
+  {
+   "name": "grep_match",
+   "script": "printf 'apple\\nbanana\\n' | grep an",
+   "stdout": "banana\n",
+   "status": 0
+  },
+  {
+   "name": "grep_no_match_status",
+   "script": "printf 'apple\\n' | grep zzz; echo \"status $?\"",
+   "stdout": "status 1\n",
+   "status": 0
+  },
+  {
+   "name": "grep_count_style",
+   "script": "printf 'x\\ny\\nx\\n' | grep -c x",
+   "stdout": "2\n",
+   "status": 0
+  }
+ ]
+}

@@ -1,6 +1,7 @@
 """Records the expected output of each conformance case under GNU bash.
 
-Run from this directory: `python3 record.py`. Each case runs in a fresh empty
+Run from this directory: `python3 record.py`. The GNU tools from Homebrew come first on
+PATH (see `record_coreutils.py`), so every command means its GNU version. Each case runs in a fresh empty
 directory, so relative paths behave the same as they do in the sandbox, which
 starts at `/`. The output is written to `cases.json`, which the Rust test
 replays. Re-run this script whenever a case changes, and commit the result.
@@ -12,13 +13,14 @@ import subprocess
 import tempfile
 
 from cases import cases
+from record_coreutils import gnu_path, gnu_version
 
 BASH = "bash"
 
 
 def bash_version() -> str:
     out = subprocess.run([BASH, "--version"], capture_output=True, text=True, check=True)
-    return out.stdout.splitlines()[0]
+    return out.stdout.splitlines()[0] + "; " + gnu_version()
 
 
 def run(script: str) -> dict:
@@ -28,7 +30,7 @@ def run(script: str) -> dict:
             cwd=work,
             capture_output=True,
             timeout=10,
-            env={"PATH": os.environ["PATH"], "LC_ALL": "C"},
+            env={"PATH": gnu_path(), "LC_ALL": "C"},
         )
     return {
         "stdout": proc.stdout.decode("utf-8", errors="replace"),
