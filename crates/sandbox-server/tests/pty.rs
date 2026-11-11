@@ -273,3 +273,42 @@ async fn a_typed_line_reaches_a_running_cat_and_ctrl_d_ends_it() {
     send_input(&mut socket, "echo done\r").await;
     output_until(&mut socket, "done\r\n$ ").await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn backspace_while_a_command_runs_edits_the_line_it_sends() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await;
+    output_until(&mut socket, "$ ").await;
+    send_input(&mut socket, "cat\r").await;
+    // "helo" with a Backspace and "lo" typed in its place: cat gets "hello".
+    send_input(&mut socket, "helo").await;
+    send_input(&mut socket, "\u{7f}").await;
+    send_input(&mut socket, "lo\r").await;
+    output_until(&mut socket, "hello\r\n").await;
+    send_input(&mut socket, "\u{4}").await;
+    output_until(&mut socket, "$ ").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ctrl_d_on_a_partial_line_sends_it_and_does_not_end_the_input() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await;
+    output_until(&mut socket, "$ ").await;
+    send_input(&mut socket, "cat\r").await;
+    // Ctrl-D on "partial" sends it without a newline, so cat prints it and keeps reading.
+    send_input(&mut socket, "partial").await;
+    send_input(&mut socket, "\u{4}").await;
+    output_until(&mut socket, "partial").await;
+    send_input(&mut socket, "\u{4}").await;
+    output_until(&mut socket, "$ ").await;
+}

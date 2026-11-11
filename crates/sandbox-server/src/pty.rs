@@ -49,6 +49,12 @@ pub struct LineEditor {
 }
 
 impl LineEditor {
+    /// Takes the line typed so far, without its newline. Ctrl-D flushes it this way while a
+    /// command reads it, as a terminal does.
+    pub fn take_partial(&mut self) -> String {
+        std::mem::take(&mut self.line)
+    }
+
     /// Applies typed text and returns the events it produced, in order.
     pub fn feed(&mut self, input: &str) -> Vec<Typed> {
         let mut events = Vec::new();
@@ -172,6 +178,7 @@ where
     K: futures::Sink<Message> + Unpin,
 {
     let (live_tx, live_rx) = live_input();
+    let mut editor = LineEditor::default();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<OutputChunk>();
     let observer: OutputObserver = Arc::new(move |chunk: OutputChunk| {
         let _ = out_tx.send(chunk);
@@ -195,15 +202,32 @@ where
                         return (None, sent);
                     }
                     if let Ok(ClientMessage::Input { data }) = serde_json::from_str(&text) {
-                        if data.contains(CTRL_D) {
-                            live_tx.end();
+                        // Typed text is edited as a terminal edits a line: the user sees the echo,
+                        // Backspace erases, and the command gets each line when it is finished.
+                        let mut ended = false;
+                        for typed in editor.feed(&data) {
+                            match typed {
+                                Typed::Echo(echo) => {
+                                    if tx.send(output(&terminal_text(&echo))).await.is_err() {
+                                        return (None, sent);
+                                    }
+                                }
+                                Typed::Line(line) => {
+                                    let _ = live_tx.send(format!("{line}\n").into_bytes());
+                                }
+                                Typed::EndOfInput => ended = true,
+                                Typed::Interrupt => {}
+                            }
                         }
-                        let typed: String = data.chars().filter(|c| !c.is_control() || *c == '\r' || *c == '\n').collect();
-                        // The command reads what is typed as lines, so Enter becomes a newline.
-                        live_tx.send(typed.replace('\r', "\n").into_bytes());
-                        // The user sees what they type, as a terminal echoes it.
-                        if tx.send(output(&terminal_text(&typed))).await.is_err() {
-                            return (None, sent);
+                        if data.contains(CTRL_D) && !ended {
+                            // Ctrl-D on a partial line sends it without a newline, and does not end.
+                            let partial = editor.take_partial();
+                            if !partial.is_empty() {
+                                let _ = live_tx.send(partial.into_bytes());
+                            }
+                        }
+                        if ended {
+                            live_tx.end();
                         }
                     }
                 }

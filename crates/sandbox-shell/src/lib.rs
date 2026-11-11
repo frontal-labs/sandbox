@@ -28,6 +28,7 @@ pub mod parser;
 
 mod arith;
 mod printf;
+mod stream;
 
 pub use ast::Script;
 pub use builtins::command_may_read_stdin;
