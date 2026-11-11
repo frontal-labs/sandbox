@@ -109,6 +109,8 @@ pub struct AppState {
     pub(crate) usage: UsageTable,
     /// Per-session CPU, memory, and exec metering for billing (see `metering`).
     pub(crate) meters: crate::metering::MeterTable,
+    /// The billing event stream, on a clustered server (see `billing`).
+    pub(crate) billing: Option<crate::billing::BillingLog>,
     /// The Tier 2 guest the server can promote a session into. `None` when no image is
     /// configured, and then a command the isolate tier cannot run is refused.
     pub(crate) vm: Option<Arc<VmConfig>>,
@@ -242,25 +244,60 @@ pub const MAX_SNAPSHOTS_TOTAL: usize = 4096;
 /// Stores a new session if the caller and the server are under their limits.
 /// The check and the insert happen under one lock, so concurrent creates
 /// cannot both pass a limit that only one of them should reach.
+/// Appends one event to the billing stream, on a clustered server. The event is durable when
+/// this returns, so the request that caused it can be answered after it.
+async fn record_billing(
+    state: &AppState,
+    event: crate::billing::BillingEvent,
+) -> Result<(), ApiError> {
+    if let Some(billing) = &state.billing {
+        billing.append(&event).await?;
+    }
+    Ok(())
+}
+
 /// Records a finished command in its session's meter: the CPU and wall time it used, and the
 /// filesystem bytes the session held when it finished. A command that failed is not metered.
+/// On a clustered server the new reading is written to the billing stream too.
 async fn record_meter(
     state: &AppState,
+    owner: &KeyId,
     id: SessionId,
     session: &dyn Session,
     result: &Result<ExecResult, SandboxError>,
-) {
+) -> Result<(), ApiError> {
     let Ok(out) = result else {
-        return;
+        return Ok(());
     };
     let bytes = session.fs().total_bytes().await.unwrap_or(0);
     state
         .meters
         .record_exec(&id.to_string(), out.cpu_ms, out.wall_ms, bytes);
+    let meter = state.meters.get(&id.to_string());
+    record_billing(
+        state,
+        crate::billing::BillingEvent::usage_reading(
+            owner.as_str(),
+            &id.to_string(),
+            now_millis(),
+            &meter,
+        ),
+    )
+    .await
 }
 
 async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<(), ApiError> {
     let id = entry.state.id;
+    // The start is written first: if the stream cannot take it, the session is not admitted.
+    record_billing(
+        state,
+        crate::billing::BillingEvent::session_started(
+            owner.as_str(),
+            &id.to_string(),
+            now_millis(),
+        ),
+    )
+    .await?;
     state.meters.open(owner.as_str(), &id.to_string());
     let mut table = state.sessions.0.write().await;
     let parked = parked_counts(state);
@@ -947,6 +984,7 @@ fn router_with_options(
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
         meters: crate::metering::MeterTable::default(),
+        billing: None,
         epoch_ms: now_millis(),
         usage_log: None,
         parked: None,
@@ -1017,6 +1055,7 @@ pub async fn open_durable_with_options(
             usage_log: Some(dir.join("usage.jsonl")),
             parked: Some(parked),
             snapshot_files: Some(snapshot_files),
+            billing: None,
         },
     )
     .await
@@ -1059,7 +1098,8 @@ pub async fn open_clustered_with_remote(
 ) -> Result<(Router, AppState, Option<String>), SandboxError> {
     crate::persist::prepare_blobs(dir, blob_remote)?;
     let (store, saved) = crate::pg_store::PgStore::connect(database_url).await?;
-    attach_store(
+    let billing = crate::billing::BillingLog::connect(database_url).await?;
+    let (router, state, key) = attach_store(
         scheduler,
         crate::persist::Persistence::Clustered(store),
         saved,
@@ -1070,9 +1110,18 @@ pub async fn open_clustered_with_remote(
             usage_log: None,
             parked: None,
             snapshot_files: None,
+            billing: Some(billing),
         },
     )
-    .await
+    .await?;
+    // Meters are in memory, so after a restart they come back from the stream, which kept
+    // every reading. A session that stopped keeps its final meter, and stays stopped.
+    if let Some(billing) = &state.billing {
+        for (key_id, session_id, meter, open) in billing.latest_meters().await? {
+            state.meters.restore(&key_id, &session_id, meter, open);
+        }
+    }
+    Ok((router, state, key))
 }
 
 /// What a server is attached with besides its store. The file-backed parts (the usage log, the
@@ -1084,6 +1133,7 @@ struct Attachments {
     usage_log: Option<std::path::PathBuf>,
     parked: Option<crate::parked::ParkedStore>,
     snapshot_files: Option<crate::parked::SnapshotFiles>,
+    billing: Option<crate::billing::BillingLog>,
 }
 
 /// Builds the server around a store and its saved state: restores the keys, snapshots, and
@@ -1098,6 +1148,7 @@ async fn attach_store(
         vm,
         python,
         otel,
+        billing,
         usage_log,
         parked,
         snapshot_files,
@@ -1125,6 +1176,7 @@ async fn attach_store(
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
         meters: crate::metering::MeterTable::default(),
+        billing,
         vm_pool: pool_for(&vm),
         vm,
         python,
@@ -1313,6 +1365,47 @@ async fn persist(state: &AppState) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Query of `GET /v1/billing/events`: the events after position `after`, at most `limit`.
+#[derive(Debug, Deserialize)]
+pub struct BillingEventsQuery {
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default = "default_billing_limit")]
+    pub limit: i64,
+}
+
+fn default_billing_limit() -> i64 {
+    100
+}
+
+/// The caller's billing events after a saved position, oldest first, one JSON object per line.
+/// A consumer keeps the last `seq` it handled and passes it back as `after`, so it resumes after
+/// a restart of its own or of the server. Available on a clustered server only.
+pub async fn get_billing_events(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Query(query): Query<BillingEventsQuery>,
+) -> Result<Response, ApiError> {
+    let Some(billing) = &state.billing else {
+        return Err(SandboxError::not_found("billing events are not kept on this server").into());
+    };
+    let events = billing
+        .read_after(owner.as_str(), query.after, query.limit.clamp(1, 1000))
+        .await?;
+    let mut body = String::new();
+    for event in events {
+        let line =
+            serde_json::to_string(&event).map_err(|e| SandboxError::internal(e.to_string()))?;
+        body.push_str(&line);
+        body.push('\n');
+    }
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/x-ndjson")],
+        body,
+    )
+        .into_response())
+}
+
 /// The caller's usage as billing history: one snapshot line per request, with the server's
 /// start time, so a consumer computes what happened between two snapshots, and knows when a
 /// restart reset the counters. On a durable server each snapshot is also kept in the data
@@ -1479,6 +1572,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/gc", post(crate::gc::run_gc))
         .route("/v1/usage", get(get_usage))
         .route("/v1/usage/export", get(get_usage_export))
+        .route("/v1/billing/events", get(get_billing_events))
         .route("/metrics", get(get_metrics))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -1752,6 +1846,18 @@ pub async fn destroy_session(
             }
         }
     }
+    if let Some(meter) = state.meters.close(&id) {
+        record_billing(
+            &state,
+            crate::billing::BillingEvent::session_stopped(
+                owner.as_str(),
+                &id,
+                now_millis(),
+                &meter,
+            ),
+        )
+        .await?;
+    }
     persist(&state).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1900,7 +2006,7 @@ async fn run_exec(
             c.exec_wall_ms += out.wall_ms;
         }
     });
-    record_meter(state, own.state.id, session.as_ref(), &result).await;
+    record_meter(state, owner, own.state.id, session.as_ref(), &result).await?;
     let files = files_since(session.as_ref(), before).await;
     let seq = record_exec(state, own.state.id, &request, &result, files, random_state).await;
     checkpoint_after_exec(state, owner, own.state.id, &session).await?;
@@ -3571,7 +3677,7 @@ async fn fork_locked(
                 c.exec_wall_ms += out.wall_ms;
             }
         });
-        record_meter(state, child_id, child.as_ref(), &result).await;
+        record_meter(state, owner, child_id, child.as_ref(), &result).await?;
         let files = files_since(child.as_ref(), before).await;
         let changed_files = files.as_ref().map_or(0, Vec::len);
         record_exec(state, child_id, &exec, &result, files, random_state).await;
