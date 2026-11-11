@@ -176,3 +176,59 @@ async fn a_command_that_needs_all_its_input_still_waits_for_the_end() {
     tx.end();
     assert_eq!(run.await.unwrap().stdout, b"a\nb\n");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_streamed_pipeline_passes_each_line_through_every_stage() {
+    let (run, tx, seen) = start("cat | rev");
+    tx.send(b"abc\n".to_vec());
+    wait_for(&seen, b"cba\n").await;
+    tx.send(b"xy\n".to_vec());
+    wait_for(&seen, b"cba\nyx\n").await;
+    tx.end();
+    assert_eq!(run.await.unwrap().stdout, b"cba\nyx\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_filter_in_a_streamed_pipeline_drops_the_lines_it_rejects() {
+    let (run, tx, seen) = start("grep a | rev");
+    tx.send(b"ax\nb\nxa\n".to_vec());
+    wait_for(&seen, b"xa\nax\n").await;
+    tx.end();
+    assert_eq!(run.await.unwrap().stdout, b"xa\nax\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pipeline_ending_in_sort_prints_once_the_input_ends() {
+    let (run, tx, seen) = start("cat | sort");
+    tx.send(b"b\na\n".to_vec());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "sort prints only after every line"
+    );
+    assert!(!run.is_finished());
+    tx.end();
+    assert_eq!(run.await.unwrap().stdout, b"a\nb\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pipeline_whose_first_stage_needs_all_input_gets_it_drained() {
+    let (run, tx, _seen) = start("sort | rev");
+    tx.send(b"ab\nba\n".to_vec());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!run.is_finished(), "sort waits for the end of its input");
+    tx.end();
+    assert_eq!(run.await.unwrap().stdout, b"ba\nab\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn head_at_the_end_of_a_streamed_pipeline_stops_the_run() {
+    let (run, tx, _seen) = start("cat | head -n 1");
+    tx.send(b"x\ny\n".to_vec());
+    let result = tokio::time::timeout(Duration::from_secs(10), run)
+        .await
+        .expect("head is done after its line")
+        .unwrap();
+    assert_eq!(result.stdout, b"x\n");
+    drop(tx);
+}
