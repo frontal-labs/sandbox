@@ -677,3 +677,62 @@ async fn python_runs_from_the_registry_with_a_read_only_stdlib() {
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("Errno") || err.contains("Read-only"), "{err}");
 }
+
+const GIT_TOOL: &[u8] = include_bytes!("../../sandbox-wasm/fixtures/git_tool.wasm");
+
+/// The git tool installed through the registry, with the limits `tools.toml` gives it. The
+/// hash is the module's own, so a changed fixture fails here as well as in the manifest test.
+async fn shell_with_git() -> Shell {
+    let mut sh = shell();
+    run(&mut sh, "mkdir -p /etc /opt /work").await;
+    sh.write_file("/opt/git_tool.wasm", GIT_TOOL, false)
+        .await
+        .unwrap();
+    let pinned = sandbox_types::hash::ContentHash::new(GIT_TOOL).to_hex();
+    let manifest = format!(
+        "[[tool]]\nname = \"git\"\npath = \"/opt/git_tool.wasm\"\nversion = \"0.1.0\"\nhash = \"{pinned}\"\nfuel = 20000000\nmax_memory_bytes = 33554432\nmax_output_bytes = 131072\n"
+    );
+    sh.write_file("/etc/tools.toml", manifest.as_bytes(), false)
+        .await
+        .unwrap();
+    sh
+}
+
+#[tokio::test]
+async fn git_init_add_commit_and_log_run_through_the_registry() {
+    let mut sh = shell_with_git().await;
+    run(&mut sh, "cd /work").await;
+    let (code, _, err) = run(&mut sh, "git init -q .").await;
+    assert_eq!(code, 0, "init: {err}");
+
+    run(&mut sh, "echo hello > a.txt").await;
+    let (code, _, err) = run(&mut sh, "git add a.txt").await;
+    assert_eq!(code, 0, "add: {err}");
+
+    let (code, out, _) = run(&mut sh, "git status --porcelain").await;
+    assert_eq!(code, 0);
+    assert_eq!(out, "A  a.txt\n");
+
+    let (code, _, err) = run(
+        &mut sh,
+        "git -c user.name=Test -c user.email=t@example.com commit -q -m 'first commit'",
+    )
+    .await;
+    assert_eq!(code, 0, "commit: {err}");
+
+    // Commit hashes depend on the clock, so the test reads subjects, not hashes.
+    let (code, out, _) = run(&mut sh, "git log --format=%s").await;
+    assert_eq!(code, 0);
+    assert_eq!(out, "first commit\n");
+    let (code, out, _) = run(&mut sh, "git status --porcelain").await;
+    assert_eq!((code, out.as_str()), (0, ""));
+}
+
+#[tokio::test]
+async fn git_refuses_the_network_commands() {
+    let mut sh = shell_with_git().await;
+    run(&mut sh, "cd /work").await;
+    let (code, _, err) = run(&mut sh, "git clone https://example.com/x.git").await;
+    assert_ne!(code, 0);
+    assert!(!err.is_empty(), "a refused command says why");
+}
