@@ -107,6 +107,8 @@ pub struct AppState {
     pub(crate) gc_last_run: Arc<tokio::sync::Mutex<Option<std::time::Instant>>>,
     /// What each key has used since this server started (PLAN §4.14).
     pub(crate) usage: UsageTable,
+    /// Per-session CPU, memory, and exec metering for billing (see `metering`).
+    pub(crate) meters: crate::metering::MeterTable,
     /// The Tier 2 guest the server can promote a session into. `None` when no image is
     /// configured, and then a command the isolate tier cannot run is refused.
     pub(crate) vm: Option<Arc<VmConfig>>,
@@ -240,8 +242,26 @@ pub const MAX_SNAPSHOTS_TOTAL: usize = 4096;
 /// Stores a new session if the caller and the server are under their limits.
 /// The check and the insert happen under one lock, so concurrent creates
 /// cannot both pass a limit that only one of them should reach.
+/// Records a finished command in its session's meter: the CPU and wall time it used, and the
+/// filesystem bytes the session held when it finished. A command that failed is not metered.
+async fn record_meter(
+    state: &AppState,
+    id: SessionId,
+    session: &dyn Session,
+    result: &Result<ExecResult, SandboxError>,
+) {
+    let Ok(out) = result else {
+        return;
+    };
+    let bytes = session.fs().total_bytes().await.unwrap_or(0);
+    state
+        .meters
+        .record_exec(&id.to_string(), out.cpu_ms, out.wall_ms, bytes);
+}
+
 async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<(), ApiError> {
     let id = entry.state.id;
+    state.meters.open(owner.as_str(), &id.to_string());
     let mut table = state.sessions.0.write().await;
     let parked = parked_counts(state);
     if table.len() + parked.total() >= MAX_SESSIONS_TOTAL {
@@ -926,6 +946,7 @@ fn router_with_options(
         snapshots: SnapshotTable::default(),
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
+        meters: crate::metering::MeterTable::default(),
         epoch_ms: now_millis(),
         usage_log: None,
         parked: None,
@@ -1103,6 +1124,7 @@ async fn attach_store(
         },
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
+        meters: crate::metering::MeterTable::default(),
         vm_pool: pool_for(&vm),
         vm,
         python,
@@ -1300,11 +1322,20 @@ pub async fn get_usage_export(
     Extension(owner): Extension<KeyId>,
 ) -> Result<Response, ApiError> {
     let counters = state.usage.get(&owner);
+    let sessions: Vec<serde_json::Value> = state
+        .meters
+        .for_owner(owner.as_str())
+        .into_iter()
+        .map(|(id, meter)| serde_json::json!({ "session_id": id, "meter": meter }))
+        .collect();
+    let total = state.meters.total_for_owner(owner.as_str());
     let line = serde_json::json!({
         "key": owner.as_str(),
         "server_epoch_ms": state.epoch_ms,
         "at_ms": now_millis(),
         "counters": counters,
+        "sessions": sessions,
+        "total": total,
     });
     let mut body = String::new();
     if let Some(path) = &state.usage_log {
@@ -1869,6 +1900,7 @@ async fn run_exec(
             c.exec_wall_ms += out.wall_ms;
         }
     });
+    record_meter(state, own.state.id, session.as_ref(), &result).await;
     let files = files_since(session.as_ref(), before).await;
     let seq = record_exec(state, own.state.id, &request, &result, files, random_state).await;
     checkpoint_after_exec(state, owner, own.state.id, &session).await?;
@@ -3539,6 +3571,7 @@ async fn fork_locked(
                 c.exec_wall_ms += out.wall_ms;
             }
         });
+        record_meter(state, child_id, child.as_ref(), &result).await;
         let files = files_since(child.as_ref(), before).await;
         let changed_files = files.as_ref().map_or(0, Vec::len);
         record_exec(state, child_id, &exec, &result, files, random_state).await;
