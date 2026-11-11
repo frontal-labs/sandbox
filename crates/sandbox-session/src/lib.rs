@@ -11,6 +11,8 @@ pub use backend::{
 };
 pub use filesystem::{delete_file, replay_run, vfs_error, write_file};
 pub use output::{cap_output, DEFAULT_OUTPUT_LIMIT};
-pub use sandbox_shell::{command_may_read_stdin, OutputChunk, OutputObserver};
+pub use sandbox_shell::{
+    command_may_read_stdin, live_input, LiveInput, LiveSender, OutputChunk, OutputObserver,
+};
 pub use session::Checkpoint;
 pub use session::Session;

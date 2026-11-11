@@ -182,6 +182,8 @@ pub struct Shell {
     /// Bytes of stdout a tool streamed while the simple command being run was
     /// running. `None` when that command's output is not streamed. See `tool_stdout`.
     stream_count: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    /// Standard input that arrives while the run goes on, for a top-level `cat` (see `live`).
+    live: Option<crate::live::LiveInput>,
     /// Set when a forked child already reported the output of the command being run,
     /// so that output is not reported again when the command finishes.
     reported_by_child: bool,
@@ -232,6 +234,7 @@ impl Shell {
             observer: None,
             capturing: false,
             stream_count: None,
+            live: None,
             reported_by_child: false,
             steps: 0,
             depth: 0,
@@ -330,6 +333,48 @@ impl Shell {
         Ok(self.finish(result))
     }
 
+    /// Like [`Shell::run_streamed`], and a top-level `cat` with no operands reads its standard
+    /// input from `input` as it arrives, reporting each chunk to `observer` as it comes. Input
+    /// is not read by any other command. The rest of the run is unchanged.
+    pub async fn run_streamed_live(
+        &mut self,
+        script: &str,
+        observer: Option<OutputObserver>,
+        input: crate::live::LiveInput,
+    ) -> Result<ExecutionResult, SandboxError> {
+        self.live = Some(input);
+        let result = self.run_streamed(script, observer).await;
+        self.live = None;
+        result
+    }
+
+    /// `cat` with no operands, reading the live input. Each chunk is reported to the observer as
+    /// it arrives, and counted in `stream_count`, so the command's end does not report it again.
+    /// The whole input is also returned, so a redirection or a pipe still gets it.
+    async fn cat_live(&mut self) -> ExecutionResult {
+        let Some(mut input) = self.live.take() else {
+            return ExecutionResult::default();
+        };
+        let observer = self.observer.clone();
+        let count = self.stream_count.clone();
+        let mut out = Vec::new();
+        while let Some(chunk) = input.next_chunk().await {
+            if let (Some(observer), Some(count)) = (&observer, &count) {
+                count.fetch_add(chunk.len(), std::sync::atomic::Ordering::SeqCst);
+                observer(OutputChunk {
+                    fd: 1,
+                    data: chunk.clone(),
+                });
+            }
+            out.extend(chunk);
+        }
+        ExecutionResult {
+            exit_code: 0,
+            stdout: out,
+            stderr: Vec::new(),
+        }
+    }
+
     /// Drops the observer. A run that the caller cancelled never reaches the end
     /// of its own, so its caller clears the observer through this.
     pub fn detach_observer(&mut self) {
@@ -424,6 +469,7 @@ impl Shell {
             observer: self.observer.clone(),
             capturing: self.capturing,
             stream_count: None,
+            live: None,
             reported_by_child: false,
             steps: self.steps,
             depth: self.depth,
@@ -842,6 +888,13 @@ impl Shell {
         // enclosing compound command is reading, as `cat` does in `{ cat; }`. `read`
         // takes one line of it instead, so it is left alone here.
         // An input redirection replaces both, and it leaves the input unread.
+        // A top-level `cat` with no operands reads the live input, when there is one.
+        let live_cat = argv.len() == 1
+            && argv[0] == "cat"
+            && !self.capturing
+            && self.live.is_some()
+            && stdin_override.is_none()
+            && pending_stdin.is_none();
         let stdin = match (stdin_override, pending_stdin) {
             (Some(data), _) => data,
             (None, Some(data)) => data,
@@ -858,7 +911,11 @@ impl Shell {
         let streams = redirects.is_empty() && !self.capturing && matches!(sinks.0, Sink::Stdout);
         self.stream_count =
             streams.then(|| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-        let out = self.run_argv_inner(&argv, stdin).await;
+        let out = if live_cat {
+            self.cat_live().await
+        } else {
+            self.run_argv_inner(&argv, stdin).await
+        };
 
         for (name, previous) in saved.into_iter().rev() {
             match previous {

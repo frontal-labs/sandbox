@@ -250,3 +250,26 @@ async fn a_bare_exit_reports_the_status_of_the_last_command() {
     let exit = exit_of(&mut socket).await;
     assert_eq!(exit["code"], 1, "{exit}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_typed_line_reaches_a_running_cat_and_ctrl_d_ends_it() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await;
+    output_until(&mut socket, "$ ").await;
+    send_input(&mut socket, "cat\r").await;
+    // cat is running now, so it reads what is typed and prints it before the input ends.
+    send_input(&mut socket, "hello\r").await;
+    output_until(&mut socket, "hello\r\n").await;
+    send_input(&mut socket, "again\r").await;
+    output_until(&mut socket, "again\r\n").await;
+    // Ctrl-D ends cat's input, so cat finishes and the prompt returns.
+    send_input(&mut socket, "\u{4}").await;
+    output_until(&mut socket, "$ ").await;
+    send_input(&mut socket, "echo done\r").await;
+    output_until(&mut socket, "done\r\n$ ").await;
+}

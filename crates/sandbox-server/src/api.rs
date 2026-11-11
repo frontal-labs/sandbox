@@ -2112,14 +2112,19 @@ struct PtyRunner {
 }
 
 impl crate::pty::Runner for PtyRunner {
-    fn run<'a>(&'a self, line: &'a str) -> BoxFuture<'a, Result<ExecResult, SandboxError>> {
+    fn run<'a>(
+        &'a self,
+        line: &'a str,
+        input: sandbox_session::LiveInput,
+        observer: sandbox_session::OutputObserver,
+    ) -> BoxFuture<'a, Result<ExecResult, SandboxError>> {
         Box::pin(async move {
             let _gate = self.gate.lock().await;
             let before = committed_root(self.session.as_ref()).await;
             let random_state = Some(self.session.random_state().await);
             *self.before.lock().unwrap_or_else(PoisonError::into_inner) =
                 Some((before, random_state));
-            self.session.run_script(line).await
+            self.session.run_script_live(line, input, observer).await
         })
     }
 
