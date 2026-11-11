@@ -14,12 +14,11 @@
 //! Input typed while a command runs is discarded, except Ctrl-C.
 
 use axum::extract::ws::{Message, WebSocket};
+use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt};
-use sandbox_session::Session;
 use sandbox_types::{ExecResult, SandboxError};
 use serde::Deserialize;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// What the shell prints before each line.
 pub const PROMPT: &str = "$ ";
@@ -106,11 +105,20 @@ enum ClientMessage {
     Resize { cols: u16, rows: u16 },
 }
 
-/// What running one line produced.
-enum Ran {
-    Finished(Result<ExecResult, SandboxError>),
-    /// Ctrl-C, or the connection ended, stopped the command.
-    Stopped,
+/// What the server does for the shell: runs each line, and does what an exec does after it. The
+/// driver holds no session state of its own, so the server keeps the trace and the checkpoints.
+pub trait Runner: Send + Sync {
+    /// Runs one line. Dropping the returned future stops the command at its next await point.
+    fn run<'a>(&'a self, line: &'a str) -> BoxFuture<'a, Result<ExecResult, SandboxError>>;
+    /// Runs after a line, whether it finished or was stopped. `outcome` is `None` when the line was
+    /// stopped, so the partial writes it made are still checkpointed.
+    fn finish<'a>(
+        &'a self,
+        line: &'a str,
+        outcome: Option<&'a Result<ExecResult, SandboxError>>,
+    ) -> BoxFuture<'a, Result<(), SandboxError>>;
+    /// Sets the terminal size the session reports through `COLUMNS` and `LINES`.
+    fn resize<'a>(&'a self, cols: u16, rows: u16) -> BoxFuture<'a, ()>;
 }
 
 fn output(data: &str) -> Message {
@@ -129,21 +137,24 @@ fn is_interrupt(text: &str) -> bool {
     )
 }
 
-/// Runs one line in the session. While it runs, only Ctrl-C from the client has an effect.
-/// Dropping the command on Ctrl-C stops it at its next await point.
-async fn run_line<S>(session: &Arc<dyn Session>, gate: &Mutex<()>, line: &str, rx: &mut S) -> Ran
+/// Runs one line. While it runs, only Ctrl-C from the client has an effect. Returns `None` when
+/// Ctrl-C, or the end of the connection, stopped the line.
+async fn run_line<S>(
+    runner: &dyn Runner,
+    line: &str,
+    rx: &mut S,
+) -> Option<Result<ExecResult, SandboxError>>
 where
     S: futures::Stream<Item = Result<Message, axum::Error>> + Unpin,
 {
-    let _gate = gate.lock().await;
-    let run = session.run_script(line);
+    let run = runner.run(line);
     tokio::pin!(run);
     loop {
         tokio::select! {
-            result = &mut run => return Ran::Finished(result),
+            result = &mut run => return Some(result),
             message = rx.next() => match message {
-                Some(Ok(Message::Text(text))) if is_interrupt(&text) => return Ran::Stopped,
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Ran::Stopped,
+                Some(Ok(Message::Text(text))) if is_interrupt(&text) => return None,
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return None,
                 // Other input while a command runs is discarded.
                 Some(Ok(_)) => {}
             },
@@ -152,7 +163,7 @@ where
 }
 
 /// Serves an interactive shell on `socket` until the shell exits or the client leaves.
-pub async fn serve(socket: WebSocket, session: Arc<dyn Session>, gate: Arc<Mutex<()>>) {
+pub async fn serve(socket: WebSocket, runner: Arc<dyn Runner>) {
     let (mut tx, mut rx) = socket.split();
     let mut editor = LineEditor::default();
     let mut size: Option<(u16, u16)> = None;
@@ -171,7 +182,7 @@ pub async fn serve(socket: WebSocket, session: Arc<dyn Session>, gate: Arc<Mutex
         match message {
             ClientMessage::Resize { cols, rows } => {
                 size = Some((cols, rows));
-                apply_size(&session, &gate, cols, rows).await;
+                runner.resize(cols, rows).await;
             }
             ClientMessage::Input { data } => {
                 for typed in editor.feed(&data) {
@@ -196,22 +207,25 @@ pub async fn serve(socket: WebSocket, session: Arc<dyn Session>, gate: Arc<Mutex
                                 return;
                             }
                             if let Some((cols, rows)) = size {
-                                apply_size(&session, &gate, cols, rows).await;
+                                runner.resize(cols, rows).await;
                             }
-                            let ran = run_line(&session, &gate, &line, &mut rx).await;
+                            let ran = run_line(runner.as_ref(), &line, &mut rx).await;
+                            if let Err(error) = runner.finish(&line, ran.as_ref()).await {
+                                let _ = tx.send(output(&format!("{}\r\n", error.message))).await;
+                                let _ = tx.send(exit(1)).await;
+                                return;
+                            }
                             let sent = match ran {
-                                Ran::Finished(Ok(out)) => {
+                                Some(Ok(out)) => {
                                     send_bytes(&mut tx, &out.stdout).await
                                         && send_bytes(&mut tx, &out.stderr).await
                                 }
-                                Ran::Finished(Err(error)) => tx
+                                Some(Err(error)) => tx
                                     .send(output(&format!("{}\r\n", error.message)))
                                     .await
                                     .is_ok(),
-                                Ran::Stopped => {
-                                    // Ctrl-C was read while the command ran, so echo it here.
-                                    tx.send(output("^C\r\n")).await.is_ok()
-                                }
+                                // Ctrl-C was read while the command ran, so echo it here.
+                                None => tx.send(output("^C\r\n")).await.is_ok(),
                             };
                             if !sent || tx.send(output(PROMPT)).await.is_err() {
                                 return;
@@ -239,14 +253,6 @@ where
         .replace("\r\n", "\n")
         .replace('\n', "\r\n");
     tx.send(output(&text)).await.is_ok()
-}
-
-/// Sets the terminal size in the session, so `$COLUMNS` and `$LINES` report it.
-async fn apply_size(session: &Arc<dyn Session>, gate: &Mutex<()>, cols: u16, rows: u16) {
-    let _gate = gate.lock().await;
-    let _ = session
-        .run_script(&format!("export COLUMNS={cols} LINES={rows}"))
-        .await;
 }
 
 #[cfg(test)]
