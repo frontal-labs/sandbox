@@ -157,6 +157,35 @@ pub type OutputObserver = Arc<dyn Fn(OutputChunk) + Send + Sync>;
 /// and the WASI host's observers, so one value serves each.
 pub(crate) type ToolStdout = Arc<dyn Fn(&[u8]) + Send + Sync>;
 
+/// The words of a simple command with no redirection, when every word is plain: no expansion,
+/// and no glob characters that would match files. `None` for any other command.
+fn plain_argv(command: &Command) -> Option<Vec<String>> {
+    let Command::Simple(simple) = command else {
+        return None;
+    };
+    if !simple.redirects.is_empty() || simple.words.is_empty() {
+        return None;
+    }
+    let plain = |word: &Word| {
+        word.0.iter().all(|piece| match piece {
+            Piece::Ch(ch) => !(ch.mode == Mode::Bare && matches!(ch.c, '*' | '?' | '[' | '~')),
+            _ => false,
+        })
+    };
+    if !simple.words.iter().all(plain) {
+        return None;
+    }
+    Some(simple.words.iter().map(Word::text).collect())
+}
+
+/// One stage of a streamed command or pipeline: its words, and how it turns input lines into output.
+/// `filter` is `None` for a stage that needs all of its input. Only the last stage may be one.
+#[derive(Debug)]
+struct Stage {
+    argv: Vec<String>,
+    filter: Option<crate::stream::Filter>,
+}
+
 /// Shell state that persists across calls: working directory, variables,
 /// functions, and the last exit status (`$?`).
 pub struct Shell {
@@ -359,58 +388,95 @@ impl Shell {
         data
     }
 
-    /// A streamable command reading the live input (see `stream`). Each complete line is run
-    /// through the command as it arrives, and its output is reported to the observer then. The
-    /// whole output is also returned, so a redirection or a later stage still gets it. A partial
-    /// last line is run when the input ends.
+    /// A streamable command reading the live input (see `stream`), as a one-stage chain.
     async fn stream_live(&mut self, argv: &[String]) -> ExecutionResult {
-        let Some(mut input) = self.live.take() else {
-            return ExecutionResult::default();
+        let stage = Stage {
+            argv: argv.to_vec(),
+            filter: crate::stream::Filter::for_argv(argv),
         };
-        let Some(mut filter) = crate::stream::Filter::for_argv(argv) else {
+        self.stream_stages(vec![stage]).await
+    }
+
+    /// Runs a chain of stages over the live input (see `stream`). Each complete line goes through
+    /// the chain as it arrives, and the last stage's output is reported as it is produced. A last
+    /// stage that needs its whole input gets all of the chain's output when the input ends. The
+    /// whole output is also returned, so a redirection or a later stage still gets it.
+    async fn stream_stages(&mut self, mut stages: Vec<Stage>) -> ExecutionResult {
+        let Some(mut input) = self.live.take() else {
             return ExecutionResult::default();
         };
         let observer = self.observer.clone();
         let count = self.stream_count.clone();
+        let last_streams = stages.last().is_some_and(|stage| stage.filter.is_some());
         let mut out = Vec::new();
         let mut errors = Vec::new();
+        let mut whole = Vec::new();
         let mut pending: Vec<u8> = Vec::new();
         let mut stop = false;
-        while !stop {
-            let ended = match input.next_chunk().await {
-                Some(chunk) => {
-                    pending.extend(chunk);
-                    false
-                }
-                None => true,
-            };
-            while let Some(end) = pending.iter().position(|&b| b == b'\n') {
-                let line: Vec<u8> = pending.drain(..=end).collect();
-                let (produced, failed, done) = self.stream_line(argv, &mut filter, line).await;
+        let mut ended = false;
+        while !stop && !ended {
+            match input.next_chunk().await {
+                Some(chunk) => pending.extend(chunk),
+                None => ended = true,
+            }
+            loop {
+                let line = match pending.iter().position(|&b| b == b'\n') {
+                    Some(end) => pending.drain(..=end).collect::<Vec<u8>>(),
+                    None if ended && !pending.is_empty() => std::mem::take(&mut pending),
+                    None => break,
+                };
+                let (produced, failed, done) = self.run_chain(&mut stages, line).await;
                 errors.extend(failed);
                 stop |= done;
-                self.report_streamed(&observer, &count, &produced);
-                out.extend(produced);
+                if last_streams {
+                    self.report_streamed(&observer, &count, &produced);
+                    out.extend(produced);
+                } else {
+                    whole.extend(produced);
+                }
                 if stop {
                     break;
                 }
             }
-            if ended {
-                if !stop && !pending.is_empty() {
-                    let line = std::mem::take(&mut pending);
-                    let (produced, failed, _) = self.stream_line(argv, &mut filter, line).await;
-                    errors.extend(failed);
-                    self.report_streamed(&observer, &count, &produced);
-                    out.extend(produced);
-                }
-                break;
-            }
+        }
+        if let (false, Some(last)) = (last_streams, stages.last()) {
+            let argv = last.argv.clone();
+            let result = self.builtin(&argv, whole).await.unwrap_or_default();
+            errors.extend(result.stderr);
+            self.report_streamed(&observer, &count, &result.stdout);
+            out.extend(result.stdout);
         }
         ExecutionResult {
             exit_code: 0,
             stdout: out,
             stderr: errors,
         }
+    }
+
+    /// Runs one line through every streamed stage of the chain, in order. Returns the output of the
+    /// chain for that line, any error text, and whether a stage is done with its input.
+    async fn run_chain(&mut self, stages: &mut [Stage], line: Vec<u8>) -> (Vec<u8>, Vec<u8>, bool) {
+        let mut data = line;
+        let mut errors = Vec::new();
+        let mut done = false;
+        let streamed = stages
+            .iter()
+            .take_while(|stage| stage.filter.is_some())
+            .count();
+        for stage in stages.iter_mut().take(streamed) {
+            if data.is_empty() {
+                break;
+            }
+            let argv = stage.argv.clone();
+            let Some(filter) = stage.filter.as_mut() else {
+                break;
+            };
+            let (produced, failed, stage_done) = self.stream_line(&argv, filter, data).await;
+            errors.extend(failed);
+            done |= stage_done;
+            data = produced;
+        }
+        (data, errors, done)
     }
 
     /// Runs one line through the streamed command. Returns the output, any error text, and
@@ -602,12 +668,71 @@ impl Shell {
         })
     }
 
+    /// The stages of a pipeline over live input that can stream: builtins with plain words, no
+    /// redirections, and every stage but the last line-local. `None` otherwise.
+    fn streamed_stages(&self, pipeline: &Pipeline) -> Option<Vec<Stage>> {
+        if self.live.is_none()
+            || self.capturing
+            || self.pending_stdin.is_some()
+            || pipeline.stages.len() < 2
+        {
+            return None;
+        }
+        let mut stages = Vec::new();
+        for command in &pipeline.stages {
+            let argv = plain_argv(command)?;
+            if argv[0].contains('=')
+                || self.has_function(&argv[0])
+                || !crate::builtins::is_builtin(&argv[0])
+            {
+                return None;
+            }
+            let filter = crate::stream::Filter::for_argv(&argv);
+            stages.push(Stage { argv, filter });
+        }
+        let last = stages.len() - 1;
+        if stages[..last].iter().any(|stage| stage.filter.is_none()) {
+            return None;
+        }
+        Some(stages)
+    }
+
     fn run_pipeline<'a>(&'a mut self, pipeline: &'a Pipeline) -> BoxFuture<'a, ExecutionResult> {
         Box::pin(async move {
+            // A pipeline over live input streams when every stage can (see `stream`).
+            if let Some(stages) = self.streamed_stages(pipeline) {
+                // The pipeline reports its own output as it streams, so nothing is reported again
+                // when it ends.
+                self.stream_count =
+                    Some(std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+                let mut out = self.stream_stages(stages).await;
+                self.stream_count = None;
+                if pipeline.negated {
+                    out.exit_code = i32::from(out.exit_code == 0);
+                }
+                self.status = out.exit_code;
+                return out;
+            }
+            // A first stage that needs all of the live input gets it, drained to its end.
+            let drain_first = self.live.is_some()
+                && !self.capturing
+                && self.pending_stdin.is_none()
+                && pipeline
+                    .stages
+                    .first()
+                    .and_then(plain_argv)
+                    .is_some_and(|argv| {
+                        crate::stream::reads_standard_input(&argv)
+                            && !crate::stream::is_streamable(&argv)
+                    });
             // The first stage gets the stdin the pipeline was given, if any. Later
             // stages get the output of the stage before. `None` means a stage has
             // no stdin of its own, so it reads the input of an enclosing compound.
-            let mut input: Option<Vec<u8>> = self.pending_stdin.take();
+            let mut input: Option<Vec<u8>> = if drain_first {
+                Some(self.drain_live().await)
+            } else {
+                self.pending_stdin.take()
+            };
             let mut stderr = Vec::new();
             let mut exit_code = 0;
             let last = pipeline.stages.len().saturating_sub(1);
