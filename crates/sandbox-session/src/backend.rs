@@ -266,6 +266,23 @@ impl Session for IsolateBackend {
         Ok(to_result(out?, started, cpu))
     }
 
+    async fn run_script_live(
+        &self,
+        script: &str,
+        input: sandbox_shell::LiveInput,
+        observer: sandbox_shell::OutputObserver,
+    ) -> Result<ExecResult, SandboxError> {
+        let started = Instant::now();
+        let mut shell = self.shell.lock().await;
+        let (out, cpu) = sandbox_shell::cpu::CpuMeter::new(shell.run_streamed_live(
+            script,
+            Some(observer),
+            input,
+        ))
+        .await;
+        Ok(to_result(out?, started, cpu))
+    }
+
     fn fs(&self) -> &dyn SessionFs {
         self.fs.as_ref()
     }

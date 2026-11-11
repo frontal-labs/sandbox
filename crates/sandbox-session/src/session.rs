@@ -48,6 +48,19 @@ pub trait Session: Send + Sync {
     /// Parses and runs a shell script. Working directory and environment
     /// persist across calls.
     async fn run_script(&self, script: &str) -> Result<ExecResult, SandboxError>;
+    /// Like `run_script`, with a top-level `cat` reading `input` as it arrives, and output
+    /// reported to `observer` as it is produced (ADR 0046). A tier that cannot stream input refuses.
+    async fn run_script_live(
+        &self,
+        script: &str,
+        input: sandbox_shell::LiveInput,
+        observer: sandbox_shell::OutputObserver,
+    ) -> Result<ExecResult, SandboxError> {
+        let _ = (script, input, observer);
+        Err(SandboxError::unsupported(
+            "this session cannot stream input to a running command",
+        ))
+    }
     fn fs(&self) -> &dyn SessionFs;
     /// The generator state behind `$RANDOM`. A run records it at its start.
     async fn random_state(&self) -> u64;

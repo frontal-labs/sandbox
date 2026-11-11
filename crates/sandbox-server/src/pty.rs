@@ -16,9 +16,11 @@
 use axum::extract::ws::{Message, WebSocket};
 use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt};
+use sandbox_session::{live_input, LiveInput, OutputChunk, OutputObserver};
 use sandbox_types::{ExecResult, SandboxError};
 use serde::Deserialize;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// What the shell prints before each line.
 pub const PROMPT: &str = "$ ";
@@ -107,8 +109,14 @@ enum ClientMessage {
 /// What the server does for the shell: runs each line, and does what an exec does after it. The
 /// driver holds no session state of its own, so the server keeps the trace and the checkpoints.
 pub trait Runner: Send + Sync {
-    /// Runs one line. Dropping the returned future stops the command at its next await point.
-    fn run<'a>(&'a self, line: &'a str) -> BoxFuture<'a, Result<ExecResult, SandboxError>>;
+    /// Runs one line. `input` carries what the user types while it runs, and `observer` gets its
+    /// output as it is produced. Dropping the returned future stops the command.
+    fn run<'a>(
+        &'a self,
+        line: &'a str,
+        input: LiveInput,
+        observer: OutputObserver,
+    ) -> BoxFuture<'a, Result<ExecResult, SandboxError>>;
     /// Runs after a line, whether it finished or was stopped. `outcome` is `None` when the line was
     /// stopped, so the partial writes it made are still checkpointed.
     fn finish<'a>(
@@ -118,6 +126,13 @@ pub trait Runner: Send + Sync {
     ) -> BoxFuture<'a, Result<(), SandboxError>>;
     /// Sets the terminal size the session reports through `COLUMNS` and `LINES`.
     fn resize<'a>(&'a self, cols: u16, rows: u16) -> BoxFuture<'a, ()>;
+}
+
+/// Terminal text: CR LF line ends, as the shell writes bare LF.
+fn terminal_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\n', "\r\n")
 }
 
 fn output(data: &str) -> Message {
@@ -136,29 +151,79 @@ fn is_interrupt(text: &str) -> bool {
     )
 }
 
-/// Runs one line. While it runs, only Ctrl-C from the client has an effect. Returns `None` when
-/// Ctrl-C, or the end of the connection, stopped the line.
-async fn run_line<S>(
+/// How many bytes of each output stream were already sent while a line ran.
+#[derive(Debug, Default, Clone, Copy)]
+struct Sent {
+    stdout: usize,
+    stderr: usize,
+}
+
+/// Runs one line. What the user types meanwhile goes to the command's input and is echoed. Ctrl-C
+/// stops the line, and Ctrl-D ends its input. Output is sent as it is produced. Returns `None` when
+/// Ctrl-C, or the end of the connection, stopped the line, with what was sent so far.
+async fn run_line<S, K>(
     runner: &dyn Runner,
     line: &str,
     rx: &mut S,
-) -> Option<Result<ExecResult, SandboxError>>
+    tx: &mut K,
+) -> (Option<Result<ExecResult, SandboxError>>, Sent)
 where
     S: futures::Stream<Item = Result<Message, axum::Error>> + Unpin,
+    K: futures::Sink<Message> + Unpin,
 {
-    let run = runner.run(line);
+    let (live_tx, live_rx) = live_input();
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<OutputChunk>();
+    let observer: OutputObserver = Arc::new(move |chunk: OutputChunk| {
+        let _ = out_tx.send(chunk);
+    });
+    let mut sent = Sent::default();
+    let run = runner.run(line, live_rx, observer);
     tokio::pin!(run);
     loop {
         tokio::select! {
-            result = &mut run => return Some(result),
+            result = &mut run => {
+                // Output that was produced before the line finished is still in the channel.
+                while let Ok(chunk) = out_rx.try_recv() {
+                    send_chunk(tx, &chunk, &mut sent).await;
+                }
+                return (Some(result), sent);
+            }
+            Some(chunk) = out_rx.recv() => send_chunk(tx, &chunk, &mut sent).await,
             message = rx.next() => match message {
-                Some(Ok(Message::Text(text))) if is_interrupt(&text) => return None,
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return None,
-                // Other input while a command runs is discarded.
+                Some(Ok(Message::Text(text))) => {
+                    if is_interrupt(&text) {
+                        return (None, sent);
+                    }
+                    if let Ok(ClientMessage::Input { data }) = serde_json::from_str(&text) {
+                        if data.contains(CTRL_D) {
+                            live_tx.end();
+                        }
+                        let typed: String = data.chars().filter(|c| !c.is_control() || *c == '\r' || *c == '\n').collect();
+                        // The command reads what is typed as lines, so Enter becomes a newline.
+                        live_tx.send(typed.replace('\r', "\n").into_bytes());
+                        // The user sees what they type, as a terminal echoes it.
+                        if tx.send(output(&terminal_text(&typed))).await.is_err() {
+                            return (None, sent);
+                        }
+                    }
+                }
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return (None, sent),
                 Some(Ok(_)) => {}
             },
         }
     }
+}
+
+/// Sends one chunk of a command's output, and counts it.
+async fn send_chunk<K>(tx: &mut K, chunk: &OutputChunk, sent: &mut Sent)
+where
+    K: futures::Sink<Message> + Unpin,
+{
+    match chunk.fd {
+        2 => sent.stderr += chunk.data.len(),
+        _ => sent.stdout += chunk.data.len(),
+    }
+    let _ = send_bytes(tx, &chunk.data).await;
 }
 
 /// Serves an interactive shell on `socket` until the shell exits or the client leaves.
@@ -210,22 +275,26 @@ pub async fn serve(socket: WebSocket, runner: Arc<dyn Runner>) {
                             if let Some((cols, rows)) = size {
                                 runner.resize(cols, rows).await;
                             }
-                            let ran = run_line(runner.as_ref(), &line, &mut rx).await;
-                            if let Err(error) = runner.finish(&line, ran.as_ref()).await {
-                                let _ = tx.send(output(&format!("{}\r\n", error.message))).await;
-                                let _ = tx.send(exit(1)).await;
-                                return;
-                            }
+                            let (ran, sent) =
+                                run_line(runner.as_ref(), &line, &mut rx, &mut tx).await;
                             last_status = match &ran {
                                 Some(Ok(out)) => out.exit_code,
                                 Some(Err(_)) => 1,
                                 // 130 is what a command stopped by SIGINT reports.
                                 None => 130,
                             };
-                            let sent = match ran {
+                            if let Err(error) = runner.finish(&line, ran.as_ref()).await {
+                                let _ = tx.send(output(&format!("{}\r\n", error.message))).await;
+                                let _ = tx.send(exit(1)).await;
+                                return;
+                            }
+                            let sent_ok = match ran {
+                                // Only the bytes the stream did not already send are left to send.
                                 Some(Ok(out)) => {
-                                    send_bytes(&mut tx, &out.stdout).await
-                                        && send_bytes(&mut tx, &out.stderr).await
+                                    let stdout = out.stdout.get(sent.stdout..).unwrap_or_default();
+                                    let stderr = out.stderr.get(sent.stderr..).unwrap_or_default();
+                                    send_bytes(&mut tx, stdout).await
+                                        && send_bytes(&mut tx, stderr).await
                                 }
                                 Some(Err(error)) => tx
                                     .send(output(&format!("{}\r\n", error.message)))
@@ -234,7 +303,7 @@ pub async fn serve(socket: WebSocket, runner: Arc<dyn Runner>) {
                                 // Ctrl-C was read while the command ran, so echo it here.
                                 None => tx.send(output("^C\r\n")).await.is_ok(),
                             };
-                            if !sent || tx.send(output(PROMPT)).await.is_err() {
+                            if !sent_ok || tx.send(output(PROMPT)).await.is_err() {
                                 return;
                             }
                         }
@@ -255,11 +324,9 @@ where
     if bytes.is_empty() {
         return true;
     }
-    // A terminal needs CR LF line ends, and the shell writes bare LF.
-    let text = String::from_utf8_lossy(bytes)
-        .replace("\r\n", "\n")
-        .replace('\n', "\r\n");
-    tx.send(output(&text)).await.is_ok()
+    tx.send(output(&terminal_text(&String::from_utf8_lossy(bytes))))
+        .await
+        .is_ok()
 }
 
 #[cfg(test)]

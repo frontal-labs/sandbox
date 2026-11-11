@@ -79,6 +79,21 @@ rust_test(
 )
 
 rust_test(
+    name = "sandbox_shell_live_input_test",
+    srcs = ["tests/live_input.rs"],
+    crate_root = "tests/live_input.rs",
+    edition = "2021",
+    deps = [
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "@crates//:tokio",
+        ":sandbox_shell",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
     name = "sandbox_shell_features_test",
     srcs = ["tests/features.rs"],
     crate_root = "tests/features.rs",
