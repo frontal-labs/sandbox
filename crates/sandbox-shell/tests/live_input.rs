@@ -97,3 +97,82 @@ async fn cat_with_a_file_operand_does_not_read_the_live_input() {
     assert_eq!(result.stdout, b"file\n");
     assert_eq!(*seen.lock().unwrap(), b"file\n");
 }
+
+/// Starts `script` over live input, and returns the run, the sender, and what it reports.
+fn start(
+    script: &'static str,
+) -> (
+    tokio::task::JoinHandle<sandbox_shell::ExecutionResult>,
+    sandbox_shell::LiveSender,
+    Arc<Mutex<Vec<u8>>>,
+) {
+    let (observer, seen) = collecting();
+    let (tx, input) = live_input();
+    let mut shell = shell();
+    let run = tokio::spawn(async move {
+        shell
+            .run_streamed_live(script, Some(observer), input)
+            .await
+            .unwrap()
+    });
+    (run, tx, seen)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rev_reverses_each_line_as_it_arrives() {
+    let (run, tx, seen) = start("rev");
+    tx.send(b"abc\n".to_vec());
+    wait_for(&seen, b"cba\n").await;
+    tx.send(b"xy\n".to_vec());
+    wait_for(&seen, b"cba\nyx\n").await;
+    tx.end();
+    assert_eq!(run.await.unwrap().stdout, b"cba\nyx\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grep_filters_each_line_as_it_arrives() {
+    let (run, tx, seen) = start("grep -v x");
+    tx.send(b"x1\ny\n".to_vec());
+    wait_for(&seen, b"y\n").await;
+    tx.send(b"zz\n".to_vec());
+    wait_for(&seen, b"y\nzz\n").await;
+    tx.end();
+    assert_eq!(run.await.unwrap().stdout, b"y\nzz\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nl_numbers_lines_as_they_arrive() {
+    let (run, tx, seen) = start("nl");
+    tx.send(b"a\n\nb\n".to_vec());
+    wait_for(&seen, b"     1\ta\n       \n     2\tb\n").await;
+    tx.end();
+    assert_eq!(
+        run.await.unwrap().stdout,
+        b"     1\ta\n       \n     2\tb\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn head_stops_after_its_lines_without_waiting_for_the_end() {
+    let (run, tx, seen) = start("head -n 2");
+    tx.send(b"a\nb\nc\n".to_vec());
+    let result = tokio::time::timeout(Duration::from_secs(10), run)
+        .await
+        .expect("head is done once it has its lines")
+        .unwrap();
+    assert_eq!(result.stdout, b"a\nb\n");
+    assert_eq!(*seen.lock().unwrap(), b"a\nb\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_command_that_needs_all_its_input_still_waits_for_the_end() {
+    let (run, tx, _seen) = start("sort");
+    tx.send(b"b\na\n".to_vec());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !run.is_finished(),
+        "sort needs every line before it can print"
+    );
+    tx.end();
+    assert_eq!(run.await.unwrap().stdout, b"a\nb\n");
+}

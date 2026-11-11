@@ -348,30 +348,125 @@ impl Shell {
         result
     }
 
-    /// `cat` with no operands, reading the live input. Each chunk is reported to the observer as
-    /// it arrives, and counted in `stream_count`, so the command's end does not report it again.
-    /// The whole input is also returned, so a redirection or a pipe still gets it.
-    async fn cat_live(&mut self) -> ExecutionResult {
+    /// Reads the live input to its end, for a command that needs all of it.
+    async fn drain_live(&mut self) -> Vec<u8> {
+        let mut data = Vec::new();
+        if let Some(mut input) = self.live.take() {
+            while let Some(chunk) = input.next_chunk().await {
+                data.extend(chunk);
+            }
+        }
+        data
+    }
+
+    /// A streamable command reading the live input (see `stream`). Each complete line is run
+    /// through the command as it arrives, and its output is reported to the observer then. The
+    /// whole output is also returned, so a redirection or a later stage still gets it. A partial
+    /// last line is run when the input ends.
+    async fn stream_live(&mut self, argv: &[String]) -> ExecutionResult {
         let Some(mut input) = self.live.take() else {
+            return ExecutionResult::default();
+        };
+        let Some(mut filter) = crate::stream::Filter::for_argv(argv) else {
             return ExecutionResult::default();
         };
         let observer = self.observer.clone();
         let count = self.stream_count.clone();
         let mut out = Vec::new();
-        while let Some(chunk) = input.next_chunk().await {
-            if let (Some(observer), Some(count)) = (&observer, &count) {
-                count.fetch_add(chunk.len(), std::sync::atomic::Ordering::SeqCst);
-                observer(OutputChunk {
-                    fd: 1,
-                    data: chunk.clone(),
-                });
+        let mut errors = Vec::new();
+        let mut pending: Vec<u8> = Vec::new();
+        let mut stop = false;
+        while !stop {
+            let ended = match input.next_chunk().await {
+                Some(chunk) => {
+                    pending.extend(chunk);
+                    false
+                }
+                None => true,
+            };
+            while let Some(end) = pending.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = pending.drain(..=end).collect();
+                let (produced, failed, done) = self.stream_line(argv, &mut filter, line).await;
+                errors.extend(failed);
+                stop |= done;
+                self.report_streamed(&observer, &count, &produced);
+                out.extend(produced);
+                if stop {
+                    break;
+                }
             }
-            out.extend(chunk);
+            if ended {
+                if !stop && !pending.is_empty() {
+                    let line = std::mem::take(&mut pending);
+                    let (produced, failed, _) = self.stream_line(argv, &mut filter, line).await;
+                    errors.extend(failed);
+                    self.report_streamed(&observer, &count, &produced);
+                    out.extend(produced);
+                }
+                break;
+            }
         }
         ExecutionResult {
             exit_code: 0,
             stdout: out,
-            stderr: Vec::new(),
+            stderr: errors,
+        }
+    }
+
+    /// Runs one line through the streamed command. Returns the output, any error text, and
+    /// whether the command is done with its input.
+    async fn stream_line(
+        &mut self,
+        argv: &[String],
+        filter: &mut crate::stream::Filter,
+        line: Vec<u8>,
+    ) -> (Vec<u8>, Vec<u8>, bool) {
+        use crate::stream::Filter;
+        match filter {
+            Filter::PerLine => {
+                let mut input = line;
+                if input.last() != Some(&b'\n') {
+                    input.push(b'\n');
+                }
+                let out = self.builtin(argv, input).await.unwrap_or_default();
+                (out.stdout, out.stderr, false)
+            }
+            Filter::Head { remaining } => {
+                *remaining = remaining.saturating_sub(1);
+                (line, Vec::new(), *remaining == 0)
+            }
+            Filter::Nl { all, number } => {
+                let text = line.strip_suffix(b"\n").unwrap_or(&line);
+                let mut out = Vec::new();
+                if *all || !text.is_empty() {
+                    *number += 1;
+                    out.extend_from_slice(format!("{:>6}\t", *number).as_bytes());
+                } else {
+                    out.extend_from_slice(b"       ");
+                }
+                out.extend_from_slice(text);
+                out.push(b'\n');
+                (out, Vec::new(), false)
+            }
+        }
+    }
+
+    /// Reports streamed output to the observer, and counts it as reported.
+    fn report_streamed(
+        &self,
+        observer: &Option<OutputObserver>,
+        count: &Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+        data: &[u8],
+    ) {
+        if let (Some(observer), Some(count)) = (observer, count) {
+            if data.is_empty() {
+                return;
+            }
+            count.fetch_add(data.len(), std::sync::atomic::Ordering::SeqCst);
+            observer(OutputChunk {
+                fd: 1,
+                data: data.to_vec(),
+            });
         }
     }
 
@@ -888,13 +983,14 @@ impl Shell {
         // enclosing compound command is reading, as `cat` does in `{ cat; }`. `read`
         // takes one line of it instead, so it is left alone here.
         // An input redirection replaces both, and it leaves the input unread.
-        // A top-level `cat` with no operands reads the live input, when there is one.
-        let live_cat = argv.len() == 1
-            && argv[0] == "cat"
-            && !self.capturing
+        // A streamable command reads the live input, when there is one (see `stream`).
+        let pending_stdin_was_none = pending_stdin.is_none();
+        let override_was_none = stdin_override.is_none();
+        let live_stream = !self.capturing
             && self.live.is_some()
             && stdin_override.is_none()
-            && pending_stdin.is_none();
+            && pending_stdin.is_none()
+            && crate::stream::is_streamable(&argv);
         let stdin = match (stdin_override, pending_stdin) {
             (Some(data), _) => data,
             (None, Some(data)) => data,
@@ -911,8 +1007,21 @@ impl Shell {
         let streams = redirects.is_empty() && !self.capturing && matches!(sinks.0, Sink::Stdout);
         self.stream_count =
             streams.then(|| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-        let out = if live_cat {
-            self.cat_live().await
+        // A command that needs its whole input reads the live input to its end first, so it gets
+        // what was typed, as a shell does for a command whose input ends with Ctrl-D.
+        let drain_live = !self.capturing
+            && self.live.is_some()
+            && override_was_none
+            && pending_stdin_was_none
+            && crate::stream::reads_standard_input(&argv)
+            && !crate::stream::is_streamable(&argv);
+        let stdin = if drain_live {
+            self.drain_live().await
+        } else {
+            stdin
+        };
+        let out = if live_stream {
+            self.stream_live(&argv).await
         } else {
             self.run_argv_inner(&argv, stdin).await
         };
