@@ -367,9 +367,12 @@ fn cmd_add(operands: &[String]) -> Result<()> {
 fn cmd_commit(globals: &Globals, operands: &[String]) -> Result<()> {
     let mut messages = Vec::new();
     let mut author = None;
+    let mut quiet = false;
     let mut args = operands.iter();
     while let Some(arg) = args.next() {
-        if arg == "-m" {
+        if arg == "-q" || arg == "--quiet" {
+            quiet = true;
+        } else if arg == "-m" {
             messages.push(
                 args.next()
                     .cloned()
@@ -435,7 +438,9 @@ fn cmd_commit(globals: &Globals, operands: &[String]) -> Result<()> {
     )?;
     let subject = message.lines().next().unwrap_or_default();
     let root = if head.is_none() { " (root-commit)" } else { "" };
-    println!("[{BRANCH}{root} {}] {subject}", index::short(&oid));
+    if !quiet {
+        println!("[{BRANCH}{root} {}] {subject}", index::short(&oid));
+    }
     Ok(())
 }
 

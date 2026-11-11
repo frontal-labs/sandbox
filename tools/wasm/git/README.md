@@ -10,7 +10,7 @@ repositories: loose objects, the v2 index, and refs under `.git`. Host git reads
 | --- | --- |
 | `init [-q] [dir]` | Creates `.git`. The branch is always `main`. |
 | `add <path>...` | Stages files and directories. A tracked file that is gone is staged as deleted. `add .` stages everything. |
-| `commit -m <msg> [-m <para>]... [--author="Name <email>"]` | Needs `-c user.name=` and `-c user.email=`, or uses the default identity below. |
+| `commit [-q] -m <msg> [-m <para>]... [--author="Name <email>"]` | Needs `-c user.name=` and `-c user.email=`, or uses the default identity below. |
 | `status [--porcelain] [-b]` | Porcelain v1 matches host git. The long form matches for the cases in the conformance script. |
 | `log [--oneline] [--format=%H\|%h\|%s] [-n N]` | Walks the first parent. |
 | `write-tree`, `ls-files --stage`, `hash-object [-w] <file>` | Plumbing, used for conformance. |
