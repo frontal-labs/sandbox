@@ -1555,6 +1555,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id", delete(destroy_session))
         .route("/v1/sessions/:id/exec", post(exec_command))
         .route("/v1/sessions/:id/ws", get(exec_websocket))
+        .route("/v1/sessions/:id/pty", get(pty_websocket))
         .route("/v1/sessions/:id/fs/*path", get(read_file))
         .route("/v1/sessions/:id/fs/*path", axum::routing::put(write_file))
         .route("/v1/sessions/:id/fs/*path", delete(delete_file))
@@ -2092,6 +2093,19 @@ fn start_exec(
 /// The read half of a WebSocket, and the write half.
 type SocketRx = futures::stream::SplitStream<WebSocket>;
 type SocketTx = futures::stream::SplitSink<WebSocket, Message>;
+
+/// An interactive shell over a WebSocket at `/v1/sessions/{id}/pty` (see `pty`).
+pub async fn pty_websocket(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let own = owned(&state, &owner, &id).await?;
+    let session = own.session.clone();
+    let gate = own.gate.clone();
+    Ok(ws.on_upgrade(move |socket| crate::pty::serve(socket, session, gate)))
+}
 
 /// Runs commands over a WebSocket at `/v1/sessions/{id}/ws`. The client's first
 /// message is the JSON `ExecRequest`. The server sends each `ExecEvent` as a text
