@@ -13,6 +13,7 @@ use axum::{
     routing::{delete, get, post},
     Extension, Router,
 };
+use futures::future::BoxFuture;
 use sandbox_scheduler::Scheduler;
 use sandbox_session::{
     cap_output, changed_since, committed_root, delete_file as delete_session_file,
@@ -32,7 +33,7 @@ use sandbox_vfs::OpenFlags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::SystemTime;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::RwLock;
@@ -2094,6 +2095,80 @@ fn start_exec(
 type SocketRx = futures::stream::SplitStream<WebSocket>;
 type SocketTx = futures::stream::SplitSink<WebSocket, Message>;
 
+/// The server side of the interactive shell (see `pty`). It runs a line in the session as an
+/// exec does, and records the trace, the meter, and a checkpoint after it. A line that was
+/// stopped is still checkpointed, so the writes it made before it stopped are kept.
+struct PtyRunner {
+    state: AppState,
+    owner: KeyId,
+    id: SessionId,
+    session: Arc<dyn Session>,
+    gate: Arc<tokio::sync::Mutex<()>>,
+    /// The committed root and generator state from before the running line, for its trace record.
+    before: std::sync::Mutex<Option<(Result<ContentHash, SandboxError>, Option<u64>)>>,
+}
+
+impl crate::pty::Runner for PtyRunner {
+    fn run<'a>(&'a self, line: &'a str) -> BoxFuture<'a, Result<ExecResult, SandboxError>> {
+        Box::pin(async move {
+            let _gate = self.gate.lock().await;
+            let before = committed_root(self.session.as_ref()).await;
+            let random_state = Some(self.session.random_state().await);
+            *self.before.lock().unwrap_or_else(PoisonError::into_inner) =
+                Some((before, random_state));
+            self.session.run_script(line).await
+        })
+    }
+
+    fn finish<'a>(
+        &'a self,
+        line: &'a str,
+        outcome: Option<&'a Result<ExecResult, SandboxError>>,
+    ) -> BoxFuture<'a, Result<(), SandboxError>> {
+        Box::pin(async move {
+            let _gate = self.gate.lock().await;
+            let before = self
+                .before
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let (Some(result), Some((before, random_state))) = (outcome, before) {
+                let request = ExecRequest {
+                    argv: vec!["sh".to_string(), "-c".to_string(), line.to_string()],
+                    ..ExecRequest::default()
+                };
+                record_meter(
+                    &self.state,
+                    &self.owner,
+                    self.id,
+                    self.session.as_ref(),
+                    result,
+                )
+                .await
+                .map_err(|e| e.0)?;
+                let files = files_since(self.session.as_ref(), before).await;
+                record_exec(&self.state, self.id, &request, result, files, random_state).await;
+            }
+            checkpoint_after_exec(&self.state, &self.owner, self.id, &self.session)
+                .await
+                .map_err(|e| e.0)?;
+            save_session(&self.state, self.id, &self.session)
+                .await
+                .map_err(|e| e.0)
+        })
+    }
+
+    fn resize<'a>(&'a self, cols: u16, rows: u16) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            let _gate = self.gate.lock().await;
+            let _ = self
+                .session
+                .run_script(&format!("export COLUMNS={cols} LINES={rows}"))
+                .await;
+        })
+    }
+}
+
 /// An interactive shell over a WebSocket at `/v1/sessions/{id}/pty` (see `pty`).
 pub async fn pty_websocket(
     ws: WebSocketUpgrade,
@@ -2102,9 +2177,15 @@ pub async fn pty_websocket(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let own = owned(&state, &owner, &id).await?;
-    let session = own.session.clone();
-    let gate = own.gate.clone();
-    Ok(ws.on_upgrade(move |socket| crate::pty::serve(socket, session, gate)))
+    let runner: Arc<dyn crate::pty::Runner> = Arc::new(PtyRunner {
+        id: own.state.id,
+        session: own.session.clone(),
+        gate: own.gate.clone(),
+        state,
+        owner,
+        before: std::sync::Mutex::new(None),
+    });
+    Ok(ws.on_upgrade(move |socket| crate::pty::serve(socket, runner)))
 }
 
 /// Runs commands over a WebSocket at `/v1/sessions/{id}/ws`. The client's first
