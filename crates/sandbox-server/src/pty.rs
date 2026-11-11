@@ -122,19 +122,11 @@ pub trait Runner: Send + Sync {
 }
 
 fn output(data: &str) -> Message {
-    Message::Text(
-        serde_json::json!({ "type": "output", "data": data })
-            .to_string()
-            .into(),
-    )
+    Message::Text(serde_json::json!({ "type": "output", "data": data }).to_string())
 }
 
 fn exit(code: i32) -> Message {
-    Message::Text(
-        serde_json::json!({ "type": "exit", "code": code })
-            .to_string()
-            .into(),
-    )
+    Message::Text(serde_json::json!({ "type": "exit", "code": code }).to_string())
 }
 
 /// Whether a client message is Ctrl-C typed while a command runs.

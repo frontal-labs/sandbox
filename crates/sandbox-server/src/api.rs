@@ -2095,6 +2095,9 @@ fn start_exec(
 type SocketRx = futures::stream::SplitStream<WebSocket>;
 type SocketTx = futures::stream::SplitSink<WebSocket, Message>;
 
+/// The committed root and generator state before a line, as the trace needs them.
+type BeforeLine = (Result<ContentHash, SandboxError>, Option<u64>);
+
 /// The server side of the interactive shell (see `pty`). It runs a line in the session as an
 /// exec does, and records the trace, the meter, and a checkpoint after it. A line that was
 /// stopped is still checkpointed, so the writes it made before it stopped are kept.
@@ -2105,7 +2108,7 @@ struct PtyRunner {
     session: Arc<dyn Session>,
     gate: Arc<tokio::sync::Mutex<()>>,
     /// The committed root and generator state from before the running line, for its trace record.
-    before: std::sync::Mutex<Option<(Result<ContentHash, SandboxError>, Option<u64>)>>,
+    before: std::sync::Mutex<Option<BeforeLine>>,
 }
 
 impl crate::pty::Runner for PtyRunner {
