@@ -5,6 +5,7 @@ pub mod auth;
 pub mod config;
 pub mod gc;
 pub mod idle;
+mod metering;
 pub mod middleware;
 pub mod openapi;
 pub mod otel;
