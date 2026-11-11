@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod auth;
+mod billing;
 pub mod config;
 pub mod gc;
 pub mod idle;

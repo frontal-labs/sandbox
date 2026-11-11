@@ -11,7 +11,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// What one session has used. All fields only grow, so adding two meters gives the total.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema,
+)]
+#[serde(default)]
 pub struct SessionMeter {
     /// Commands that finished, including those that failed.
     pub execs: u64,
@@ -53,25 +56,69 @@ pub fn memory_byte_ms(memory_bytes: u64, wall_ms: u64) -> u64 {
     memory_bytes.saturating_mul(wall_ms)
 }
 
-/// The meters of every session, keyed by session ID, with the owning key of each.
+/// One session's meter, with its owner and whether it is still running.
+#[derive(Debug, Clone)]
+struct Entry {
+    owner: String,
+    meter: SessionMeter,
+    open: bool,
+}
+
+/// The meters of every session, keyed by session ID. A session's meter stays after it stops, so
+/// its usage is still billed.
 #[derive(Clone, Default)]
-pub struct MeterTable(Arc<Mutex<HashMap<String, (String, SessionMeter)>>>);
+pub struct MeterTable(Arc<Mutex<HashMap<String, Entry>>>);
 
 impl MeterTable {
     /// Opens a meter for a new session, so it is reported even before any command runs.
     pub fn open(&self, owner: &str, session: &str) {
-        let mut table = self.lock();
-        table
+        self.lock()
             .entry(session.to_string())
-            .or_insert_with(|| (owner.to_string(), SessionMeter::default()));
+            .or_insert_with(|| Entry {
+                owner: owner.to_string(),
+                meter: SessionMeter::default(),
+                open: true,
+            });
+    }
+
+    /// Restores a session's meter after a restart, from the billing stream. `open` is false for a
+    /// session that had already stopped.
+    #[cfg_attr(not(feature = "clustered"), allow(dead_code))]
+    pub fn restore(&self, owner: &str, session: &str, meter: SessionMeter, open: bool) {
+        self.lock().insert(
+            session.to_string(),
+            Entry {
+                owner: owner.to_string(),
+                meter,
+                open,
+            },
+        );
     }
 
     /// Records one finished command against a session's meter.
     pub fn record_exec(&self, session: &str, cpu_ms: u64, wall_ms: u64, memory_bytes: u64) {
-        let mut table = self.lock();
-        if let Some((_, meter)) = table.get_mut(session) {
-            meter.record_exec(cpu_ms, wall_ms, memory_bytes);
+        if let Some(entry) = self.lock().get_mut(session) {
+            entry.meter.record_exec(cpu_ms, wall_ms, memory_bytes);
         }
+    }
+
+    /// Stops a session's meter. Returns the final meter, or `None` if the session was not open.
+    pub fn close(&self, session: &str) -> Option<SessionMeter> {
+        let mut table = self.lock();
+        let entry = table.get_mut(session)?;
+        if !entry.open {
+            return None;
+        }
+        entry.open = false;
+        Some(entry.meter.clone())
+    }
+
+    /// A session's meter so far, or zeros if it is unknown.
+    pub fn get(&self, session: &str) -> SessionMeter {
+        self.lock()
+            .get(session)
+            .map(|entry| entry.meter.clone())
+            .unwrap_or_default()
     }
 
     /// Every session the key owns, with its meter, ordered by session ID.
@@ -79,8 +126,8 @@ impl MeterTable {
         let table = self.lock();
         let mut sessions: Vec<(String, SessionMeter)> = table
             .iter()
-            .filter(|(_, (o, _))| o == owner)
-            .map(|(id, (_, meter))| (id.clone(), meter.clone()))
+            .filter(|(_, entry)| entry.owner == owner)
+            .map(|(id, entry)| (id.clone(), entry.meter.clone()))
             .collect();
         sessions.sort_by(|a, b| a.0.cmp(&b.0));
         sessions
@@ -96,7 +143,7 @@ impl MeterTable {
             })
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, (String, SessionMeter)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Entry>> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -186,5 +233,31 @@ mod tests {
         let table = MeterTable::default();
         table.record_exec("nope", 1, 1, 1);
         assert!(table.for_owner("key-a").is_empty());
+    }
+
+    #[test]
+    fn closing_a_session_keeps_its_meter_and_closes_it_once() {
+        let table = MeterTable::default();
+        table.open("key-a", "s1");
+        table.record_exec("s1", 2, 3, 4);
+        let final_meter = table.close("s1").expect("the session was open");
+        assert_eq!(final_meter.execs, 1);
+        assert!(table.close("s1").is_none(), "a second stop reports nothing");
+        assert_eq!(table.for_owner("key-a")[0].1.cpu_ms, 2);
+    }
+
+    #[test]
+    fn a_restored_meter_keeps_its_totals_and_open_state() {
+        let table = MeterTable::default();
+        let mut meter = SessionMeter::default();
+        meter.record_exec(5, 6, 7);
+        table.restore("key-a", "s1", meter.clone(), true);
+        assert_eq!(table.get("s1"), meter);
+        assert!(table.close("s1").is_some());
+        table.restore("key-a", "s2", meter, false);
+        assert!(
+            table.close("s2").is_none(),
+            "a restored stopped session stays stopped"
+        );
     }
 }

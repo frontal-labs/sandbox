@@ -33,4 +33,4 @@ SANDBOX_TEST_DATABASE_URL="postgres://postgres:$PGPASS@127.0.0.1:55432/postgres"
 SANDBOX_S3_ENDPOINT=http://127.0.0.1:9092 \
 SANDBOX_S3_BUCKET=sandbox-clustered-test \
 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
-  cargo test -p sandbox-server --features clustered --test clustered --test clustered_blobs --test clustered_metering -- --nocapture
+  cargo test -p sandbox-server --features clustered --test clustered --test clustered_blobs --test clustered_metering --test clustered_billing -- --nocapture
