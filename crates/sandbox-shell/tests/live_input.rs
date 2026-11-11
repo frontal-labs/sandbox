@@ -232,3 +232,62 @@ async fn head_at_the_end_of_a_streamed_pipeline_stops_the_run() {
     assert_eq!(result.stdout, b"x\n");
     drop(tx);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_streamed_pipeline_reports_its_last_stage_status() {
+    let (run, tx, seen) = start("cat | rev");
+    tx.send(b"abc\n".to_vec());
+    wait_for(&seen, b"cba\n").await;
+    tx.end();
+    let result = run.await.unwrap();
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.stdout, b"cba\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_streamed_pipeline_reports_the_last_stage_status_per_line() {
+    // The last line matches, so the last stage's last invocation succeeds.
+    let (run, tx, seen) = start("cat | grep a");
+    tx.send(b"xyz\naaa\n".to_vec());
+    wait_for(&seen, b"aaa\n").await;
+    tx.end();
+    let result = run.await.unwrap();
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.stdout, b"aaa\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_streamed_pipeline_reports_a_failing_last_stage() {
+    // The last line does not match, so the last stage's last invocation fails.
+    let (run, tx, seen) = start("cat | grep a");
+    tx.send(b"aaa\nxyz\n".to_vec());
+    wait_for(&seen, b"aaa\n").await;
+    tx.end();
+    let result = run.await.unwrap();
+    assert_eq!(result.exit_code, 1);
+    assert_eq!(result.stdout, b"aaa\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_streamed_pipeline_ending_in_a_whole_input_stage_reports_that_stage() {
+    let (run, tx, seen) = start("cat | sort");
+    tx.send(b"b\na\n".to_vec());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "sort prints only after every line"
+    );
+    tx.end();
+    let result = run.await.unwrap();
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.stdout, b"a\nb\n");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_empty_streamed_pipeline_reports_zero() {
+    let (run, tx, _seen) = start("cat | rev");
+    tx.end();
+    let result = run.await.unwrap();
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.stdout, b"");
+}

@@ -414,6 +414,7 @@ impl Shell {
         let mut pending: Vec<u8> = Vec::new();
         let mut stop = false;
         let mut ended = false;
+        let mut last_status = 0;
         while !stop && !ended {
             match input.next_chunk().await {
                 Some(chunk) => pending.extend(chunk),
@@ -425,9 +426,13 @@ impl Shell {
                     None if ended && !pending.is_empty() => std::mem::take(&mut pending),
                     None => break,
                 };
-                let (produced, failed, done) = self.run_chain(&mut stages, line).await;
+                let (produced, failed, done, stage_status) =
+                    self.run_chain(&mut stages, line).await;
                 errors.extend(failed);
                 stop |= done;
+                if let Some(status) = stage_status {
+                    last_status = status;
+                }
                 if last_streams {
                     self.report_streamed(&observer, &count, &produced);
                     out.extend(produced);
@@ -443,27 +448,35 @@ impl Shell {
             let argv = last.argv.clone();
             let result = self.builtin(&argv, whole).await.unwrap_or_default();
             errors.extend(result.stderr);
+            last_status = result.exit_code;
             self.report_streamed(&observer, &count, &result.stdout);
             out.extend(result.stdout);
         }
         ExecutionResult {
-            exit_code: 0,
+            exit_code: last_status,
             stdout: out,
             stderr: errors,
         }
     }
 
     /// Runs one line through every streamed stage of the chain, in order. Returns the output of the
-    /// chain for that line, any error text, and whether a stage is done with its input.
-    async fn run_chain(&mut self, stages: &mut [Stage], line: Vec<u8>) -> (Vec<u8>, Vec<u8>, bool) {
+    /// chain for that line, any error text, whether a stage is done with its input, and the exit
+    /// code of the pipeline's last stage when it ran this line.
+    async fn run_chain(
+        &mut self,
+        stages: &mut [Stage],
+        line: Vec<u8>,
+    ) -> (Vec<u8>, Vec<u8>, bool, Option<i32>) {
         let mut data = line;
         let mut errors = Vec::new();
         let mut done = false;
+        let mut last_status = None;
+        let last_index = stages.len().saturating_sub(1);
         let streamed = stages
             .iter()
             .take_while(|stage| stage.filter.is_some())
             .count();
-        for stage in stages.iter_mut().take(streamed) {
+        for (index, stage) in stages.iter_mut().take(streamed).enumerate() {
             if data.is_empty() {
                 break;
             }
@@ -471,12 +484,16 @@ impl Shell {
             let Some(filter) = stage.filter.as_mut() else {
                 break;
             };
-            let (produced, failed, stage_done) = self.stream_line(&argv, filter, data).await;
+            let (produced, failed, stage_done, stage_status) =
+                self.stream_line(&argv, filter, data).await;
             errors.extend(failed);
             done |= stage_done;
             data = produced;
+            if index == last_index {
+                last_status = Some(stage_status);
+            }
         }
-        (data, errors, done)
+        (data, errors, done, last_status)
     }
 
     /// Runs one line through the streamed command. Returns the output, any error text, and
@@ -486,7 +503,7 @@ impl Shell {
         argv: &[String],
         filter: &mut crate::stream::Filter,
         line: Vec<u8>,
-    ) -> (Vec<u8>, Vec<u8>, bool) {
+    ) -> (Vec<u8>, Vec<u8>, bool, i32) {
         use crate::stream::Filter;
         match filter {
             Filter::PerLine => {
@@ -495,11 +512,11 @@ impl Shell {
                     input.push(b'\n');
                 }
                 let out = self.builtin(argv, input).await.unwrap_or_default();
-                (out.stdout, out.stderr, false)
+                (out.stdout, out.stderr, false, out.exit_code)
             }
             Filter::Head { remaining } => {
                 *remaining = remaining.saturating_sub(1);
-                (line, Vec::new(), *remaining == 0)
+                (line, Vec::new(), *remaining == 0, 0)
             }
             Filter::Nl { all, number } => {
                 let text = line.strip_suffix(b"\n").unwrap_or(&line);
@@ -512,7 +529,7 @@ impl Shell {
                 }
                 out.extend_from_slice(text);
                 out.push(b'\n');
-                (out, Vec::new(), false)
+                (out, Vec::new(), false, 0)
             }
         }
     }
