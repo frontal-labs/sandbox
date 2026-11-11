@@ -233,3 +233,20 @@ async fn ctrl_d_on_an_empty_line_ends_the_shell_with_zero() {
     let exit = exit_of(&mut socket).await;
     assert_eq!(exit["code"], 0, "{exit}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bare_exit_reports_the_status_of_the_last_command() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+    let session = create_session(&app, &key).await;
+    let addr = serve(app).await;
+
+    let mut socket = connect(addr, &session, &key).await;
+    output_until(&mut socket, "$ ").await;
+    send_input(&mut socket, "false\r").await;
+    output_until(&mut socket, "$ ").await;
+    send_input(&mut socket, "exit\r").await;
+    let exit = exit_of(&mut socket).await;
+    assert_eq!(exit["code"], 1, "{exit}");
+}

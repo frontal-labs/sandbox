@@ -83,13 +83,12 @@ impl LineEditor {
     }
 }
 
-/// The status of a line that is `exit` or `exit N`, or `None` for any other line. `exit`
-/// with no number ends the shell with status 0, since the shell does not carry the last status
-/// here.
-pub fn exit_status(line: &str) -> Option<i32> {
+/// The status of a line that is `exit` or `exit N`, or `None` for any other line. A bare `exit`
+/// ends the shell with `last`, the status of the line that ran before it, as bash does.
+pub fn exit_status(line: &str, last: i32) -> Option<i32> {
     let rest = line.trim().strip_prefix("exit")?;
     if rest.is_empty() {
-        return Some(0);
+        return Some(last);
     }
     if !rest.starts_with(char::is_whitespace) {
         return None;
@@ -167,6 +166,8 @@ pub async fn serve(socket: WebSocket, runner: Arc<dyn Runner>) {
     let (mut tx, mut rx) = socket.split();
     let mut editor = LineEditor::default();
     let mut size: Option<(u16, u16)> = None;
+    // The status of the last line, which a bare `exit` reports.
+    let mut last_status = 0;
     if tx.send(output(PROMPT)).await.is_err() {
         return;
     }
@@ -202,7 +203,7 @@ pub async fn serve(socket: WebSocket, runner: Arc<dyn Runner>) {
                             return;
                         }
                         Typed::Line(line) => {
-                            if let Some(code) = exit_status(&line) {
+                            if let Some(code) = exit_status(&line, last_status) {
                                 let _ = tx.send(exit(code)).await;
                                 return;
                             }
@@ -215,6 +216,12 @@ pub async fn serve(socket: WebSocket, runner: Arc<dyn Runner>) {
                                 let _ = tx.send(exit(1)).await;
                                 return;
                             }
+                            last_status = match &ran {
+                                Some(Ok(out)) => out.exit_code,
+                                Some(Err(_)) => 1,
+                                // 130 is what a command stopped by SIGINT reports.
+                                None => 130,
+                            };
                             let sent = match ran {
                                 Some(Ok(out)) => {
                                     send_bytes(&mut tx, &out.stdout).await
@@ -340,12 +347,17 @@ mod tests {
 
     #[test]
     fn exit_takes_an_optional_status() {
-        assert_eq!(exit_status("exit"), Some(0));
-        assert_eq!(exit_status("exit 3"), Some(3));
-        assert_eq!(exit_status("  exit 7  "), Some(7));
-        assert_eq!(exit_status("exit x"), None);
-        assert_eq!(exit_status("exitcode"), None);
-        assert_eq!(exit_status("echo exit"), None);
+        assert_eq!(exit_status("exit", 0), Some(0));
+        assert_eq!(
+            exit_status("exit", 5),
+            Some(5),
+            "a bare exit reports the last status"
+        );
+        assert_eq!(exit_status("exit 3", 5), Some(3));
+        assert_eq!(exit_status("  exit 7  ", 0), Some(7));
+        assert_eq!(exit_status("exit x", 0), None);
+        assert_eq!(exit_status("exitcode", 0), None);
+        assert_eq!(exit_status("echo exit", 0), None);
     }
 
     #[test]
