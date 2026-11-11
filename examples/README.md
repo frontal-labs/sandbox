@@ -11,6 +11,7 @@ Examples demonstrating different use cases and features of the Frontal Sandbox T
 | `sleep-wake` | Put a session to sleep and wake it |
 | `fork-parallel` | Fork a snapshot into parallel workers |
 | `env-vars` | Pass environment variables to a session |
+| `mcp-agent` | Coding agent that uses MCP server tools to edit code and run tests in a sandbox |
 
 ## Getting Started
 
