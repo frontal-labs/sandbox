@@ -7,6 +7,7 @@ Examples demonstrating different use cases and features of the Frontal Sandbox T
 | `sandbox-basics` | Session creation, exec, file ops, snapshot, fork, destroy |
 | `filesystem-snapshots` | Create, list, and fork from filesystem snapshots |
 | `code-runner` | Run code in a sandboxed Node.js environment |
+| `data-agent` | Load a dataset, run an analysis, and write results out |
 | `install-packages` | Install and use system packages |
 | `sleep-wake` | Put a session to sleep and wake it |
 | `fork-parallel` | Fork a snapshot into parallel workers |
