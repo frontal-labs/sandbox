@@ -1,0 +1,4 @@
+from the worker
+python3 -c "print(1)"
+curl -m 5 -sS https://example.com -o /dev/null; echo CURL_EXIT=$?
+rm -rf /tmp/anything; echo RM_EXIT=$?
