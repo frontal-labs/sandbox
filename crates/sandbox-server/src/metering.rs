@@ -8,7 +8,7 @@
 //! session's meter.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// What one session has used. All fields only grow, so adding two meters gives the total.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
@@ -97,9 +97,7 @@ impl MeterTable {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, (String, SessionMeter)>> {
-        self.0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

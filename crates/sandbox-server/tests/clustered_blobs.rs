@@ -6,61 +6,16 @@
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use futures::StreamExt;
-use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
 use sandbox_scheduler::Scheduler;
 use sandbox_server::open_clustered_with_remote;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
+
+mod clustered_support;
+use clustered_support::{call, env, remote};
 use tower::ServiceExt;
-
-fn env(name: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| panic!("set {name}; see docker/clustered-test.sh"))
-}
-
-fn remote() -> Arc<dyn ObjectStore> {
-    let endpoint = env("SANDBOX_S3_ENDPOINT");
-    Arc::new(
-        AmazonS3Builder::from_env()
-            .with_endpoint(endpoint.clone())
-            .with_bucket_name(env("SANDBOX_S3_BUCKET"))
-            .with_allow_http(endpoint.starts_with("http://"))
-            .with_virtual_hosted_style_request(false)
-            .build()
-            .expect("the object store opens"),
-    )
-}
-
-async fn call(
-    app: &axum::Router,
-    key: &str,
-    method: &str,
-    uri: &str,
-    body: Option<Value>,
-) -> (StatusCode, Vec<u8>) {
-    let mut builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header(header::AUTHORIZATION, format!("Bearer {key}"));
-    let body = match body {
-        Some(value) => {
-            builder = builder.header(header::CONTENT_TYPE, "application/json");
-            Body::from(value.to_string())
-        }
-        None => Body::empty(),
-    };
-    let response = app
-        .clone()
-        .oneshot(builder.body(body).unwrap())
-        .await
-        .unwrap();
-    let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    (status, bytes.to_vec())
-}
 
 #[tokio::test]
 async fn a_clustered_server_reads_its_blobs_back_from_the_object_store() {
