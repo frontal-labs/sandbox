@@ -11,7 +11,7 @@ Demonstrates an agent that drives `frontal-sandbox mcp` over stdio (JSON-RPC 2.0
 
 ```bash
 cargo build -p cli --bin frontal-sandbox
-npm install
+npm install --ignore-scripts
 npm start
 ```
 

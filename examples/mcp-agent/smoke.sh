@@ -10,6 +10,7 @@ if [ ! -x "$BIN" ]; then
   cargo build -p cli --bin frontal-sandbox
 fi
 
+export FRONTAL_SANDBOX_BIN="$BIN"
 cd "$ROOT/examples/mcp-agent"
-npm install
-npx tsx src/index.ts "$BIN"
+npm install --ignore-scripts
+npx tsx src/index.ts

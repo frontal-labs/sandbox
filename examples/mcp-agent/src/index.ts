@@ -1,5 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { once } from "node:events"
+import { existsSync } from "node:fs"
+import { resolve } from "node:path"
 import { createInterface } from "node:readline"
 
 type JsonRpcId = number
@@ -101,8 +103,16 @@ function assertCondition(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg)
 }
 
+function resolveBinary(): string {
+  const bin = resolve(process.env.FRONTAL_SANDBOX_BIN ?? "../../target/debug/frontal-sandbox")
+  if (!existsSync(bin)) {
+    throw new Error(`frontal-sandbox binary not found: ${bin}`)
+  }
+  return bin
+}
+
 async function main(): Promise<void> {
-  const bin = process.argv[2] ?? "../../target/debug/frontal-sandbox"
+  const bin = resolveBinary()
   const client = new McpClient(bin)
   try {
     await client.initialize()
