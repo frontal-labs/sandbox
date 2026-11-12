@@ -52,7 +52,7 @@ node scripts/build-binaries.mjs x86_64-apple-darwin   # build a specific target
 
 ## Publishing
 
-Releases are published by `.github/workflows/release-binaries.yml` on `v*` tags. The workflow builds each target, publishes the platform packages, and then publishes the wrapper with its `optionalDependencies` set to the released versions. Publishing goes to GitHub Packages (`https://npm.pkg.github.com`), as configured in `publishConfig`.
+Releases are published by `.github/workflows/release-binaries.yml` on `v*` tags. The workflow builds each target, publishes the platform packages, and then publishes the wrapper with its `optionalDependencies` set to the released versions. All packages are published to [public npm](https://www.npmjs.com/) under the `@frontal-labs` scope.
 
 ## License
 
