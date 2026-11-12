@@ -72,7 +72,7 @@ notify = "8"
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
-swc_core = { version = "82", features = ["common", "ecma_ast", "ecma_parser", "ecma_codegen", "ecma_visit", "ecma_transforms", "ecma_transforms_typescript"] }
+swc_core = { version = "84", features = ["common", "ecma_ast", "ecma_parser", "ecma_codegen", "ecma_visit", "ecma_transforms", "ecma_transforms_typescript"] }
 hyperlocal = "0.9"
 prost = "0.14"
 prost-types = "0.14"
