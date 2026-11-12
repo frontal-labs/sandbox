@@ -1,33 +1,33 @@
-# Frontal Sandbox CLI
+# Sandbox CLI
 
-The `frontal-sandbox` binary, built from the `cli` crate. It runs commands in the local isolate runtime, drives a running server, and records and replays traces.
+The `sandbox` binary (`frontal-sandbox` is a legacy alias that runs the same binary), built from the `cli` crate. It runs commands in the local isolate runtime, drives a running server, and records and replays traces.
 
 ## Commands
 
 | Command | What it does |
 |---------|--------------|
-| `frontal-sandbox run [--trace FILE] <command>...` | Runs the arguments, joined with spaces, as one shell script in a new local sandbox. `--trace` writes the script and its output to FILE. |
-| `frontal-sandbox shell [--trace FILE]` | Reads one script per line from stdin in one local sandbox. `exit` or end of input stops it. `--trace` writes every line to FILE when the shell exits. |
-| `frontal-sandbox replay <TRACE_FILE>` | Runs the scripts of a trace, in order, in a fresh local sandbox and compares each output with the recording. Exits 0 when every run matches and 1 when any run diverges. |
-| `frontal-sandbox bench [-n NAME]` | Times the cases in the table below and prints one JSON line per case. |
-| `frontal-sandbox serve [--addr ADDR] [--data-dir DIR]` | Starts the server in the foreground (default `0.0.0.0:8080`). Prints one API key to stderr on the first run. With `--data-dir`, keys, snapshots, and sleeping sessions survive a restart (ADR 0008). Without it, the server is in memory only. |
-| `frontal-sandbox snapshot <SESSION_ID>` | Snapshots a session on the server named by `SANDBOX_BASE_URL`, with `SANDBOX_API_KEY`. |
-| `frontal-sandbox fork <SNAPSHOT_ID> [-c N]` | Forks a snapshot into N sessions on that server. |
+| `sandbox run [--trace FILE] <command>...` | Runs the arguments, joined with spaces, as one shell script in a new local sandbox. `--trace` writes the script and its output to FILE. |
+| `sandbox shell [--trace FILE]` | Reads one script per line from stdin in one local sandbox. `exit` or end of input stops it. `--trace` writes every line to FILE when the shell exits. |
+| `sandbox replay <TRACE_FILE>` | Runs the scripts of a trace, in order, in a fresh local sandbox and compares each output with the recording. Exits 0 when every run matches and 1 when any run diverges. |
+| `sandbox bench [-n NAME]` | Times the cases in the table below and prints one JSON line per case. |
+| `sandbox serve [--addr ADDR] [--data-dir DIR]` | Starts the server in the foreground (default `0.0.0.0:8080`). Prints one API key to stderr on the first run. With `--data-dir`, keys, snapshots, and sleeping sessions survive a restart (ADR 0008). Without it, the server is in memory only. |
+| `sandbox snapshot <SESSION_ID>` | Snapshots a session on the server named by `SANDBOX_BASE_URL`, with `SANDBOX_API_KEY`. |
+| `sandbox fork <SNAPSHOT_ID> [-c N]` | Forks a snapshot into N sessions on that server. |
 
-Run `frontal-sandbox --help` or `frontal-sandbox <command> --help` for the generated help text.
+Run `sandbox --help` or `sandbox <command> --help` for the generated help text.
 
 ## Traces
 
 A trace is JSON Lines: a header line, then one line per script. See [ADR 0007](../docs/adr/0007-trace-format-and-replay.md) for the format and for what replay does and does not check.
 
 ```bash
-frontal-sandbox run --trace one.jsonl 'echo hi | cat > /a && cat /a'
-frontal-sandbox replay one.jsonl        # replayed 1 runs: 0 diverged
+sandbox run --trace one.jsonl 'echo hi | cat > /a && cat /a'
+sandbox replay one.jsonl        # replayed 1 runs: 0 diverged
 ```
 
 ## Benchmarks
 
-`frontal-sandbox bench` runs these cases on the local isolate runtime, with 10 warm-up and 200 measured iterations each:
+`sandbox bench` runs these cases on the local isolate runtime, with 10 warm-up and 200 measured iterations each:
 
 | Case | Operation |
 |------|-----------|

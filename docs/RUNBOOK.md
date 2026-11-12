@@ -24,7 +24,7 @@ They sum every key, so they carry no tenant label. Per-key usage is at `GET /v1/
 
 ## Logs and request IDs
 
-`frontal-sandbox serve` logs to stderr. `RUST_LOG` sets the filter, and the default is `info`.
+`sandbox serve` (frontal-sandbox is a legacy alias) logs to stderr. `RUST_LOG` sets the filter, and the default is `info`.
 Each request gets an ID. A client may send `x-request-id` (printable, at most 128 bytes), and
 the server echoes it. Otherwise the server generates one. The response carries the same
 header. Each request is logged once, with its method, path, status, and duration, under a span

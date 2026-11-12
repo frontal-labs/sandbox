@@ -1,7 +1,7 @@
 {
   "name": "@frontal-labs/sandbox-cli",
   "version": "0.1.0",
-  "description": "Command-line client for Frontal Sandbox. Installs the prebuilt frontal-sandbox binary for this platform.",
+  "description": "Command-line client for Frontal Sandbox. Installs the prebuilt sandbox binary for this platform. `frontal-sandbox` is a legacy alias.",
   "keywords": [
     "sandbox",
     "cli"
@@ -14,6 +14,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
+    "sandbox": "bin/sandbox.js",
     "frontal-sandbox": "bin/sandbox.js"
   },
   "files": [

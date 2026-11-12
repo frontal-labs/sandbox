@@ -5,13 +5,17 @@ use sandbox_types::{ErrorCode, ExecRequest};
 use sandbox_worker::{Worker, MAX_MESSAGE_BYTES};
 use std::os::unix::fs::PermissionsExt;
 
+/// Path to the sandbox binary. Prefers the canonical `sandbox` name, falling
+/// back to the legacy `frontal-sandbox` name. Cargo sets both; Bazel sets only
+/// the ones listed in `env` (cli/BUILD.bazel).
+fn sandbox_path() -> String {
+    std::env::var("CARGO_BIN_EXE_sandbox")
+        .or_else(|_| std::env::var("CARGO_BIN_EXE_frontal-sandbox"))
+        .expect("Cargo/Bazel should provide a sandbox test binary path")
+}
+
 async fn spawn() -> Option<Worker> {
-    match Worker::spawn(
-        &std::env::var("CARGO_BIN_EXE_frontal-sandbox")
-            .expect("Cargo should provide the frontal-sandbox test binary path"),
-    )
-    .await
-    {
+    match Worker::spawn(&sandbox_path()).await {
         Ok(worker) => Some(worker),
         Err(error) if error.code == ErrorCode::Unsupported => {
             eprintln!("skipping worker process test: {error}");

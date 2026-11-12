@@ -9,7 +9,7 @@ Accepted.
 ## Context
 PLAN §6 sets the cold start of a Tier 1 session at under 5 ms from a warm pool, and PLAN §4.14 describes pools of pre-warmed isolates. The measurements came first, so the pool would go where the cost is.
 
-Measured in a Linux release build (`frontal-sandbox bench`, 200 iterations after warm-up, the container on Apple silicon):
+Measured in a Linux release build (`sandbox bench` (frontal-sandbox is a legacy alias), 200 iterations after warm-up, the container on Apple silicon):
 
 | Case | p50 | p99 |
 | --- | --- | --- |

@@ -477,7 +477,7 @@ impl Shell {
                 exit_code: 2,
                 stdout: Vec::new(),
                 stderr: format!(
-                    "sandbox {other}: needs the server; run `frontal-sandbox sandbox {other}` from the host\n"
+                    "sandbox {other}: needs the server; run `sandbox sandbox {other}` from the host\n"
                 )
                 .into_bytes(),
             },

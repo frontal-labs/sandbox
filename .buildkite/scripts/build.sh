@@ -17,8 +17,8 @@ export V8_FROM_SOURCE="0"
 echo "build: Bazel //..."
 bazel build //...
 
-echo "build: release CLI binary"
-cargo build --release -p cli --bin frontal-sandbox
+echo "build: release CLI binaries"
+cargo build --release -p cli --bin sandbox --bin frontal-sandbox
 
 echo "build: TypeScript SDK"
 bun install --frozen-lockfile --ignore-scripts

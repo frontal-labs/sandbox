@@ -1,5 +1,5 @@
 //! `node` scripts run in a contained child process. These tests drive the real child
-//! (the `frontal-sandbox` binary): the host survives scripts that exhaust memory, and
+//! (the `sandbox` binary): the host survives scripts that exhaust memory, and
 //! each limit is reported. The containment checks need Linux with delegated cgroups
 //! v2. Elsewhere the tests check that `node` is refused.
 //
@@ -14,8 +14,17 @@ mod linux {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    /// Path to the sandbox binary. Prefers the canonical `sandbox` name, falling
+    /// back to the legacy `frontal-sandbox` name. Cargo sets both; Bazel sets only
+    /// the ones listed in `env` (cli/BUILD.bazel).
+    fn sandbox_path() -> String {
+        std::env::var("CARGO_BIN_EXE_sandbox")
+            .or_else(|_| std::env::var("CARGO_BIN_EXE_frontal-sandbox"))
+            .expect("Cargo/Bazel should provide a sandbox test binary path")
+    }
+
     fn install() {
-        let runner = ScriptProcess::new(env!("CARGO_BIN_EXE_frontal-sandbox"));
+        let runner = ScriptProcess::new(sandbox_path());
         let _ = install_script_runner(Arc::new(runner));
     }
 
@@ -169,11 +178,18 @@ mod elsewhere {
     use sandbox_worker::ScriptProcess;
     use std::sync::Arc;
 
+    /// Path to the sandbox binary. Prefers the canonical `sandbox` name, falling
+    /// back to the legacy `frontal-sandbox` name. Cargo sets both; Bazel sets only
+    /// the ones listed in `env` (cli/BUILD.bazel).
+    fn sandbox_path() -> String {
+        std::env::var("CARGO_BIN_EXE_sandbox")
+            .or_else(|_| std::env::var("CARGO_BIN_EXE_frontal-sandbox"))
+            .expect("Cargo/Bazel should provide a sandbox test binary path")
+    }
+
     #[tokio::test]
     async fn node_is_refused_without_linux_containment() {
-        let _ = install_script_runner(Arc::new(ScriptProcess::new(env!(
-            "CARGO_BIN_EXE_frontal-sandbox"
-        ))));
+        let _ = install_script_runner(Arc::new(ScriptProcess::new(sandbox_path())));
         let err = execute_script_contained("console.log(1)", ScriptLimits::default(), None, None)
             .await
             .expect_err("contained scripts need Linux");

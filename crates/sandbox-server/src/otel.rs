@@ -122,7 +122,7 @@ pub fn otlp_json(spans: &[Span]) -> serde_json::Value {
     json!({
         "resourceSpans": [{
             "resource": {"attributes": [
-                {"key": "service.name", "value": {"stringValue": "frontal-sandbox"}},
+                {"key": "service.name", "value": {"stringValue": "sandbox"}},
             ]},
             "scopeSpans": [{
                 "scope": {"name": "sandbox-server"},

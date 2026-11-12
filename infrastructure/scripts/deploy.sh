@@ -6,7 +6,8 @@ set -euo pipefail
 # Usage: sudo ./deploy.sh --binary <path> [--config <path>] [--no-systemd]
 #
 # Installs:
-#   /usr/local/bin/frontal-sandbox          static binary
+#   /usr/local/bin/sandbox              static binary (canonical)
+#   /usr/local/bin/frontal-sandbox       legacy alias
 #   /etc/sandbox/config.toml        config (from --config or defaults.toml)
 #   /etc/systemd/system/*.service   systemd units (unless --no-systemd)
 #
@@ -37,8 +38,10 @@ fi
 
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# 1. Binary.
-install -m 0755 "$BINARY" /usr/local/bin/frontal-sandbox
+# 1. Binary. The canonical name is `sandbox`; `frontal-sandbox` is a legacy alias
+#    kept as a symlink so existing units and references keep working.
+install -m 0755 "$BINARY" /usr/local/bin/sandbox
+ln -sf /usr/local/bin/sandbox /usr/local/bin/frontal-sandbox
 
 # 2. Config.
 CONFIG_DIR="/etc/sandbox"

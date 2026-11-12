@@ -1,6 +1,6 @@
 # Docker
 
-Container setup for the Frontal Sandbox server. The image runs `frontal-sandbox serve`,
+Container setup for the Frontal Sandbox server. The image runs `sandbox serve` (frontal-sandbox is a legacy alias),
 the CLI subcommand that starts the HTTP API in `crates/sandbox-server`.
 
 > **Status: local and development use.** The API has no TLS, no rate limiting,
@@ -81,7 +81,7 @@ The server's flags (`--addr`, `--data-dir`) are fixed in the image's `CMD`. To
 run without persistence, override the command:
 
 ```bash
-docker compose -f docker/compose.yaml run --rm frontal-sandbox serve --addr 0.0.0.0:8080
+docker compose -f docker/compose.yaml run --rm sandbox serve --addr 0.0.0.0:8080
 ```
 
 That mode keeps everything in memory, and a new key is printed on each start.
@@ -127,7 +127,7 @@ inputs change) and on pushes to `master`. It then runs the image with the same
 hardened flags as compose, and checks that the health check passes, that
 `/v1/openapi.json` returns 200, and that a protected route returns 401.
 
-A `v*` tag also publishes the image to `ghcr.io/<owner>/frontal-sandbox`, with
+A `v*` tag also publishes the image to `ghcr.io/<owner>/sandbox`, with
 semver tags and the commit SHA. Publishing needs the `packages: write` scope,
 which only the publish job requests.
 

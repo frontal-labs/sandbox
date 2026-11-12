@@ -86,8 +86,8 @@ filesystem shim, guest protocol decoder. No `fuzz/` directories exist yet.
 ### Agent Transcript Replay (planned)
 
 Replay recorded agent command transcripts against the sandbox. Target: 70%
-pass rate on the first corpus (M2). `frontal-sandbox replay` works on traces recorded
-with `frontal-sandbox run --trace` or `frontal-sandbox shell --trace` (ADR 0007). It does not
+pass rate on the first corpus (M2). `sandbox replay` works on traces recorded
+with `sandbox run --trace` or `sandbox shell --trace` (ADR 0007). It does not
 yet replay a transcript from an agent or from the server.
 
 ### Determinism Tests

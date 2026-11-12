@@ -42,13 +42,23 @@ rust_binary(
     visibility = ["//visibility:public"],
 )
 
+rust_binary(
+    name = "sandbox",
+    edition = "2021",
+    srcs = ["src/main.rs"],
+    deps = [
+        ":cli_lib",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 rust_test(
     name = "cli_bench_process_test",
     srcs = ["tests/bench_process.rs"],
     crate_root = "tests/bench_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":frontal-sandbox"],
+    data = [":frontal-sandbox", ":sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -80,7 +90,7 @@ rust_test(
     crate_root = "tests/serve_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":frontal-sandbox"],
+    data = [":frontal-sandbox", ":sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -112,7 +122,7 @@ rust_test(
     crate_root = "tests/trace_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":frontal-sandbox"],
+    data = [":frontal-sandbox", ":sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -144,7 +154,7 @@ rust_test(
     crate_root = "tests/worker_isolation.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":frontal-sandbox"],
+    data = [":frontal-sandbox", ":sandbox"],
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -180,10 +190,13 @@ rust_test(
     crate_root = "tests/worker_process.rs",
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
-    data = [":frontal-sandbox"],
+    data = [":frontal-sandbox", ":sandbox"],
     # The worker test reads CARGO_BIN_EXE_* at run time, which only Cargo sets. The
     # path is relative to the runfiles root, the test's working directory.
-    env = {"CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)"},
+    env = {
+        "CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)",
+        "CARGO_BIN_EXE_sandbox": "$(rootpath :sandbox)",
+    },
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -216,8 +229,11 @@ rust_test(
     srcs = ["tests/contained_scripts.rs"],
     crate_root = "tests/contained_scripts.rs",
     edition = "2021",
-    data = [":frontal-sandbox"],
-    env = {"CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)"},
+    data = [":frontal-sandbox", ":sandbox"],
+    env = {
+        "CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)",
+        "CARGO_BIN_EXE_sandbox": "$(rootpath :sandbox)",
+    },
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-types:sandbox_types",

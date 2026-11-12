@@ -27,8 +27,8 @@ jobs:
           - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, os_name: linux, arch: arm64 }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, os_name: win32, arch: x64 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://npm.pkg.github.com"
@@ -48,9 +48,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: choco install protoc -y; protoc --version
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
       - name: Install Rust
         run: rustup target add ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       # The ARM Linux build runs on an x86 runner, so it needs a cross toolchain.
       - name: Install cross toolchain (aarch64 Linux)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -61,13 +62,14 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
         run: |
-          # `frontal-sandbox --version` reports the release version, taken from the tag.
+          # `sandbox --version` reports the release version, taken from the tag.
+          # `frontal-sandbox` is the legacy alias, built from the same source.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             export SANDBOX_VERSION="${GITHUB_REF_NAME#v}"
           else
             export SANDBOX_VERSION="0.0.0-dryrun"
           fi
-          cargo build --release -p cli --target ${{ matrix.target }}
+          cargo build --release --locked -p cli --target ${{ matrix.target }} --bin sandbox --bin frontal-sandbox
       - name: Release version and publish mode
         shell: bash
         run: |
@@ -82,8 +84,10 @@ jobs:
       - name: Package CLI binary
         shell: bash
         run: |
-          EXE=frontal-sandbox
-          if [ "${{ matrix.os_name }}" = "win32" ]; then EXE=frontal-sandbox.exe; fi
+          # Both the canonical `sandbox` and the legacy `frontal-sandbox` are built
+          # from the same source. Each platform package ships the canonical binary.
+          EXE=sandbox
+          if [ "${{ matrix.os_name }}" = "win32" ]; then EXE=sandbox.exe; fi
           BIN="target/${{ matrix.target }}/release/$EXE"
           PKG_DIR="target/npm-pkg/${{ matrix.target }}"
           mkdir -p "$PKG_DIR"
@@ -95,7 +99,7 @@ jobs:
             const pkg = {
               name: `@frontal-labs/sandbox-cli-${target}`,
               version,
-              description: `frontal-sandbox CLI binary for ${target}`,
+              description: `sandbox CLI binary for ${target}`,
               os: [osName],
               cpu: [arch],
               files: [exe],
@@ -105,9 +109,9 @@ jobs:
             }
             require("fs").writeFileSync(pkgDir + "/package.json", JSON.stringify(pkg, null, 2))
           ' "$PKG_DIR" "${{ matrix.target }}" "${{ matrix.os_name }}" "${{ matrix.arch }}" "$EXE" "$VERSION"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: frontal-sandbox-${{ matrix.target }}
+          name: sandbox-${{ matrix.target }}
           path: target/npm-pkg/${{ matrix.target }}
 
   publish-npm:
@@ -118,10 +122,10 @@ jobs:
     # checked without releasing anything.
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { path: dist }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://npm.pkg.github.com"
@@ -172,20 +176,23 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { path: dist }
       - name: Name each binary after its target
-        # Every platform's binary is called frontal-sandbox, so the uploads would overwrite each
-        # other. Each one is copied under its target name first.
+        # Each platform's binary is called `sandbox`, so the uploads would overwrite
+        # each other. Each one is copied under its target name first, and the legacy
+        # alias is copied too, so both `sandbox-<target>` and `frontal-sandbox-<target>`
+        # are attached to the release.
         run: |
           mkdir -p release-assets
           for dir in dist/*/; do
-            target="${dir#dist/frontal-sandbox-}"
+            target="${dir#dist/sandbox-}"
             target="${target%/}"
-            for file in "$dir"frontal-sandbox*; do
+            for file in "$dir"sandbox*; do
               name="$(basename "$file")"
-              ext="${name#frontal-sandbox}"
+              ext="${name#sandbox}"
+              cp "$file" "release-assets/sandbox-${target}${ext}"
               cp "$file" "release-assets/frontal-sandbox-${target}${ext}"
             done
           done
@@ -200,7 +207,7 @@ jobs:
       - name: Create the GitHub release and attach the binaries
         # This is the only workflow that creates a release for a v* tag, so the
         # binaries and the notes land on one release.
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           files: release-assets/*

@@ -16,6 +16,10 @@ path = "src/lib.rs"
 name = "frontal-sandbox"
 path = "src/main.rs"
 
+[[bin]]
+name = "sandbox"
+path = "src/main.rs"
+
 [dependencies]
 object_store = { workspace = true }
 frontal-sandbox-sdk = { path = "../sdks/rust" }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TARGETS, findTarget, packageName } from "../lib/platform.js";
+import { TARGETS, findTarget, packageName, exeFor } from "../lib/platform.js";
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
@@ -30,12 +30,22 @@ test("findTarget returns undefined for platforms without a prebuilt binary", () 
   assert.equal(findTarget("freebsd", "x64"), undefined);
 });
 
-test("the Windows binary is frontal-sandbox.exe and the others have no extension", () => {
+test("the canonical binary is sandbox and the alias is frontal-sandbox", () => {
   for (const target of TARGETS) {
-    if (target.os === "win32") {
-      assert.equal(target.exe, "frontal-sandbox.exe");
-    } else {
-      assert.equal(target.exe, "frontal-sandbox");
-    }
+    assert.equal(target.exe, target.os === "win32" ? "sandbox.exe" : "sandbox");
+    assert.equal(
+      target.alias,
+      target.os === "win32" ? "frontal-sandbox.exe" : "frontal-sandbox",
+    );
   }
+});
+
+test("exeFor returns the alias when invoked as the alias and the canonical name otherwise", () => {
+  assert.equal(exeFor("frontal-sandbox"), "frontal-sandbox");
+  assert.equal(exeFor("frontal-sandbox.exe"), "frontal-sandbox.exe");
+  assert.equal(exeFor("sandbox"), "sandbox");
+  assert.equal(exeFor("sandbox.exe"), "sandbox.exe");
+  assert.equal(exeFor("/usr/local/bin/sandbox"), "sandbox");
+  assert.equal(exeFor("/usr/local/bin/frontal-sandbox"), "frontal-sandbox");
+  assert.equal(exeFor("node"), "sandbox");
 });

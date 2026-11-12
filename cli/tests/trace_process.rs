@@ -4,8 +4,17 @@
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
+/// Path to the sandbox binary. Prefers the canonical `sandbox` name, falling
+/// back to the legacy `frontal-sandbox` name. Cargo sets both; Bazel sets only
+/// the ones listed in `env` (cli/BUILD.bazel).
+fn sandbox_path() -> String {
+    std::env::var("CARGO_BIN_EXE_sandbox")
+        .or_else(|_| std::env::var("CARGO_BIN_EXE_frontal-sandbox"))
+        .expect("Cargo/Bazel should provide a sandbox test binary path")
+}
+
 fn sandbox() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_frontal-sandbox"))
+    Command::new(sandbox_path())
 }
 
 fn scratch(name: &str) -> PathBuf {

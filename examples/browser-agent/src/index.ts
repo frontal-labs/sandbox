@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn } from "node:child_process"
 import { once } from "node:events"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
@@ -100,8 +100,8 @@ function assertCondition(cond: unknown, msg: string): asserts cond {
 }
 
 function resolveBinary(): string {
-  const bin = resolve(process.env.FRONTAL_SANDBOX_BIN ?? "../../target/debug/frontal-sandbox")
-  if (!existsSync(bin)) throw new Error(`frontal-sandbox binary not found: ${bin}`)
+  const bin = resolve(process.env.FRONTAL_SANDBOX_BIN ?? "../../target/debug/sandbox")
+  if (!existsSync(bin)) throw new Error(`sandbox binary not found: ${bin}`)
   return bin
 }
 
