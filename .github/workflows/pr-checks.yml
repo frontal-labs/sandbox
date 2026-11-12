@@ -81,13 +81,13 @@ jobs:
             core.setOutput('changes', changes.toString())
 
   changeset:
-    name: Changeset for SDK changes
+    name: Changeset for SDK or CLI changes
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Require a changeset when the SDKs change
+      - name: Require a changeset when the SDKs or CLI change
         env:
           BASE: origin/${{ github.base_ref }}
           HEAD_BRANCH: ${{ github.head_ref }}
@@ -96,13 +96,13 @@ jobs:
           case "$HEAD_BRANCH" in
             changeset-release/*) echo "Version PR. No changeset needed."; exit 0 ;;
           esac
-          if [ -z "$(git diff --name-only "$BASE...HEAD" -- sdks)" ]; then
-            echo "No SDK changes."
+          if [ -z "$(git diff --name-only "$BASE...HEAD" -- sdks npm/sandbox-cli)" ]; then
+            echo "No SDK or CLI changes."
             exit 0
           fi
           added=$(git diff --name-only --diff-filter=A "$BASE...HEAD" -- .changeset | grep -v 'README.md' || true)
           if [ -z "$added" ]; then
-            echo "::error::This PR changes the SDKs. Add a changeset with 'npm run changeset' and commit the file."
+            echo "::error::This PR changes the SDKs or CLI. Add a changeset with 'npm run changeset' and commit the file."
             exit 1
           fi
 

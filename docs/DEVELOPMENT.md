@@ -224,7 +224,7 @@ of truth. Changesets manages it.
 
 1. Add a changeset with `npm run changeset` on the PR that changes an SDK.
    Use `"@frontal-labs/sandbox-sdk": minor` or `patch` (or `major`).
-2. When changesets land on `main`, `sdk-release.yml` opens a "version SDKs"
+2. When changesets land on `main`, `release.yml` opens a "version SDKs"
    PR through `npm run version-packages`. That runs `changeset version`, then
    `scripts/sync-sdk-versions.mjs`, which copies the version into
    `sdks/python/pyproject.toml`, `sdks/rust/Cargo.toml`, and `Cargo.lock`.
@@ -244,7 +244,9 @@ Run the publish step without pushing: `scripts/release/publish-sdk.sh <ts|py|rs>
 
 Other workflows in `.github/workflows/`: `pr-checks.yml`, `benchmarks.yml`,
 `codeql-analysis.yml`, and `release-binaries.yml`. `release-binaries.yml` creates
-the GitHub release for each `v*` tag, with `SHA256SUMS` attached.
+the GitHub release for each `v*` tag, with `SHA256SUMS` attached. `release.yml`
+publishes all SDKs (TS, Python, Rust) to GHCR and the TypeScript SDK to npm,
+driven by changesets.
 
 ## Local Development Loop
 
