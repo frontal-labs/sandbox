@@ -20,7 +20,6 @@ on:
 # Read-only by default. Each job below asks for the write scope it needs.
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: sdk-release-${{ github.ref }}
