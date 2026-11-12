@@ -1,5 +1,11 @@
 # @frontal-labs/sandbox-sdk
 
+## 0.2.1
+
+### Patch Changes
+
+- 6e6722b: CLI: build the binary under both `sandbox` and `frontal-sandbox` names. Both names work identically; `sandbox` is the canonical name and `frontal-sandbox` is a legacy alias. The Rust SDK README documents the alias.
+
 ## 0.2.0
 
 ### Minor Changes
