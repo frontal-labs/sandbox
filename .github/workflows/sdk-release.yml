@@ -141,7 +141,7 @@ jobs:
           cache: npm
       - name: Install
         if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Build TypeScript SDK
         if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
         working-directory: sdks/typescript
