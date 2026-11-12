@@ -69,7 +69,7 @@ jobs:
           else
             export SANDBOX_VERSION="0.0.0-dryrun"
           fi
-          cargo build --release -p cli --target ${{ matrix.target }} --bin sandbox --bin frontal-sandbox
+          cargo build --release --locked -p cli --target ${{ matrix.target }} --bin sandbox --bin frontal-sandbox
       - name: Release version and publish mode
         shell: bash
         run: |
