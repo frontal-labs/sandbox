@@ -2,7 +2,8 @@
 //!
 //! The state lives in the data directory as a base file and a log (ADR 0016).
 //! `state.json` is a full snapshot of the API key digests, the snapshot records,
-//! and the sessions. `state.<epoch>.log` holds, as JSON lines, the entities that
+//! the templates, and the sessions. `state.<epoch>.log` holds, as JSON lines,
+//! the entities that
 //! changed since that snapshot. Each save appends only what changed, and a
 //! compaction writes a new snapshot when the log outgrows it. Blobs live in
 //! `blobs/`, in the disk store.
@@ -12,7 +13,9 @@ use sandbox_cas::tiered_store::CachePolicy;
 use sandbox_cas::{DiskStore, TieredStore};
 use sandbox_session::install_blob_store;
 use sandbox_types::hash::ContentHash;
-use sandbox_types::{CheckpointPolicy, SandboxError, SessionId, SessionState, SnapshotId};
+use sandbox_types::{
+    CheckpointPolicy, SandboxError, SessionId, SessionState, SnapshotId, TemplateId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -36,6 +39,8 @@ pub struct Saved {
     pub version: u32,
     pub keys: Vec<SavedKey>,
     pub snapshots: Vec<SavedSnapshot>,
+    #[serde(default)]
+    pub templates: Vec<SavedTemplate>,
     /// Version 1 sleeping sessions, read for compatibility and never written.
     #[serde(default)]
     pub sleeping: Vec<SavedSleep>,
@@ -131,6 +136,16 @@ pub struct SavedSnapshot {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct SavedTemplate {
+    pub id: TemplateId,
+    pub name: String,
+    pub snapshot_id: SnapshotId,
+    pub owner: String,
+    #[serde(with = "sandbox_types::rfc3339")]
+    pub created_at: SystemTime,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SavedSleep {
     pub owner: String,
     pub state: SessionState,
@@ -154,6 +169,7 @@ enum Entity {
     Key(String),
     Snapshot(SnapshotId),
     Session(SessionId),
+    Template(TemplateId),
 }
 
 /// Every saved entity, with its canonical JSON and that JSON's hash. Canonical
@@ -172,6 +188,8 @@ enum Record {
     DelSnapshot { id: SnapshotId },
     PutSession { value: SavedSession },
     DelSession { id: SessionId },
+    PutTemplate { value: SavedTemplate },
+    DelTemplate { id: TemplateId },
 }
 
 /// The saved state keyed by entity, the working form while the log is replayed.
@@ -180,6 +198,7 @@ struct Entities {
     keys: HashMap<String, SavedKey>,
     snapshots: HashMap<SnapshotId, SavedSnapshot>,
     sessions: HashMap<SessionId, SavedSession>,
+    templates: HashMap<TemplateId, SavedTemplate>,
     sleeping: Vec<SavedSleep>,
 }
 
@@ -193,6 +212,7 @@ impl Entities {
                 .into_iter()
                 .map(|s| (s.state.id, s))
                 .collect(),
+            templates: saved.templates.into_iter().map(|t| (t.id, t)).collect(),
             sleeping: saved.sleeping,
         }
     }
@@ -217,6 +237,12 @@ impl Entities {
             Record::DelSession { id } => {
                 self.sessions.remove(&id);
             }
+            Record::PutTemplate { value } => {
+                self.templates.insert(value.id, value);
+            }
+            Record::DelTemplate { id } => {
+                self.templates.remove(&id);
+            }
         }
     }
 
@@ -225,6 +251,7 @@ impl Entities {
             version: VERSION,
             keys: self.keys.into_values().collect(),
             snapshots: self.snapshots.into_values().collect(),
+            templates: self.templates.into_values().collect(),
             sleeping: self.sleeping,
             sessions: self.sessions.into_values().collect(),
             log_epoch: epoch,
@@ -475,6 +502,9 @@ fn canonical(saved: &Saved) -> Result<Canonical, SandboxError> {
     for session in &saved.sessions {
         insert_canonical(&mut out, Entity::Session(session.state.id), session)?;
     }
+    for template in &saved.templates {
+        insert_canonical(&mut out, Entity::Template(template.id), template)?;
+    }
     Ok(out)
 }
 
@@ -497,6 +527,7 @@ fn put_record(entity: &Entity, value: &serde_json::Value) -> serde_json::Value {
         Entity::Key(_) => ("put_key", "value"),
         Entity::Snapshot(_) => ("put_snapshot", "value"),
         Entity::Session(_) => ("put_session", "value"),
+        Entity::Template(_) => ("put_template", "value"),
     };
     serde_json::json!({ "op": op, field: value })
 }
@@ -511,6 +542,9 @@ fn del_record(entity: &Entity) -> Result<serde_json::Value, SandboxError> {
         }
         Entity::Session(id) => {
             serde_json::json!({ "op": "del_session", "id": serde_json::to_value(id).map_err(encode)? })
+        }
+        Entity::Template(id) => {
+            serde_json::json!({ "op": "del_template", "id": serde_json::to_value(id).map_err(encode)? })
         }
     })
 }
@@ -716,6 +750,7 @@ mod tests {
             version: VERSION,
             keys: Vec::new(),
             snapshots: Vec::new(),
+            templates: Vec::new(),
             sleeping: Vec::new(),
             sessions: vec![session],
             log_epoch: 0,
@@ -774,6 +809,7 @@ mod tests {
                 digest: "digest".to_string(),
             }],
             snapshots: Vec::new(),
+            templates: Vec::new(),
             sleeping: Vec::new(),
             sessions,
             log_epoch: 0,

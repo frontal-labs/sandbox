@@ -33,6 +33,9 @@ use utoipa::{Modify, OpenApi};
         crate::api::list_snapshots,
         crate::api::get_snapshot,
         crate::api::fork_snapshot,
+        crate::api::create_template,
+        crate::api::list_templates,
+        crate::api::get_template,
         crate::api::session_info,
         crate::api::checkpoint_session,
         crate::api::undo_session,
@@ -45,6 +48,7 @@ use utoipa::{Modify, OpenApi};
         crate::api::TakeSnapshotResponse,
         crate::api::ForkRequest,
         crate::api::ForkResponse,
+        crate::api::CreateTemplateRequest,
         crate::api::SessionView,
         crate::api::CheckpointUsage,
         crate::api::CheckpointResponse,
@@ -63,6 +67,7 @@ use utoipa::{Modify, OpenApi};
         sandbox_types::ExecEvent,
         sandbox_types::OutputStream,
         sandbox_types::Snapshot,
+        sandbox_types::Template,
         sandbox_types::ErrorCode,
         sandbox_types::policy::ResourceLimits,
         sandbox_types::policy::NetworkPolicy,
@@ -77,6 +82,7 @@ use utoipa::{Modify, OpenApi};
         (name = "exec", description = "Running commands"),
         (name = "fs", description = "Files inside a session"),
         (name = "snapshots", description = "Snapshots and forks"),
+        (name = "templates", description = "Reusable named templates over snapshots"),
     )
 )]
 pub struct ApiDoc;

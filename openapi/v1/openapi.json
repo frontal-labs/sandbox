@@ -1287,6 +1287,167 @@
         ]
       }
     },
+    "/v1/templates": {
+      "get": {
+        "tags": [
+          "templates"
+        ],
+        "summary": "List this key's templates, newest first.",
+        "operationId": "list_templates",
+        "responses": {
+          "200": {
+            "description": "This key's templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Template"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "templates"
+        ],
+        "summary": "Create a new template over one of this key's snapshots.",
+        "operationId": "create_template",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Template created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid template name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The snapshot is not one of this key's snapshots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/templates/{id}": {
+      "get": {
+        "tags": [
+          "templates"
+        ],
+        "summary": "Read one of this key's templates.",
+        "operationId": "get_template",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Template ID (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such template for this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/usage": {
       "get": {
         "tags": [
@@ -1439,6 +1600,24 @@
           "session_id": {
             "type": "string",
             "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          }
+        }
+      },
+      "CreateTemplateRequest": {
+        "type": "object",
+        "description": "Create a reusable named template over an existing snapshot (ADR 0049).",
+        "required": [
+          "name",
+          "snapshot_id"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "A short human-readable name for the template."
+          },
+          "snapshot_id": {
+            "type": "string",
+            "description": "The snapshot this template starts from."
           }
         }
       },
@@ -1990,6 +2169,14 @@
             ],
             "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
           },
+          "initial_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Start the session from a reusable template. Separate from `initial_snapshot`\nfor type safety (ADR 0049). The server resolves it to the template's snapshot.",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          },
           "labels": {
             "type": "object",
             "additionalProperties": {
@@ -2191,6 +2378,34 @@
           }
         }
       },
+      "Template": {
+        "type": "object",
+        "description": "A reusable starting point for a session. A template is a stable name over an\nexisting snapshot: it captures the snapshot's committed filesystem root so a\nsession can start from a pre-built filesystem (ADR 0049). It is not a snapshot\nrenamed; it layers ownership and a name on top of a snapshot record.",
+        "required": [
+          "id",
+          "name",
+          "snapshot_id",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "description": "The snapshot this template was created from. The root, limits, and VM\neligibility are read from that snapshot record when the template is used.",
+            "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+          }
+        }
+      },
       "Tier": {
         "type": "string",
         "enum": [
@@ -2242,6 +2457,10 @@
     {
       "name": "snapshots",
       "description": "Snapshots and forks"
+    },
+    {
+      "name": "templates",
+      "description": "Reusable named templates over snapshots"
     }
   ]
 }

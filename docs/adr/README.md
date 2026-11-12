@@ -78,6 +78,20 @@ What is the change that we're proposing and/or doing?
 | [0034](0034-parked-sleeping-sessions.md) | Parked sleeping sessions | Accepted | 2026-11-05 |
 | [0035](0035-object-store-blobs.md) | Blobs in an object store | Accepted | 2026-11-05 |
 | [0031](0031-bazel-resolves-from-its-own-lock.md) | Bazel resolves crates from its own lock | Accepted | 2026-11-03 |
+| [0036](0036-serve-config-toml.md) | TOML configuration for `serve` | Accepted | 2026-11-07 |
+| [0037](0037-websocket-signals.md) | Signals on the WebSocket exec route | Accepted | 2026-11-10 |
+| [0038](0038-websocket-live-stdin.md) | Live stdin on the WebSocket exec route | Accepted | 2026-11-10 |
+| [0039](0039-coreutils-builtins.md) | Coreutils builtins over the VFS | Accepted | 2026-11-10 |
+| [0040](0040-mcp-server.md) | MCP server over stdio | Accepted | 2026-11-10 |
+| [0041](0041-session-metering.md) | Per-session CPU and memory metering | Accepted | 2026-11-11 |
+| [0042](0042-billing-event-stream.md) | Durable billing event stream in Postgres | Accepted | 2026-11-11 |
+| [0043](0043-pty-shell.md) | Interactive PTY shell over WebSocket | Accepted | 2026-11-11 |
+| [0044](0044-pty-commands-are-checkpointed.md) | PTY commands are checkpointed, traced, and metered | Accepted | 2026-11-11 |
+| [0045](0045-pty-exit-status-and-running-input.md) | PTY exit status, and typed input for running commands | Accepted | 2026-11-11 |
+| [0046](0046-live-stdin-for-cat.md) | Live standard input for a top-level cat | Accepted | 2026-11-11 |
+| [0047](0047-streaming-filters-and-line-input.md) | Streaming line filters, drained input for other readers, and line editing while a command runs | Accepted | 2026-11-11 |
+| [0048](0048-streaming-pipelines.md) | Streaming pipelines over live input | Accepted | 2026-11-11 |
+| [0049](0049-snapshot-templates.md) | Snapshot templates | Accepted | 2026-11-12 |
 
 Add rows here as `NNNN-title.md` files are created.
 

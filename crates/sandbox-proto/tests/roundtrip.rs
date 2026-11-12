@@ -11,7 +11,7 @@ use sandbox_types::session::{
     CheckpointPolicy, SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
 };
 use sandbox_types::{
-    ErrorCode, ExecRequest, ExecResult, SandboxError, SessionId, SnapshotId, TenantId,
+    ErrorCode, ExecRequest, ExecResult, SandboxError, SessionId, SnapshotId, TemplateId, TenantId,
 };
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -95,6 +95,7 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
         arb_map(),
         "/[a-z/]{0,12}",
         prop::option::of(arb_ulid()),
+        prop::option::of(arb_ulid()),
         arb_map(),
         prop_oneof![
             Just(CheckpointPolicy::PerExec),
@@ -112,6 +113,7 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
                 env,
                 cwd,
                 snap,
+                template,
                 labels,
                 checkpoint,
                 checkpoint_retain,
@@ -126,6 +128,7 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
                 env,
                 cwd,
                 initial_snapshot: snap.map(SnapshotId::from_ulid),
+                initial_template: template.map(TemplateId::from_ulid),
                 secrets: None,
                 labels,
                 checkpoint,

@@ -1,7 +1,7 @@
 use super::invalid;
 use crate::v1::types as pb;
 use sandbox_types::SandboxError;
-use sandbox_types::{SessionId, SnapshotId, TenantId};
+use sandbox_types::{SessionId, SnapshotId, TemplateId, TenantId};
 use ulid::Ulid;
 
 fn parse(value: &str, field: &str) -> Result<Ulid, SandboxError> {
@@ -35,6 +35,21 @@ impl TryFrom<pb::SnapshotId> for SnapshotId {
     type Error = SandboxError;
     fn try_from(id: pb::SnapshotId) -> Result<Self, Self::Error> {
         Ok(SnapshotId::from_ulid(parse(&id.value, "snapshot_id")?))
+    }
+}
+
+impl From<TemplateId> for pb::TemplateId {
+    fn from(id: TemplateId) -> Self {
+        Self {
+            value: id.as_ulid().to_string(),
+        }
+    }
+}
+
+impl TryFrom<pb::TemplateId> for TemplateId {
+    type Error = SandboxError;
+    fn try_from(id: pb::TemplateId) -> Result<Self, Self::Error> {
+        Ok(TemplateId::from_ulid(parse(&id.value, "template_id")?))
     }
 }
 
