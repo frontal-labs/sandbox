@@ -1,8 +1,8 @@
-name: SDK release
+name: Release
 
 # Changesets turns pending changesets into a "Version SDKs" pull request. Merging
 # that pull request publishes the new version: each SDK is packed and pushed to
-# GHCR, then the version is tagged and a GitHub release is created.
+# GHCR and npm, then the version is tagged and a GitHub release is created.
 #
 # Run it by hand with dry_run on (the default) to check the packing without
 # pushing anything.
@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sdk-release-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
