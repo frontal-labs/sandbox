@@ -139,21 +139,24 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: Install and build
+      - name: Install
         if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
-        run: |
-          npm ci
-          (cd sdks/typescript && npm run build)
+        run: npm ci
+      - name: Build TypeScript SDK
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        working-directory: sdks/typescript
+        run: npm run build
       - name: Publish
         if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        working-directory: sdks/typescript
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           DRY_RUN="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}"
           if [ "$DRY_RUN" = "true" ]; then
-            (cd sdks/typescript && npm publish --dry-run)
+            npm publish --dry-run
           else
-            (cd sdks/typescript && npm publish --access public)
+            npm publish --access public
           fi
 
   release:
