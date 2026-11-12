@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn } from "node:child_process"
 import { once } from "node:events"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"

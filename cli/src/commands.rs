@@ -2,6 +2,7 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use sandbox_session::{changed_since, committed_root, replay_run, IsolateBackend, Session};
 use sandbox_trace::{outcome_of, replay, FileChange, FsOp, Outcome, RunRecord, Trace};
 use sandbox_types::{ErrorCode, ExecResult, SandboxError, SessionConfig};
+use std::ffi::OsStr;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -22,8 +23,8 @@ fn invocation_name() -> &'static str {
     let exe = std::env::current_exe().ok();
     match exe
         .as_deref()
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
+        .and_then(Path::file_name)
+        .and_then(OsStr::to_str)
     {
         Some("sandbox" | "sandbox.exe") => "sandbox",
         Some("frontal-sandbox" | "frontal-sandbox.exe") => "frontal-sandbox",

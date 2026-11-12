@@ -14,9 +14,11 @@ const require = createRequire(import.meta.url);
 
 // The name this wrapper was invoked as, without any path.
 const invoked = (process.argv[1] ?? "").split(/[\\/]/).pop() ?? "";
-const exe = invoked === "frontal-sandbox" || invoked === "frontal-sandbox.exe"
-  ? invoked
-  : invoked === "sandbox" || invoked === "sandbox.exe"
+const exe =
+  invoked === "frontal-sandbox" ||
+  invoked === "frontal-sandbox.exe" ||
+  invoked === "sandbox" ||
+  invoked === "sandbox.exe"
     ? invoked
     : "sandbox";
 
