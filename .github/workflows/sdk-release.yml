@@ -115,9 +115,53 @@ jobs:
             scripts/release/publish-sdk.sh "$SDK"
           fi
 
+  publish-npm:
+    name: Publish TypeScript SDK to npm
+    needs: publish
+    if: >-
+      needs.publish.result == 'success' &&
+      (github.event_name == 'push' || github.event.inputs.dry_run == 'false')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Stop while changesets are still pending
+        id: pending
+        run: |
+          pending=$(ls .changeset/*.md 2>/dev/null | grep -v README.md | wc -l | tr -d ' ')
+          echo "pending=$pending" >> "$GITHUB_OUTPUT"
+          if [ "$pending" != "0" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "Changesets are pending; the version PR has not been merged yet. Skipping."
+          fi
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        run: npm ci --ignore-scripts
+      - name: Build TypeScript SDK
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        working-directory: sdks/typescript
+        run: npm run build
+      - name: Publish
+        if: steps.pending.outputs.pending == '0' || github.event_name == 'workflow_dispatch'
+        working-directory: sdks/typescript
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          DRY_RUN="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}"
+          if [ "$DRY_RUN" = "true" ]; then
+            npm publish --dry-run
+          else
+            npm publish --access public
+          fi
+
   release:
     name: Tag the release
-    needs: publish
+    needs: [publish, publish-npm]
     if: >-
       needs.publish.result == 'success' &&
       (github.event_name == 'push' || github.event.inputs.dry_run == 'false')

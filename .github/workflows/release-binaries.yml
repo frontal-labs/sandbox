@@ -31,7 +31,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: "https://npm.pkg.github.com"
+          registry-url: "https://registry.npmjs.org"
       # sandbox-proto's build script runs protoc. Each runner installs its own.
       - name: Install protoc (Linux)
         if: runner.os == 'Linux'
@@ -105,7 +105,7 @@ jobs:
               files: [exe],
               license: "Apache-2.0",
               repository: "https://github.com/frontal-labs/sandbox",
-              publishConfig: { registry: "https://npm.pkg.github.com" },
+              publishConfig: { registry: "https://registry.npmjs.org" },
             }
             require("fs").writeFileSync(pkgDir + "/package.json", JSON.stringify(pkg, null, 2))
           ' "$PKG_DIR" "${{ matrix.target }}" "${{ matrix.os_name }}" "${{ matrix.arch }}" "$EXE" "$VERSION"
@@ -128,7 +128,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: "https://npm.pkg.github.com"
+          registry-url: "https://registry.npmjs.org"
       - name: Release version and publish mode
         shell: bash
         run: |
@@ -146,7 +146,7 @@ jobs:
             (cd "$dir" && npm publish --access public $NPM_FLAGS)
           done
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish the sandbox-cli wrapper
         # The wrapper lists each platform package in optionalDependencies at the
         # same version, so it is published after them.
@@ -168,7 +168,7 @@ jobs:
           ' "$WRAP" "$VERSION" "$GITHUB_WORKSPACE/dist"
           (cd "$WRAP" && npm publish --access public $NPM_FLAGS)
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   release:
     name: Attach to release
