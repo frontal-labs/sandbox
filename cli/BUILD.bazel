@@ -59,6 +59,10 @@ rust_test(
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":frontal-sandbox", ":sandbox"],
+    env = {
+        "CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)",
+        "CARGO_BIN_EXE_sandbox": "$(rootpath :sandbox)",
+    },
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -91,6 +95,10 @@ rust_test(
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":frontal-sandbox", ":sandbox"],
+    env = {
+        "CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)",
+        "CARGO_BIN_EXE_sandbox": "$(rootpath :sandbox)",
+    },
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",
@@ -123,6 +131,10 @@ rust_test(
     edition = "2021",
     # The tests start the `sandbox` binary, which Bazel passes in as data.
     data = [":frontal-sandbox", ":sandbox"],
+    env = {
+        "CARGO_BIN_EXE_frontal-sandbox": "$(rootpath :frontal-sandbox)",
+        "CARGO_BIN_EXE_sandbox": "$(rootpath :sandbox)",
+    },
     deps = [
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-scheduler:sandbox_scheduler",

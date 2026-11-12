@@ -18,7 +18,7 @@ implemented, the "Current State" sections say so.
 | [MILESTONES.md](MILESTONES.md) | Milestone plan |
 | [PERFORMANCE.md](PERFORMANCE.md) | Performance targets and measurements |
 | [API_REFERENCE.md](API_REFERENCE.md) | API reference |
-| [BUILD_SYSTEM.md](BUILD_SYSTEM.md) | Build system (Nix + Bazel) |
+| [BUILD_SYSTEM.md](BUILD_SYSTEM.md) | Build system (Bazel + Cargo) |
 
 ## Architecture Decision Records
 

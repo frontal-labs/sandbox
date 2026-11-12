@@ -79,10 +79,8 @@ bazel build //...
 bazel test //...
 ```
 
-Nix is optional. With Nix installed, `nix develop` gives a shell with Bazelisk,
-the pinned Rust toolchain, and the formatters and linters, and `nix flake check`
-runs the repository checks. See [docs/build-system.md](docs/build-system.md) for
-the setup, the layout, and the known gaps.
+See [docs/BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) for the setup, the layout, and
+the known gaps.
 
 TypeScript and repository tooling (root `package.json`; the `ts:*` scripts run
 through Bazel):
