@@ -1,10 +1,11 @@
 #!/bin/sh
-# Drives `frontal-sandbox mcp` over stdio the way an MCP client does, and checks the replies.
+# Drives `sandbox mcp` over stdio the way an MCP client does, and checks the replies.
+# (`frontal-sandbox` is a legacy alias that works identically.)
 #
-#   cargo build -p cli --bin frontal-sandbox && examples/mcp/smoke.sh
+#   cargo build -p cli --bin sandbox && examples/mcp/smoke.sh
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-BIN="${FRONTAL_SANDBOX_BIN:-$ROOT/target/debug/frontal-sandbox}"
+BIN="${SANDBOX_BIN:-${FRONTAL_SANDBOX_BIN:-$ROOT/target/debug/sandbox}}"
 
 out=$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \

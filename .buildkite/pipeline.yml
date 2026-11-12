@@ -55,7 +55,7 @@ steps:
     command: ".buildkite/scripts/build.sh"
     depends_on: "lint"
     artifact_paths:
-      - "target/release/frontal-sandbox"
+      - "target/release/sandbox"
       - "dist/**"
       - "bazel-out/**"
     key: "build"

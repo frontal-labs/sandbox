@@ -49,7 +49,7 @@ COPY . .
 #
 # rusty_v8 (pulled in by deno_core through `cli`) downloads a prebuilt V8
 # archive during the build, so this stage needs network access.
-# SANDBOX_VERSION is read by cli/src/commands.rs at build time, so `frontal-sandbox
+# SANDBOX_VERSION is read by cli/src/commands.rs at build time, so `sandbox
 # --version` reports the release. docker.yml passes the tag; a plain build gets
 # the placeholder.
 ARG SANDBOX_VERSION=0.0.0-dev
@@ -58,7 +58,8 @@ ENV SANDBOX_VERSION=${SANDBOX_VERSION}
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/src/target,sharing=locked \
-    cargo build --release --locked -p cli \
+    cargo build --release --locked -p cli --bin sandbox --bin frontal-sandbox \
+    && install -Dm0755 target/release/sandbox /out/sandbox \
     && install -Dm0755 target/release/frontal-sandbox /out/frontal-sandbox
 
 # -----------------------------------------------------------------------------
@@ -82,6 +83,7 @@ RUN groupadd --system --gid 10001 sandbox \
         --home-dir /var/lib/sandbox --shell /usr/sbin/nologin sandbox \
     && install -d -o sandbox -g sandbox -m 0700 /var/lib/sandbox
 
+COPY --from=builder /out/sandbox /usr/local/bin/sandbox
 COPY --from=builder /out/frontal-sandbox /usr/local/bin/frontal-sandbox
 
 USER sandbox:sandbox
@@ -100,5 +102,7 @@ HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
 
 # Durable mode: keys, snapshots, and sleeping sessions survive a restart
 # (ADR 0008). The first start prints one API key to the container log.
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/frontal-sandbox"]
+# Both `sandbox` and `frontal-sandbox` are installed; the entrypoint uses the
+# canonical name.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sandbox"]
 CMD ["serve", "--addr", "0.0.0.0:8080", "--data-dir", "/var/lib/sandbox"]

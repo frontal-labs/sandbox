@@ -101,7 +101,7 @@ sdks/
 ├── rust/               # Crate `sandbox-sdk` (Rust client)
 ├── typescript/         # npm `@frontal-labs/sandbox-sdk` (built with Bazel and Bun)
 └── python/             # Python package `sandbox_sdk`
-cli/                    # Crate `cli`, binary `frontal-sandbox`
+cli/                    # Crate `cli`, binary `sandbox` (frontal-sandbox is a legacy alias)
 ```
 
 Dependency direction (project specification section 11): `sandbox-types` and `sandbox-cas` at

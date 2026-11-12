@@ -9,7 +9,7 @@
 
 ## Base URL
 
-The intended bind address is `0.0.0.0:8080` (the default of `frontal-sandbox serve
+The intended bind address is `0.0.0.0:8080` (the default of `sandbox serve
 --addr` in `cli/src/commands.rs`), but no process currently serves these
 routes (see the CLI section). Routes are mounted under `/v1`.
 
@@ -43,7 +43,7 @@ integers. The SDKs convert those arrays to bytes on their side.
 | GET | `/v1/sessions/{id}/snapshots` | `list_snapshots` | Snapshots taken from a session |
 | GET | `/v1/sessions/{id}/snapshots/{snapshot_id}` | `get_snapshot` | One snapshot taken from a session |
 | GET | `/v1/usage` | `get_usage` | The caller's counters since the server started (ADR 0015) |
-| POST | `/v1/gc` | `run_gc` | Start a blob store collection in the background (`202`). One per minute, else `429` (ADR 0013). `frontal-sandbox serve --gc-interval-secs` also runs one on a schedule |
+| POST | `/v1/gc` | `run_gc` | Start a blob store collection in the background (`202`). One per minute, else `429` (ADR 0013). `sandbox serve --gc-interval-secs` also runs one on a schedule |
 
 Source: `crates/sandbox-server/src/api.rs` (`create_router`).
 
@@ -243,7 +243,7 @@ often hold secrets (ADR 0010).
 A request to a sleeping session wakes it first, so `exec`, file operations, and
 `snapshot` succeed. `get` and `destroy` never wake it. Sleeping a sleeping session,
 or waking a running one, returns `409` with code `INVALID_STATE`. Idle sessions
-sleep by themselves when `frontal-sandbox serve --idle-sleep-secs` is set (default 300). See
+sleep by themselves when `sandbox serve --idle-sleep-secs` is set (default 300). See
 [ADR 0006](adr/0006-sleep-and-wake.md) and [ADR 0015](adr/0015-idle-sleep-and-metering.md).
 
 ### Command trace
@@ -261,7 +261,7 @@ field, with the operation (`create`, `write`, `delete`, `mkdir`, `symlink`) and 
 content hashes before and after. A rename appears as a delete and a create, and a
 chmod is not reported. Writes and deletes through the filesystem API are runs of their
 own, with the written bytes in an `fs` field. Save the body and replay it with
-`frontal-sandbox replay`, which makes the same writes again. See
+`sandbox replay`, which makes the same writes again. See
 [ADR 0009](adr/0009-server-exec-traces.md), [ADR 0011](adr/0011-file-changes-in-traces.md),
 and [ADR 0012](adr/0012-filesystem-writes-in-traces.md).
 
@@ -285,17 +285,17 @@ yet. The `middleware.rs` module only adds a request ID.
 
 ## CLI
 
-The `frontal-sandbox` binary (crate `cli`) runs commands in an in-process isolate
+The `sandbox` (sandbox is a legacy alias) binary (crate `cli`) runs commands in an in-process isolate
 session, records and replays traces, and times the local runtime. `snapshot`
 and `fork` call a server named by `SANDBOX_BASE_URL`. See
 [cli/README.md](../cli/README.md) for every command.
 
 ```bash
-frontal-sandbox run --trace one.jsonl "echo hi | cat > /a && cat /a"  # exit code = the script's
-frontal-sandbox shell --trace session.jsonl                           # one script per stdin line
-frontal-sandbox replay one.jsonl                                      # exit 1 on any divergence
-frontal-sandbox bench --name exec_echo                                # one JSON line per case
-frontal-sandbox serve --addr 127.0.0.1:8080                           # prints one API key to stderr
-SANDBOX_BASE_URL=... SANDBOX_API_KEY=... frontal-sandbox snapshot <session-id>
-SANDBOX_BASE_URL=... SANDBOX_API_KEY=... frontal-sandbox fork <snapshot-id> --count 3
+sandbox run --trace one.jsonl "echo hi | cat > /a && cat /a"  # exit code = the script's
+sandbox shell --trace session.jsonl                           # one script per stdin line
+sandbox replay one.jsonl                                      # exit 1 on any divergence
+sandbox bench --name exec_echo                                # one JSON line per case
+sandbox serve --addr 127.0.0.1:8080                           # prints one API key to stderr
+SANDBOX_BASE_URL=... SANDBOX_API_KEY=... sandbox snapshot <session-id>
+SANDBOX_BASE_URL=... SANDBOX_API_KEY=... sandbox fork <snapshot-id> --count 3
 ```

@@ -19,7 +19,7 @@ Fields that Tier 1 cannot fill yet are honest about it:
 - `cpu_ms_budget` is `null`. The limits model has no matching budget.
 - `user` is `"agent"`. Tier 1 has no real uid.
 
-`GET /v1/sessions/{id}/info`, `frontal-sandbox sandbox info`, and the Rust SDK's
+`GET /v1/sessions/{id}/info`, `sandbox sandbox info`, and the Rust SDK's
 `info` return the file.
 
 ### Protection
@@ -78,7 +78,7 @@ that still does not fit is skipped, and an explicit checkpoint, undo, or fork fa
 with `RESOURCE_EXHAUSTED`.
 
 Unpinning is real storage reclaim. A collection (`POST /v1/gc`, or the scheduled
-sweep under `frontal-sandbox serve`) removes the blobs of unpinned roots that no
+sweep under `sandbox serve` (sandbox is a legacy alias)) removes the blobs of unpinned roots that no
 other root uses.
 
 ## Undo
@@ -134,12 +134,12 @@ Each child writes its own `/r`.
 
 | Operation | Server route | Rust SDK | CLI |
 | --- | --- | --- | --- |
-| Environment | `GET /v1/sessions/{id}/info` | `info` | `frontal-sandbox sandbox info <session>` |
-| Checkpoint | `POST /v1/sessions/{id}/checkpoint` | `checkpoint` | `frontal-sandbox sandbox checkpoint <session>` |
-| Undo | `POST /v1/sessions/{id}/undo` | `undo` | `frontal-sandbox sandbox undo <session> [N]` |
-| Fork | `POST /v1/sessions/{id}/fork` | `fork_command` | `frontal-sandbox sandbox fork <session> -c N -- <cmd>` |
+| Environment | `GET /v1/sessions/{id}/info` | `info` | `sandbox sandbox info <session>` |
+| Checkpoint | `POST /v1/sessions/{id}/checkpoint` | `checkpoint` | `sandbox sandbox checkpoint <session>` |
+| Undo | `POST /v1/sessions/{id}/undo` | `undo` | `sandbox sandbox undo <session> [N]` |
+| Fork | `POST /v1/sessions/{id}/fork` | `fork_command` | `sandbox sandbox fork <session> -c N -- <cmd>` |
 
-The top-level `frontal-sandbox fork <snapshot>` still forks a snapshot.
+The top-level `sandbox fork <snapshot>` still forks a snapshot.
 
 Inside the shell, `sandbox info` prints the same file. The shell's own `sandbox`
 builtin runs only `info`. The other subcommands are handled by the exec route, as
@@ -155,4 +155,4 @@ yet, because those index files had uncommitted changes when this was written.
 ## Not yet implemented
 
 - A running server does not expose its GC schedule through the API. Operators set
-  the interval with `frontal-sandbox serve`.
+  the interval with `sandbox serve` (sandbox is a legacy alias).

@@ -23,7 +23,7 @@ Build from the repo with `cargo build -p sandbox-sdk`.
 `Client::from_env()` reads:
 
 - `SANDBOX_BASE_URL`, default `http://localhost:8080`
-- `SANDBOX_API_KEY`, sent as a bearer token. The server issues keys at startup (`frontal-sandbox serve` prints one).
+- `SANDBOX_API_KEY`, sent as a bearer token. The server issues keys at startup (`sandbox serve` prints one (frontal-sandbox is a legacy alias)).
 
 `Client::new(base_url, api_key)` takes both explicitly.
 

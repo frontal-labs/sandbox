@@ -6,6 +6,15 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+/// Path to the sandbox binary. Prefers the canonical `sandbox` name, falling
+/// back to the legacy `frontal-sandbox` name. Cargo sets both; Bazel sets only
+/// the ones listed in `env` (cli/BUILD.bazel).
+fn sandbox_path() -> String {
+    std::env::var("CARGO_BIN_EXE_sandbox")
+        .or_else(|_| std::env::var("CARGO_BIN_EXE_frontal-sandbox"))
+        .expect("Cargo/Bazel should provide a sandbox test binary path")
+}
+
 /// Kills the server when dropped, so a failing assertion never leaves it running.
 struct Server(Child);
 
@@ -25,7 +34,7 @@ fn free_addr() -> String {
 /// closes what the test checks. The server prints the state directory after
 /// it starts listening, and a first run prints the key after that.
 fn start(dir: &Path, last: &str) -> (Server, Vec<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_frontal-sandbox"))
+    let mut child = Command::new(sandbox_path())
         .args(["serve", "--addr", &free_addr(), "--data-dir"])
         .arg(dir)
         .stderr(Stdio::piped())

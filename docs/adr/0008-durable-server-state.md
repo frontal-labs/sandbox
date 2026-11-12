@@ -10,7 +10,8 @@ Accepted
 The server kept every key, snapshot record, and sleeping session in memory, so a restart lost them. A sleeping session is only worth having if its root survives a restart, and a snapshot is only useful if its owner can still authenticate. The content store had a disk implementation (`DiskStore`), but the server did not use it.
 
 ## Decision
-- `frontal-sandbox serve --data-dir <DIR>` makes the server durable. Without the flag, it behaves as before, entirely in memory.
+- `sandbox serve --data-dir <DIR>` makes the server durable. Without the flag, it behaves as
+  before, entirely in memory. (`frontal-sandbox` is a legacy alias that runs the same binary.)
 - Blobs go to `<DIR>/blobs` through `DiskStore`. The session backend's blob store is process-wide, so `sandbox_session::install_blob_store` installs the disk store before the first session. It fails if a store is already in use.
 - `<DIR>/state.json` holds the server's durable state, and it is rewritten atomically (temp file, then rename) after every change to it:
   - API keys as `(key id, BLAKE3 digest of the secret)`. The secret is never written.

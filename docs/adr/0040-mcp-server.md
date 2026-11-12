@@ -12,8 +12,9 @@ sandbox without a bespoke SDK. The sandbox already has an in-process session (`I
 used by the CLI's `run` and `shell`), so the server needs no network listener or API key.
 
 ## Decision
-- `frontal-sandbox mcp` serves the MCP stdio transport: one JSON object per line, on stdin and
-  stdout. The protocol revision is `2024-11-05`.
+- `sandbox mcp` serves the MCP stdio transport: one JSON object per line, on stdin and
+  stdout. The protocol revision is `2024-11-05`. (`frontal-sandbox` is a legacy alias that
+  runs the same binary.)
 - Four tools, each returning MCP text content with `isError` on failure: `exec` (a shell script,
   with its stdout, stderr and exit status), `read_file`, `write_file`, and `list_dir`.
 - A tool failure is a tool result with `isError: true`. A malformed message or an unknown method
@@ -25,7 +26,7 @@ used by the CLI's `run` and `shell`), so the server needs no network listener or
 
 ## Consequences
 ### Positive
-- Any MCP client can drive a sandbox with `claude mcp add frontal-sandbox -- frontal-sandbox mcp`.
+- Any MCP client can drive a sandbox with `claude mcp add sandbox -- sandbox mcp`.
 - No new dependency. The server reuses the CLI's existing session type.
 
 ### Negative

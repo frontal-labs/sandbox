@@ -31,11 +31,16 @@ class Sandbox < Formula
   end
 
   def install
-    # Each download is one bare binary, saved under its release name.
-    bin.install Dir["sandbox-*"].first => "sandbox"
+    # Each download is one bare binary, saved under its release name. The canonical
+    # `sandbox` is installed as the primary command; `frontal-sandbox` is the legacy
+    # alias, so it is linked too and both names work.
+    staged = Dir["sandbox-*"].first
+    bin.install staged => "sandbox"
+    bin.install staged => "frontal-sandbox"
   end
 
   test do
     assert_match "sandbox", shell_output("#{bin}/sandbox --help")
+    assert_match "frontal-sandbox", shell_output("#{bin}/frontal-sandbox --help")
   end
 end

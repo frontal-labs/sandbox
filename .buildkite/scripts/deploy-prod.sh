@@ -12,7 +12,7 @@ set -euo pipefail
 
 REGISTRY="${PROD_REGISTRY:-ghcr.io}"
 NAMESPACE="${PROD_NAMESPACE:-${BUILDKITE_ORGANIZATION_SLUG:-frontal-labs}}"
-IMAGE="${REGISTRY}/${NAMESPACE}/frontal-sandbox:latest"
+IMAGE="${REGISTRY}/${NAMESPACE}/sandbox:latest"
 COMPOSE_FILE="deploy/compose.prod.yaml"
 
 export RUSTY_V8_MIRROR="https://github.com/denoland/rusty_v8/releases/download"
@@ -20,7 +20,7 @@ export RUSTY_V8_MIRROR_FALLBACK="1"
 export V8_FROM_SOURCE="0"
 
 echo "deploy-prod: building release binary"
-cargo build --release -p cli --bin frontal-sandbox
+cargo build --release -p cli --bin sandbox --bin frontal-sandbox
 
 echo "deploy-prod: building and pushing image"
 docker build -f deploy/Dockerfile -t "${IMAGE}" .

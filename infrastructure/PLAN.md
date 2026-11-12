@@ -12,7 +12,7 @@
 Provide a complete, milestone-aligned path from "works on a laptop" to
 "runs on a KVM-capable cloud host":
 
-- **Single node:** one static `frontal-sandbox` binary + systemd units, a container
+- **Single node:** one static `sandbox` binary (frontal-sandbox is a legacy alias) + systemd units, a container
   image, and a TOML config file with sane defaults.
 - **Cloud (bare metal / KVM instances):** OpenTofu (Terraform-compatible)
   provisioning of compute with `/dev/kvm`, cgroups v2, security groups, and
@@ -217,7 +217,7 @@ depth, and host resource usage.
 | Script | Purpose |
 |--------|---------|
 | `bootstrap.sh` | Install toolchain deps, enable KVM/cgroups v2, harden sshd, open firewall ports |
-| `deploy.sh` | Copy the static binary to `/usr/local/bin/frontal-sandbox`, install systemd units, write `/etc/sandbox/config.toml`, start services |
+| `deploy.sh` | Copy the static binary to `/usr/local/bin/sandbox` (frontal-sandbox is a legacy alias), install systemd units, write `/etc/sandbox/config.toml`, start services |
 | `upgrade.sh` | Blue-green worker rollout: drain, stop old units, start new binary, verify health |
 | `backup.sh` | Snapshot `/var/lib/sandbox`, dump Postgres (clustered), upload to object store |
 | `restore.sh` | Download backup, restore state + metadata, restart services |
@@ -255,7 +255,7 @@ Aligned with PLAN.md:
 
 | Milestone | infrastructure/ deliverable | Acceptance |
 |-----------|-----------------------------|------------|
-| M3 | config schema + defaults, `systemd/` units, `scripts/{bootstrap,deploy,smoke}.sh`, `docker/compose.prod.yaml` | `frontal-sandbox serve --config` starts; systemd units install and start; smoke.sh passes on a fresh host |
+| M3 | config schema + defaults, `systemd/` units, `scripts/{bootstrap,deploy,smoke}.sh`, `docker/compose.prod.yaml` | `sandbox serve --config` starts (frontal-sandbox is a legacy alias); systemd units install and start; smoke.sh passes on a fresh host |
 | M4 | `terraform/` for KVM host, worker systemd unit with seccomp/cgroups, Tier 2 flags | `tofu plan` clean; worker starts with `/dev/kvm` access |
 | M5 | `kubernetes/`, `monitoring/`, Postgres + object-store CAS config, `backup.sh`/`restore.sh` | cluster deploys; Prometheus scrapes metrics; backup/restore round-trips a snapshot |
 

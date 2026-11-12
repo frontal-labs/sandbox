@@ -13,7 +13,7 @@ set -euo pipefail
 
 REGISTRY="${STAGING_REGISTRY:-ghcr.io}"
 NAMESPACE="${STAGING_NAMESPACE:-${BUILDKITE_ORGANIZATION_SLUG:-frontal-labs}}"
-IMAGE="${REGISTRY}/${NAMESPACE}/frontal-sandbox:staging"
+IMAGE="${REGISTRY}/${NAMESPACE}/sandbox:staging"
 COMPOSE_FILE="deploy/compose.staging.yaml"
 
 export RUSTY_V8_MIRROR="https://github.com/denoland/rusty_v8/releases/download"
@@ -21,7 +21,7 @@ export RUSTY_V8_MIRROR_FALLBACK="1"
 export V8_FROM_SOURCE="0"
 
 echo "deploy-staging: building release binary"
-cargo build --release -p cli --bin frontal-sandbox
+cargo build --release -p cli --bin sandbox --bin frontal-sandbox
 
 echo "deploy-staging: building and pushing image"
 docker build -f deploy/Dockerfile -t "${IMAGE}" .

@@ -17,7 +17,7 @@ PrivateTmp=true
 CapabilityBoundingSet=
 AmbientCapabilities=
 # The server listens on 8080; no capabilities needed.
-ExecStart=/usr/local/bin/frontal-sandbox serve --config /etc/sandbox/config.toml
+ExecStart=/usr/local/bin/sandbox serve --config /etc/sandbox/config.toml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s

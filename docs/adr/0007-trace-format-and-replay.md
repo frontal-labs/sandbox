@@ -7,15 +7,15 @@ Accepted
 2026-10-15
 
 ## Context
-`frontal-sandbox replay` returned `Unsupported`, and `sandbox-trace` had a replay stub that reported success without checking anything. The `Event` log in `sandbox-types` records argv and timing, but not the script that ran or what it printed. A replay needs the inputs and the outcomes, so the event log cannot be replayed as it is.
+`sandbox replay` (frontal-sandbox is a legacy alias) returned `Unsupported`, and `sandbox-trace` had a replay stub that reported success without checking anything. The `Event` log in `sandbox-types` records argv and timing, but not the script that ran or what it printed. A replay needs the inputs and the outcomes, so the event log cannot be replayed as it is.
 
 ## Decision
 - A trace is a JSON Lines file. The first line is the header `{"format":"sandbox-trace","version":1}`. Each later line is one run, in the order it ran:
   - `{"seq":N,"script":"...","exit_code":E,"stdout":"<hex>","stderr":"<hex>"}` when the script completed, including a non-zero exit.
   - `{"seq":N,"script":"...","error":{"code":"...","message":"..."}}` when the script failed before it ran, for example a parse error.
 - Stdout and stderr are hex-encoded, so the bytes are exact and the file stays plain text.
-- `frontal-sandbox run --trace <file>` and `frontal-sandbox shell --trace <file>` write a trace of the scripts they run. The trace is written when the command ends.
-- `frontal-sandbox replay <file>` parses the trace, starts one fresh local session, runs the scripts in order, and compares each outcome with the recorded one. It exits 0 when every run matches, and 1 when any run diverges. Each divergence is printed with its sequence number, the expected outcome, and the actual outcome.
+- `sandbox run --trace <file>` and `sandbox shell --trace <file>` (frontal-sandbox is a legacy alias) write a trace of the scripts they run. The trace is written when the command ends.
+- `sandbox replay <file>` (frontal-sandbox is a legacy alias) parses the trace, starts one fresh local session, runs the scripts in order, and compares each outcome with the recorded one. It exits 0 when every run matches, and 1 when any run diverges. Each divergence is printed with its sequence number, the expected outcome, and the actual outcome.
 - Replay covers the isolate tier's local session only. The server does not record or replay traces yet.
 - A replay is faithful only for scripts whose output does not depend on the clock, randomness, or the host. The format records no environment, so a script that reads the host's state can diverge on replay. That is reported as a divergence, not hidden.
 - `sandbox-trace` defines the format and the comparison, and it does not depend on the session crate. The CLI supplies the function that runs one script.

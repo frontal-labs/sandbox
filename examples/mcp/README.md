@@ -1,20 +1,22 @@
 # MCP server
 
-`frontal-sandbox mcp` serves one sandbox session to an MCP client over stdio. The tools are
+`sandbox mcp` serves one sandbox session to an MCP client over stdio. The tools are
 `exec`, `read_file`, `write_file`, and `list_dir`. The session lives as long as the process,
 so working directory, environment, and files persist between calls.
+
+`frontal-sandbox` is a legacy alias that works identically.
 
 ## Register it with Claude Code
 
 ```sh
-cargo install --path cli        # or put frontal-sandbox on PATH
-claude mcp add frontal-sandbox -- frontal-sandbox mcp
+cargo install --path cli        # or put sandbox on PATH
+claude mcp add sandbox -- sandbox mcp
 ```
 
 ## Check it without a client
 
 ```sh
-cargo build -p cli --bin frontal-sandbox
+cargo build -p cli --bin sandbox
 examples/mcp/smoke.sh
 ```
 

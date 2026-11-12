@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use sandbox_session::{changed_since, committed_root, replay_run, IsolateBackend, Session};
 use sandbox_trace::{outcome_of, replay, FileChange, FsOp, Outcome, RunRecord, Trace};
 use sandbox_types::{ErrorCode, ExecResult, SandboxError, SessionConfig};
@@ -11,6 +11,25 @@ const VERSION: &str = match option_env!("SANDBOX_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
+
+/// The canonical name the binary is invoked as. `frontal-sandbox` is the legacy
+/// alias; both names work identically. The binary chooses its clap help name
+/// from the name it was invoked as, so `sandbox --help` and
+/// `frontal-sandbox --help` each show the right name.
+fn invocation_name() -> &'static str {
+    // The clap help name follows the name the binary was invoked as, so
+    // `sandbox --help` and `frontal-sandbox --help` each show the right name.
+    let exe = std::env::current_exe().ok();
+    match exe
+        .as_deref()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+    {
+        Some("sandbox" | "sandbox.exe") => "sandbox",
+        Some("frontal-sandbox" | "frontal-sandbox.exe") => "frontal-sandbox",
+        _ => "frontal-sandbox",
+    }
+}
 
 #[derive(Subcommand)]
 pub enum SandboxCommand {
@@ -40,7 +59,7 @@ pub enum SandboxCommand {
     /// Fork the session's current state into N children and run a command in each.
     /// Prints one line per child. Exits 1 when a child's command failed.
     ///
-    /// Example: frontal-sandbox sandbox fork <session> -c 3 -- touch /r
+    /// Example: sandbox fork <session> -c 3 -- touch /r
     Fork {
         /// Session ID
         session_id: String,
@@ -223,7 +242,11 @@ pub enum Commands {
 impl Cli {
     /// Parses arguments, runs the command, and exits with its status.
     pub fn run() {
-        let cli = Cli::parse();
+        // The clap help/usage name follows the name the binary was invoked as, so
+        // `sandbox --help` and `frontal-sandbox --help` each show the right name.
+        let command = Cli::command().name(invocation_name());
+        let cli = Cli::from_arg_matches(&command.get_matches())
+            .expect("clap parse: the args are valid by construction");
         if let Err(e) = install_script_runner(&cli.command) {
             eprintln!("Error: {}", e.message);
             std::process::exit(1);
@@ -897,6 +920,31 @@ mod tests {
     }
 
     #[test]
+    fn sandbox_fork_takes_the_command_after_a_separator_under_sandbox_name() {
+        // The same command parses when the argv[0] is the canonical `sandbox` name.
+        let cli = Cli::try_parse_from([
+            "sandbox",
+            "sandbox",
+            "fork",
+            "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+            "-c",
+            "3",
+            "--",
+            "touch",
+            "/r",
+        ])
+        .unwrap();
+        let Commands::Sandbox {
+            command: SandboxCommand::Fork { count, command, .. },
+        } = cli.command
+        else {
+            panic!("expected sandbox fork");
+        };
+        assert_eq!(count, 3);
+        assert_eq!(command, ["touch", "/r"]);
+    }
+
+    #[test]
     fn sandbox_fork_needs_a_command() {
         assert!(Cli::try_parse_from([
             "frontal-sandbox",
@@ -933,5 +981,30 @@ mod tests {
             cli.execute().unwrap_err().code,
             sandbox_types::ErrorCode::ShellError
         );
+    }
+
+    /// Both invocation names build the same `Cli` from the same argv, so the help
+    /// name is the only thing that differs. This pins that `invocation_name()`
+    /// recognizes both binaries and falls back to the legacy alias otherwise.
+    #[test]
+    fn invocation_name_matches_the_binary_it_was_invoked_as() {
+        assert_eq!(invocation_name_for("sandbox"), "sandbox");
+        assert_eq!(invocation_name_for("sandbox.exe"), "sandbox");
+        assert_eq!(invocation_name_for("frontal-sandbox"), "frontal-sandbox");
+        assert_eq!(
+            invocation_name_for("frontal-sandbox.exe"),
+            "frontal-sandbox"
+        );
+        assert_eq!(invocation_name_for("something-else"), "frontal-sandbox");
+    }
+
+    fn invocation_name_for(file_name: &str) -> &'static str {
+        // Mirrors the match in `invocation_name()`, so the test does not depend on
+        // the actual on-disk path of the running binary.
+        match file_name {
+            "sandbox" | "sandbox.exe" => "sandbox",
+            "frontal-sandbox" | "frontal-sandbox.exe" => "frontal-sandbox",
+            _ => "frontal-sandbox",
+        }
     }
 }

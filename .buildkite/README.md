@@ -53,7 +53,7 @@ lint ──► build ──► test (parallel)      │
 - `lint`, `build`, and the four test jobs use `if_changed` so a change to
   `crates/**` does not re-run the TypeScript tests.
 - Test jobs run in parallel and `depends_on: build`; the build step
-  publishes artifacts (`target/release/frontal-sandbox`, `dist/**`,
+  publishes artifacts (`target/release/sandbox`, `dist/**`,
   `bazel-out/**`) that downstream steps consume.
 - `deploy-staging` and `deploy-prod` only run on the default branch.
 - `deploy-prod` is gated by a `block` step and runs with

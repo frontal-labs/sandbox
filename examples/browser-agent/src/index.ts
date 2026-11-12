@@ -100,8 +100,8 @@ function assertCondition(cond: unknown, msg: string): asserts cond {
 }
 
 function resolveBinary(): string {
-  const bin = resolve(process.env.FRONTAL_SANDBOX_BIN ?? "../../target/debug/frontal-sandbox")
-  if (!existsSync(bin)) throw new Error(`frontal-sandbox binary not found: ${bin}`)
+  const bin = resolve(process.env.FRONTAL_SANDBOX_BIN ?? "../../target/debug/sandbox")
+  if (!existsSync(bin)) throw new Error(`sandbox binary not found: ${bin}`)
   return bin
 }
 

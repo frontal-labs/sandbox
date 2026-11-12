@@ -129,10 +129,10 @@ jobs:
       - run: npm ci
       - run: python -m pip install -e "sdks/python[dev]"
       - name: Build the server
-        run: cargo build -p cli --bin frontal-sandbox
+        run: cargo build -p cli --bin sandbox --bin frontal-sandbox
       - name: Start the server
         run: |
-          nohup ./target/debug/frontal-sandbox serve --addr 127.0.0.1:8080 > server.out 2> server.err &
+          nohup ./target/debug/sandbox serve --addr 127.0.0.1:8080 > server.out 2> server.err &
           for _ in $(seq 1 60); do
             curl -sf http://127.0.0.1:8080/v1/openapi.json > /dev/null && break
             sleep 1
