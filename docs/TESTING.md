@@ -38,10 +38,9 @@ zero tests.
 
 `.github/workflows/ci.yml` runs one Rust job: `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test --workspace`, and `cargo bench --workspace --no-run`. The commands
-run directly, with no Nix wrapper. CI does not run the TypeScript or Python SDK
-tests, and does not run `cargo deny` or `cargo audit`. The CI commands have not
-been run in this refresh.
+`cargo test --workspace`, and `cargo bench --workspace --no-run`. CI also runs
+`cargo deny check` and `cargo audit --deny warnings` in the supply-chain job.
+The CI commands have not been run in this refresh.
 
 ## Planned Test Strategy
 

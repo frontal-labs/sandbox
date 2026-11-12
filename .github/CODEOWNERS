@@ -6,9 +6,6 @@
 
 # Core infrastructure
 /.github/ @gabrielfonseca
-/nix/ @gabrielfonseca
-/flake.nix @gabrielfonseca
-/flake.lock @gabrielfonseca
 
 # Documentation
 /docs/ @gabrielfonseca

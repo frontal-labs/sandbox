@@ -48,6 +48,7 @@ message SessionConfig {
   map<string, string> labels = 9;
   CheckpointPolicy checkpoint = 10;
   optional uint32 checkpoint_retain = 11;
+  optional TemplateId initial_template = 12;
 }
 
 // Mirrors sandbox_types::SessionState.

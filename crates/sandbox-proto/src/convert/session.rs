@@ -6,7 +6,7 @@ use sandbox_types::policy::{NetworkPolicy, ResourceLimits, SecretsConfig};
 use sandbox_types::session::{
     CheckpointPolicy, SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
 };
-use sandbox_types::{SandboxError, SnapshotId, TenantId};
+use sandbox_types::{SandboxError, SnapshotId, TemplateId, TenantId};
 use std::collections::HashMap;
 
 impl From<CheckpointPolicy> for pb::CheckpointPolicy {
@@ -113,6 +113,7 @@ impl From<SessionConfig> for pb::SessionConfig {
             env: config.env.into_iter().collect(),
             cwd: config.cwd,
             initial_snapshot: config.initial_snapshot.map(Into::into),
+            initial_template: config.initial_template.map(Into::into),
             secrets: config.secrets.map(Into::into),
             labels: config.labels.into_iter().collect(),
             checkpoint: pb::CheckpointPolicy::from(config.checkpoint) as i32,
@@ -136,6 +137,10 @@ impl TryFrom<pb::SessionConfig> for SessionConfig {
             .initial_snapshot
             .map(SnapshotId::try_from)
             .transpose()?;
+        let initial_template = config
+            .initial_template
+            .map(TemplateId::try_from)
+            .transpose()?;
         Ok(Self {
             tenant_id,
             tier_preference: enum_i32::<pb::TierPreference>(
@@ -148,6 +153,7 @@ impl TryFrom<pb::SessionConfig> for SessionConfig {
             env: config.env.into_iter().collect::<HashMap<_, _>>(),
             cwd: config.cwd,
             initial_snapshot,
+            initial_template,
             secrets: config.secrets.map(SecretsConfig::from),
             labels: config.labels.into_iter().collect(),
             checkpoint: enum_i32::<pb::CheckpointPolicy>(config.checkpoint, "checkpoint policy")?

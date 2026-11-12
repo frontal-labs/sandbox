@@ -1,6 +1,6 @@
 use crate::error::ErrorCode;
 use crate::hash::ContentHash;
-use crate::ids::{SnapshotId, TenantId};
+use crate::ids::{SnapshotId, TemplateId, TenantId};
 use crate::policy::{NetworkPolicy, ResourceLimits, SecretsConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -61,6 +61,10 @@ pub struct SessionConfig {
     pub cwd: String,
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"))]
     pub initial_snapshot: Option<SnapshotId>,
+    /// Start the session from a reusable template. Separate from `initial_snapshot`
+    /// for type safety (ADR 0049). The server resolves it to the template's snapshot.
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"))]
+    pub initial_template: Option<TemplateId>,
     pub secrets: Option<SecretsConfig>,
     pub labels: HashMap<String, String>,
     /// Checkpoint policy. Defaults to `per_exec`.
@@ -85,6 +89,7 @@ impl Default for SessionConfig {
             env: HashMap::new(),
             cwd: "/work".to_string(),
             initial_snapshot: None,
+            initial_template: None,
             secrets: None,
             labels: HashMap::new(),
             checkpoint: CheckpointPolicy::default(),
@@ -128,6 +133,11 @@ impl SessionConfig {
 
     pub fn with_snapshot(mut self, snapshot: SnapshotId) -> Self {
         self.initial_snapshot = Some(snapshot);
+        self
+    }
+
+    pub fn with_template(mut self, template: TemplateId) -> Self {
+        self.initial_template = Some(template);
         self
     }
 
@@ -249,6 +259,25 @@ pub struct ExecResult {
     pub stderr: Vec<u8>,
     pub cpu_ms: u64,
     pub wall_ms: u64,
+}
+
+/// A reusable starting point for a session. A template is a stable name over an
+/// existing snapshot: it captures the snapshot's committed filesystem root so a
+/// session can start from a pre-built filesystem (ADR 0049). It is not a snapshot
+/// renamed; it layers ownership and a name on top of a snapshot record.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Template {
+    #[cfg_attr(feature = "openapi", schema(value_type = String, pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"))]
+    pub id: TemplateId,
+    pub name: String,
+    /// The snapshot this template was created from. The root, limits, and VM
+    /// eligibility are read from that snapshot record when the template is used.
+    #[cfg_attr(feature = "openapi", schema(value_type = String, pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"))]
+    pub snapshot_id: SnapshotId,
+    #[serde(with = "crate::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: SystemTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

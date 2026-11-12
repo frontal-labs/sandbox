@@ -26,8 +26,8 @@ use sandbox_types::policy::{NetworkPolicy, PolicyAction, ResourceLimits};
 use sandbox_types::session::DEFAULT_CHECKPOINT_RETAIN;
 use sandbox_types::{
     CheckpointPolicy, ErrorCode, ExecEvent, ExecRequest, ExecResult, OutputStream, SandboxError,
-    SessionConfig, SessionId, SessionState, SessionStatus, Snapshot, SnapshotId, TenantId, Tier,
-    TierPreference,
+    SessionConfig, SessionId, SessionState, SessionStatus, Snapshot, SnapshotId, Template,
+    TemplateId, TenantId, Tier, TierPreference,
 };
 use sandbox_vfs::OpenFlags;
 use serde::{Deserialize, Serialize};
@@ -101,6 +101,7 @@ pub struct AppState {
     pub auth: Arc<AuthManager>,
     pub sessions: SessionTable,
     pub snapshots: SnapshotTable,
+    pub templates: TemplateTable,
     /// Where keys, snapshots, and sleeping sessions are saved. `None` keeps the
     /// server in memory (ADR 0008).
     pub store: Option<Arc<crate::persist::Persistence>>,
@@ -205,6 +206,25 @@ pub struct SnapshotTable {
     pub(crate) files: Option<crate::parked::SnapshotFiles>,
     /// Serializes snapshot admission, so the limits cannot be raced past.
     admit: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// A named, reusable template over a snapshot. The template holds only the name
+/// and the snapshot it points at; root, limits and `allow_vm` are read from the
+/// snapshot record when a session starts from it. ADR 0049.
+#[derive(Clone, Debug)]
+pub struct TemplateRecord {
+    pub id: TemplateId,
+    pub name: String,
+    pub snapshot_id: SnapshotId,
+    pub owner: KeyId,
+    pub created_at: SystemTime,
+}
+
+/// Templates held by the server, keyed by ID. Mirrors `SnapshotTable` ownership:
+/// a key can only list, get, or start from templates it created.
+#[derive(Clone, Default)]
+pub struct TemplateTable {
+    pub(crate) records: Arc<RwLock<HashMap<TemplateId, TemplateRecord>>>,
 }
 
 /// Most sessions one fork call may create.
@@ -982,6 +1002,7 @@ fn router_with_options(
         auth,
         sessions: SessionTable::default(),
         snapshots: SnapshotTable::default(),
+        templates: TemplateTable::default(),
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
         meters: crate::metering::MeterTable::default(),
@@ -1174,6 +1195,7 @@ async fn attach_store(
             files: snapshot_files,
             ..SnapshotTable::default()
         },
+        templates: TemplateTable::default(),
         gc_last_run: Arc::new(tokio::sync::Mutex::new(None)),
         usage: UsageTable::default(),
         meters: crate::metering::MeterTable::default(),
@@ -1216,6 +1238,13 @@ async fn restore(state: &AppState, saved: crate::persist::Saved) -> Result<(), S
                 let id = s.id;
                 records.insert(id, record_of(s));
             }
+        }
+    }
+    // Templates survive a restart like snapshots (ADR 0049).
+    {
+        let mut records = state.templates.records.write().await;
+        for t in saved.templates {
+            records.insert(t.id, template_record_of(t));
         }
     }
     // Version 1 kept sleeping sessions in their own list, with no shell state.
@@ -1301,6 +1330,13 @@ async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError
             .map(|(id, r)| saved_snapshot_of(*id, r))
             .collect()
     };
+    let templates = {
+        let records = state.templates.records.read().await;
+        records
+            .iter()
+            .map(|(id, r)| saved_template_of(*id, r))
+            .collect()
+    };
     let sessions = {
         let table = state.sessions.0.read().await;
         table
@@ -1317,6 +1353,7 @@ async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError
         version: crate::persist::VERSION,
         keys,
         snapshots,
+        templates,
         sleeping: Vec::new(),
         sessions,
         // The store sets the epoch when it writes the base file.
@@ -1567,6 +1604,9 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/sessions/:id/snapshots", get(list_snapshots))
         .route("/v1/sessions/:id/snapshots/:snapshot_id", get(get_snapshot))
         .route("/v1/snapshots/:id/fork", post(fork_snapshot))
+        .route("/v1/templates", post(create_template))
+        .route("/v1/templates", get(list_templates))
+        .route("/v1/templates/:id", get(get_template))
         .route("/v1/sessions/:id/info", get(session_info))
         .route("/v1/sessions/:id/checkpoint", post(checkpoint_session))
         .route("/v1/sessions/:id/undo", post(undo_session))
@@ -1624,14 +1664,25 @@ pub async fn create_session(
     let labels = config.labels.clone();
     let limits = config.limits.clone();
     let network = config.network.clone();
-    let session: Arc<dyn Session> = match config.initial_snapshot {
-        Some(snapshot_id) => {
-            let record = snapshot_for(&state, &owner, snapshot_id).await?;
-            sandbox_session::restore_limited(record.root, &limits)
-                .await?
-                .into()
-        }
-        None => Arc::new(IsolateBackend::new(config.clone()).await?),
+    if config.initial_snapshot.is_some() && config.initial_template.is_some() {
+        return Err(SandboxError::invalid_argument(
+            "set at most one of initial_snapshot and initial_template",
+        )
+        .into());
+    }
+    let session: Arc<dyn Session> = if let Some(snapshot_id) = config.initial_snapshot {
+        let record = snapshot_for(&state, &owner, snapshot_id).await?;
+        sandbox_session::restore_limited(record.root, &limits)
+            .await?
+            .into()
+    } else if let Some(template_id) = config.initial_template {
+        let template = template_for(&state, &owner, template_id).await?;
+        let record = snapshot_for(&state, &owner, template.snapshot_id).await?;
+        sandbox_session::restore_limited(record.root, &limits)
+            .await?
+            .into()
+    } else {
+        Arc::new(IsolateBackend::new(config.clone()).await?)
     };
     let id = session.id();
     let mut entry = entry(
@@ -3984,6 +4035,53 @@ async fn snapshot_for(
     }
 }
 
+fn parse_template_id(raw: &str) -> Result<TemplateId, ApiError> {
+    raw.parse()
+        .map_err(|_| SandboxError::not_found(format!("template {raw} not found")).into())
+}
+
+/// The template, if the caller owns it. Otherwise `NotFound`, which does not
+/// reveal that the template exists.
+async fn template_for(
+    state: &AppState,
+    owner: &KeyId,
+    template_id: TemplateId,
+) -> Result<TemplateRecord, ApiError> {
+    match state
+        .templates
+        .records
+        .read()
+        .await
+        .get(&template_id)
+        .cloned()
+    {
+        Some(record) if record.owner == *owner => Ok(record),
+        _ => Err(SandboxError::not_found(format!("template {template_id} not found")).into()),
+    }
+}
+
+/// The template as saved state, for the state log.
+fn saved_template_of(id: TemplateId, record: &TemplateRecord) -> crate::persist::SavedTemplate {
+    crate::persist::SavedTemplate {
+        id,
+        name: record.name.clone(),
+        snapshot_id: record.snapshot_id,
+        owner: record.owner.as_str().to_string(),
+        created_at: record.created_at,
+    }
+}
+
+/// The template as an in-memory record, from saved state.
+fn template_record_of(saved: crate::persist::SavedTemplate) -> TemplateRecord {
+    TemplateRecord {
+        id: saved.id,
+        name: saved.name,
+        snapshot_id: saved.snapshot_id,
+        owner: KeyId::from_stored(saved.owner),
+        created_at: saved.created_at,
+    }
+}
+
 /// The API view of a snapshot. The VFS root is the only state a snapshot
 /// captures, so `env` is empty and `cwd` is the root directory.
 fn snapshot_view(id: SnapshotId, record: &SnapshotRecord) -> Snapshot {
@@ -4056,6 +4154,130 @@ pub async fn get_snapshot(
             Ok(Json(snapshot_view(snapshot_id, &record)))
         }
         _ => Err(SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into()),
+    }
+}
+
+/// Create a reusable named template over an existing snapshot (ADR 0049).
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct CreateTemplateRequest {
+    /// A short human-readable name for the template.
+    pub name: String,
+    /// The snapshot this template starts from.
+    pub snapshot_id: String,
+}
+
+/// Create a new template over one of this key's snapshots.
+#[utoipa::path(
+    post,
+    path = "/v1/templates",
+    tag = "templates",
+    request_body = CreateTemplateRequest,
+    responses(
+        (status = 201, description = "Template created", body = Template),
+        (status = 400, description = "Invalid template name", body = ErrorBody),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "The snapshot is not one of this key's snapshots", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn create_template(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Json(body): Json<CreateTemplateRequest>,
+) -> Result<(StatusCode, Json<Template>), ApiError> {
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return Err(SandboxError::invalid_argument("template name must not be empty").into());
+    }
+    let snapshot_id = parse_snapshot_id(&body.snapshot_id)?;
+    // The snapshot must belong to this key, so a template can only wrap
+    // snapshots the caller owns.
+    let record = snapshot_record(&state, snapshot_id).await?;
+    match record {
+        Some(r) if r.owner == owner => {}
+        _ => {
+            return Err(
+                SandboxError::not_found(format!("snapshot {snapshot_id} not found")).into(),
+            );
+        }
+    }
+    let id = TemplateId::new();
+    let now = SystemTime::now();
+    let record = TemplateRecord {
+        id,
+        name,
+        snapshot_id,
+        owner: owner.clone(),
+        created_at: now,
+    };
+    state
+        .templates
+        .records
+        .write()
+        .await
+        .insert(id, record.clone());
+    persist(&state).await?;
+    Ok((StatusCode::CREATED, Json(template_view(id, &record))))
+}
+
+/// List this key's templates, newest first.
+#[utoipa::path(
+    get,
+    path = "/v1/templates",
+    tag = "templates",
+    responses(
+        (status = 200, description = "This key's templates", body = Vec<Template>),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn list_templates(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+) -> Result<Json<Vec<Template>>, ApiError> {
+    let records = state.templates.records.read().await;
+    let mut templates: Vec<Template> = records
+        .iter()
+        .filter(|(_, r)| r.owner == owner)
+        .map(|(id, r)| template_view(*id, r))
+        .collect();
+    templates.sort_by_key(|t| t.created_at);
+    templates.reverse();
+    Ok(Json(templates))
+}
+
+/// Read one of this key's templates.
+#[utoipa::path(
+    get,
+    path = "/v1/templates/{id}",
+    tag = "templates",
+    params(("id" = String, Path, description = "Template ID (ULID)", pattern = "^[0-9A-HJKMNP-TV-Z]{26}$")),
+    responses(
+        (status = 200, description = "The template", body = Template),
+        (status = 401, description = "Missing or invalid API key", body = ErrorBody),
+        (status = 404, description = "No such template for this key", body = ErrorBody),
+    ),
+    security(("bearer" = []))
+)]
+pub async fn get_template(
+    State(state): State<AppState>,
+    Extension(owner): Extension<KeyId>,
+    Path(id): Path<String>,
+) -> Result<Json<Template>, ApiError> {
+    let template_id = parse_template_id(&id)?;
+    match template_for(&state, &owner, template_id).await {
+        Ok(record) => Ok(Json(template_view(template_id, &record))),
+        Err(e) => Err(e),
+    }
+}
+
+/// The public view of a template.
+fn template_view(id: TemplateId, record: &TemplateRecord) -> Template {
+    Template {
+        id,
+        name: record.name.clone(),
+        snapshot_id: record.snapshot_id,
+        created_at: record.created_at,
     }
 }
 

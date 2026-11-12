@@ -35,7 +35,8 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 
 | File | What it does | Status |
 |------|--------------|--------|
-| `.github/workflows/ci.yml` | `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `cargo bench --no-run`, using the `rust-toolchain.toml` pin | Runs without Nix. Not verified to pass in this refresh. |
+| `.github/workflows/ci.yml` | `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `cargo bench --no-run`, using the `rust-toolchain.toml` pin | Not verified to pass in this refresh. |
+| `.github/workflows/bazel.yml` | `bazel build //...` and `bazel test //...` with Bazelisk | Active |
 | `.github/workflows/pr-checks.yml` | Conventional-commit PR title, semver label, size warning, auto-assign | Active |
 | `.github/workflows/benchmarks.yml` | Criterion and load-test runs, baseline comparison | Runs, but see [PERFORMANCE.md](PERFORMANCE.md). `benchmarks/baselines/` is empty, so no regression check compares against recorded data. |
 | `.github/workflows/release-binaries.yml` | Tag build of the `cli` crate (binary `sandbox` (sandbox is a legacy alias)) for five targets, npm platform packages and the `@frontal-labs/sandbox-cli` wrapper to npmjs, `SHA256SUMS` attached to the release | Builds `-p cli`. Windows copies `sandbox.exe`. |
@@ -52,7 +53,6 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 - `crates/sandbox-scheduler/migrations/` (the scheduler has no SQL migrations)
 - `/health` and `/admin/workers` endpoints
 - `sandbox_*` Prometheus metrics (no metrics are exported by code)
-- The `nix develop` workflow and `flake.nix` (CI no longer uses them)
 
 ## Requirements (planned)
 

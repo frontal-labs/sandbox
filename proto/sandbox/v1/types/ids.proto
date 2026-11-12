@@ -13,6 +13,10 @@ message SnapshotId {
   string value = 1;
 }
 
+message TemplateId {
+  string value = 1;
+}
+
 message TenantId {
   string value = 1;
 }

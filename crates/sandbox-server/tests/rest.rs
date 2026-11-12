@@ -1084,3 +1084,155 @@ async fn a_trace_stops_recording_at_its_byte_budget_and_says_so() {
     );
     assert!(recorded * 1024 * 1024 <= MAX_TRACE_BYTES);
 }
+
+async fn template(
+    app: &axum::Router,
+    key: &str,
+    snapshot_id: &str,
+    name: &str,
+) -> (StatusCode, Value) {
+    let (status, body) = call(
+        app,
+        "POST",
+        "/v1/templates",
+        key,
+        json_body(&json!({ "name": name, "snapshot_id": snapshot_id })),
+    )
+    .await;
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn template_round_trip() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    write_file(&app, &key, &id, "data.txt", b"kept").await;
+    let snapshot_id = snapshot(&app, &key, &id).await;
+
+    let (status, created) = template(&app, &key, &snapshot_id, "my template").await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let template_id = created["id"].as_str().unwrap().to_string();
+    assert_eq!(created["name"], "my template");
+    assert_eq!(created["snapshot_id"], snapshot_id);
+    assert!(created["created_at"].is_string());
+
+    // Get returns the same template.
+    let (status, got) = get_json(&app, &key, &format!("/v1/templates/{template_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(got["id"], template_id);
+    assert_eq!(got["name"], "my template");
+    assert_eq!(got["snapshot_id"], snapshot_id);
+
+    // List includes it.
+    let (status, list) = get_json(&app, &key, "/v1/templates").await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&template_id.as_str()));
+
+    // An empty or whitespace name is rejected.
+    let (status, _) = template(&app, &key, &snapshot_id, "   ").await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "blank name must be refused"
+    );
+}
+
+#[tokio::test]
+async fn a_session_started_from_a_template_gets_the_snapshot_files() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    write_file(&app, &key, &id, "seed.txt", b"from-template").await;
+    let snapshot_id = snapshot(&app, &key, &id).await;
+    let (status, created) = template(&app, &key, &snapshot_id, "starter").await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let template_id = created["id"].as_str().unwrap().to_string();
+
+    let mut config: Value = config();
+    config["initial_template"] = json!(template_id);
+    let (status, body) = call(&app, "POST", "/v1/sessions", &key, json_body(&config)).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let created_session: Value = serde_json::from_slice(&body).unwrap();
+    let new_id = created_session["session_id"].as_str().unwrap().to_string();
+
+    let (status, bytes) = read_file(&app, &key, &new_id, "seed.txt").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, b"from-template");
+}
+
+#[tokio::test]
+async fn both_initial_snapshot_and_initial_template_are_refused() {
+    let (app, key, _) = router();
+    let id = create(&app, &key).await;
+    let snapshot_id = snapshot(&app, &key, &id).await;
+    let (status, created) = template(&app, &key, &snapshot_id, "both").await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let template_id = created["id"].as_str().unwrap().to_string();
+
+    let mut config: Value = config();
+    config["initial_snapshot"] = json!(snapshot_id);
+    config["initial_template"] = json!(template_id);
+    let (status, _) = call(&app, "POST", "/v1/sessions", &key, json_body(&config)).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "setting both must be refused"
+    );
+}
+
+#[tokio::test]
+async fn templates_are_invisible_to_other_keys() {
+    let (app, owner, other) = router();
+    let id = create(&app, &owner).await;
+    let snapshot_id = snapshot(&app, &owner, &id).await;
+    let (status, created) = template(&app, &owner, &snapshot_id, "private").await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let template_id = created["id"].as_str().unwrap().to_string();
+
+    // Another key cannot read it.
+    let (status, _) = get_json(&app, &other, &format!("/v1/templates/{template_id}")).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "another key must not read it"
+    );
+
+    // Another key cannot start a session from it.
+    let mut config: Value = config();
+    config["initial_template"] = json!(template_id);
+    let (status, _) = call(&app, "POST", "/v1/sessions", &other, json_body(&config)).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "another key must not start from it"
+    );
+
+    // Another key's listing does not include it.
+    let (status, list) = get_json(&app, &other, "/v1/templates").await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&template_id.as_str()));
+
+    // A template over another key's snapshot is refused.
+    let (status, _) = template(&app, &other, &snapshot_id, "theirs").await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a template must wrap one of the caller's snapshots"
+    );
+}

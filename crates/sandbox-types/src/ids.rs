@@ -62,6 +62,7 @@ macro_rules! ulid_newtype {
 ulid_newtype!(SessionId);
 ulid_newtype!(SnapshotId);
 ulid_newtype!(TenantId);
+ulid_newtype!(TemplateId);
 
 impl SessionId {
     pub const fn nil() -> Self {
