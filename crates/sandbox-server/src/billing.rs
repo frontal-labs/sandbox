@@ -1,11 +1,11 @@
-#![cfg_attr(not(feature = "clustered"), allow(dead_code))]
 //! The billing event stream (PLAN §4.14, M5). Session starts and stops, and the usage reading
-//! after each command, are appended to one table in the clustered Postgres database. The table's
-//! sequence number is the position a consumer saves, so a consumer resumes from any point, and a
-//! restart cannot lose an event the server had acknowledged: each event is written before the
-//! request that caused it is answered.
+//! after each command, are appended to one stream. The stream's sequence number is the position
+//! a consumer saves, so a consumer resumes from any point, and a restart cannot lose an event
+//! the server had acknowledged: each event is written before the request that caused it is
+//! answered.
 //!
-//! Only a clustered server has the stream. On other builds `BillingLog` has no values, so
+//! A clustered server keeps the stream in Postgres. A durable single-node server keeps it in
+//! `billing.jsonl` in its data directory. Without either, `BillingLog` has no values, so
 //! `AppState::billing` is always `None`, and the code that appends to it is never reached.
 
 use crate::metering::SessionMeter;
@@ -23,6 +23,7 @@ pub enum EventKind {
 }
 
 impl EventKind {
+    #[cfg_attr(not(feature = "clustered"), allow(dead_code))]
     pub fn as_str(self) -> &'static str {
         match self {
             EventKind::SessionStarted => "session.started",
@@ -81,7 +82,7 @@ impl BillingEvent {
 }
 
 /// An event as read back, with its position in the stream.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StoredEvent {
     pub seq: u64,
     #[serde(flatten)]
@@ -232,30 +233,137 @@ mod postgres {
 #[cfg(feature = "clustered")]
 pub use postgres::BillingLog;
 
-/// Without the clustered build there is no stream, and this type has no values.
+/// The billing stream in a local JSONL file, for a durable single-node server.
+/// Events are appended with a monotonically increasing sequence number, and the file is
+/// replayed on startup to rebuild the meters before the server accepts requests.
 #[cfg(not(feature = "clustered"))]
 #[derive(Clone)]
-pub enum BillingLog {}
+pub struct BillingLog {
+    path: std::path::PathBuf,
+    next_seq: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
 
 #[cfg(not(feature = "clustered"))]
 impl BillingLog {
-    pub async fn append(&self, _event: &BillingEvent) -> Result<u64, sandbox_types::SandboxError> {
-        match *self {}
+    /// Opens the file, replaying any existing events to determine the next sequence number.
+    pub async fn open(path: std::path::PathBuf) -> Result<Self, sandbox_types::SandboxError> {
+        use sandbox_types::SandboxError;
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| SandboxError::internal(format!("billing stream: {e}")))?;
+        }
+        let next_seq = Self::read_all(&path)
+            .await
+            .map(|events| events.iter().map(|e| e.seq).max().map_or(0, |max| max + 1))
+            .unwrap_or(0);
+        Self::append_bytes(&path, b"").await?;
+        Ok(Self {
+            path,
+            next_seq: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(next_seq)),
+        })
     }
 
+    /// Appends one event and returns its position. The write is synced before this returns.
+    pub async fn append(&self, event: &BillingEvent) -> Result<u64, sandbox_types::SandboxError> {
+        use sandbox_types::SandboxError;
+        let seq = self
+            .next_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let stored = StoredEvent {
+            seq,
+            event: event.clone(),
+        };
+        let mut bytes = serde_json::to_vec(&stored)
+            .map_err(|e| SandboxError::internal(format!("billing stream: encode: {e}")))?;
+        bytes.push(b'\n');
+        Self::append_bytes(&self.path, &bytes).await?;
+        Ok(seq)
+    }
+
+    /// Reads events for one key, skipping those at or before `after`, capped at `limit`.
     pub async fn read_after(
         &self,
-        _key_id: &str,
-        _after: u64,
-        _limit: i64,
+        key_id: &str,
+        after: u64,
+        limit: i64,
     ) -> Result<Vec<StoredEvent>, sandbox_types::SandboxError> {
-        match *self {}
+        let events = Self::read_all(&self.path).await?;
+        Ok(events
+            .into_iter()
+            .filter(|e| e.event.key_id == key_id && e.seq > after)
+            .take(limit as usize)
+            .collect())
     }
 
+    /// Reads the whole stream, returning all stored events in file order.
+    async fn read_all(
+        path: &std::path::Path,
+    ) -> Result<Vec<StoredEvent>, sandbox_types::SandboxError> {
+        use sandbox_types::SandboxError;
+        let text = match tokio::fs::read_to_string(path).await {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => {
+                return Err(SandboxError::internal(format!(
+                    "billing stream: cannot read {}: {e}",
+                    path.display()
+                )))
+            }
+        };
+        Ok(text
+            .lines()
+            .filter_map(|line| serde_json::from_str::<StoredEvent>(line).ok())
+            .collect::<Vec<_>>())
+    }
+
+    /// Appends `bytes` to the stream file, syncing it to disk before returning.
+    async fn append_bytes(
+        path: &std::path::Path,
+        bytes: &[u8],
+    ) -> Result<(), sandbox_types::SandboxError> {
+        crate::persist::append_synced(path, bytes).await
+    }
+
+    /// Replays the stream to rebuild per-session meters: the latest reading per session,
+    /// and whether it is still open. Sessions with no reading come back at zero.
     pub async fn latest_meters(
         &self,
     ) -> Result<Vec<(String, String, SessionMeter, bool)>, sandbox_types::SandboxError> {
-        match *self {}
+        let events = Self::read_all(&self.path).await?;
+        let mut meters: std::collections::HashMap<String, (String, String, SessionMeter, bool)> =
+            std::collections::HashMap::new();
+        for stored in &events {
+            let entry = meters
+                .entry(stored.event.session_id.clone())
+                .or_insert_with(|| {
+                    (
+                        stored.event.key_id.clone(),
+                        stored.event.session_id.clone(),
+                        SessionMeter::default(),
+                        true,
+                    )
+                });
+            match stored.event.kind {
+                EventKind::SessionStarted => entry.3 = true,
+                EventKind::UsageReading => {
+                    if let Ok(meter) =
+                        serde_json::from_value::<SessionMeter>(stored.event.payload.clone())
+                    {
+                        entry.2 = meter;
+                    }
+                }
+                EventKind::SessionStopped => {
+                    entry.3 = false;
+                    if let Ok(meter) =
+                        serde_json::from_value::<SessionMeter>(stored.event.payload.clone())
+                    {
+                        entry.2 = meter;
+                    }
+                }
+            }
+        }
+        Ok(meters.into_values().collect())
     }
 }
 

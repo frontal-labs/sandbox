@@ -1067,7 +1067,8 @@ pub async fn open_durable_with_options(
     let (store, saved) = crate::persist::Store::open_with_remote(dir, options.blob_remote)?;
     let parked = crate::parked::parked_store(dir)?;
     let snapshot_files = crate::parked::snapshot_files(dir)?;
-    attach_store(
+    let billing = crate::billing::BillingLog::open(dir.join("billing.jsonl")).await?;
+    let (router, state, key) = attach_store(
         scheduler,
         crate::persist::Persistence::Files(store),
         saved,
@@ -1078,10 +1079,18 @@ pub async fn open_durable_with_options(
             usage_log: Some(dir.join("usage.jsonl")),
             parked: Some(parked),
             snapshot_files: Some(snapshot_files),
-            billing: None,
+            billing: Some(billing),
         },
     )
-    .await
+    .await?;
+    // Meters are in memory, so after a restart they come back from the stream, which kept
+    // every reading. A session that stopped keeps its final meter, and stays stopped.
+    if let Some(billing) = &state.billing {
+        for (key_id, session_id, meter, open) in billing.latest_meters().await? {
+            state.meters.restore(&key_id, &session_id, meter, open);
+        }
+    }
+    Ok((router, state, key))
 }
 
 /// Like [`open_durable_with_state`], with the metadata in the Postgres database at
