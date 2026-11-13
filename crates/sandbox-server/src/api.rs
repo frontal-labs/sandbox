@@ -706,17 +706,18 @@ fn vfs_path(raw: &str) -> Result<PathBuf, ApiError> {
 
 /// Refuses a config that asks for something the backend does not enforce.
 /// Ignoring such a setting would look like success while giving no protection.
-fn refuse_unenforced(config: &SessionConfig) -> Result<(), ApiError> {
+/// `allow_vm` is true when the server permits the VM tier in its config and has
+/// a VM backend configured, so a `Vm` preference is honored only when the server
+/// can actually boot a guest; otherwise the request is refused rather than
+/// silently downgraded to the isolate tier.
+fn refuse_unenforced(config: &SessionConfig, allow_vm: bool) -> Result<(), ApiError> {
     let refuse = |what: &str| {
         Err(SandboxError::unsupported(format!(
             "{what} is not enforced yet, so the request is refused rather than ignored"
         ))
         .into())
     };
-    if !matches!(
-        config.tier_preference,
-        TierPreference::Auto | TierPreference::Isolate
-    ) {
+    if config.tier_preference == TierPreference::Vm && !allow_vm {
         return refuse("the vm tier");
     }
     // Memory limit is enforced via VFS quotas and cgroups (worker tier).
@@ -1653,7 +1654,7 @@ pub async fn create_session(
     Extension(owner): Extension<KeyId>,
     Json(config): Json<SessionConfig>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
-    refuse_unenforced(&config)?;
+    refuse_unenforced(&config, state.vm.is_some())?;
     if config.checkpoint_retain == 0 || config.checkpoint_retain > MAX_CHECKPOINT_RETAIN {
         return Err(SandboxError::invalid_argument(format!(
             "checkpoint_retain must be between 1 and {MAX_CHECKPOINT_RETAIN}"
@@ -1670,7 +1671,25 @@ pub async fn create_session(
         )
         .into());
     }
-    let session: Arc<dyn Session> = if let Some(snapshot_id) = config.initial_snapshot {
+    let session: Arc<dyn Session> = if config.tier_preference == TierPreference::Vm {
+        // A fresh VM session: build a new isolate session to supply the ID and the
+        // (empty) tree, take a guest, and promote it. There is no existing session to
+        // move, so a warm start is the promotion of a just-created one.
+        let isolate = IsolateBackend::new(config.clone()).await?;
+        let pool = state
+            .vm_pool
+            .clone()
+            .ok_or_else(|| SandboxError::new(ErrorCode::NeedsVm, "no guest pool is configured"))?;
+        let vm = pool.take().await?;
+        let (promoted, _report) = sandbox_promote::promote_to_vm(&isolate, vm).await?;
+        // Replace the guest that was taken, off the request's path.
+        tokio::spawn(async move {
+            if let Err(error) = pool.refill().await {
+                tracing::warn!(error = %error.message, "refilling the guest pool failed");
+            }
+        });
+        Arc::new(promoted)
+    } else if let Some(snapshot_id) = config.initial_snapshot {
         let record = snapshot_for(&state, &owner, snapshot_id).await?;
         sandbox_session::restore_limited(record.root, &limits)
             .await?
@@ -1693,6 +1712,11 @@ pub async fn create_session(
         limits.clone(),
         config.tier_preference != TierPreference::Isolate,
     );
+    // A session created directly in the VM tier reports that tier; the entry helper
+    // defaults to isolate, which the other branches keep.
+    if session.tier() == Tier::Vm {
+        entry.state.tier = Tier::Vm;
+    }
     entry.checkpoint_policy = config.checkpoint;
     entry.checkpoint_retain = config.checkpoint_retain;
     stamp(&state, &mut entry, &session).await?;
