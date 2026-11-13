@@ -151,3 +151,50 @@ async fn a_streamed_command_moves_an_auto_session_to_the_vm() {
     assert_eq!(status, StatusCode::OK, "{info}");
     assert_eq!(info["tier"], "vm", "{info}");
 }
+
+#[tokio::test]
+#[ignore = "needs SANDBOX_VM_IMAGE; see docker/run-vm-tests.sh"]
+async fn a_vm_preference_creates_the_session_directly_in_the_vm() {
+    let image = PathBuf::from(std::env::var("SANDBOX_VM_IMAGE").expect("set SANDBOX_VM_IMAGE"));
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let (app, _state) = create_router_with_vm(
+        Arc::new(Scheduler::new()),
+        auth,
+        VmConfig {
+            qemu: PathBuf::from("qemu-system-x86_64"),
+            image,
+            accel: sandbox_vmm::Accel::from_env(),
+            memory_mib: 2048,
+            boot_timeout: Duration::from_secs(180),
+            warm_guests: 1,
+        },
+    );
+
+    let config = serde_json::to_value(SessionConfig {
+        tenant_id: TenantId::nil(),
+        tier_preference: TierPreference::Vm,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let (status, created) = call(&app, &key, "POST", "/v1/sessions", Some(config)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["session_id"].as_str().unwrap().to_string();
+
+    // The session starts already in the VM tier, with no promotion in between.
+    let (status, info) = call(&app, &key, "GET", &format!("/v1/sessions/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["tier"], "vm", "{info}");
+
+    // A command the isolate tier would refuse runs in the guest, which has no such tool.
+    let (status, body) = call(
+        &app,
+        &key,
+        "POST",
+        &format!("/v1/sessions/{id}/exec"),
+        Some(json!({"argv": ["nonexistent-tool"], "env": {}, "stream": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["exit_code"], 127, "{body}");
+}

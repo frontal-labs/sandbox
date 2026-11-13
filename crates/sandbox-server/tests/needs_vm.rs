@@ -78,6 +78,29 @@ async fn a_command_the_isolate_tier_lacks_is_refused_as_needs_vm_without_an_imag
 }
 
 #[tokio::test]
+async fn a_vm_preference_is_refused_without_a_guest_image() {
+    let auth = Arc::new(AuthManager::new());
+    let key = auth.create_key();
+    let app = create_router(Arc::new(Scheduler::new()), auth);
+
+    // A session may not be created directly in the VM tier when the server has no image,
+    // so the request is refused rather than silently ignored.
+    let config = serde_json::to_value(SessionConfig {
+        tenant_id: TenantId::nil(),
+        tier_preference: TierPreference::Vm,
+        ..SessionConfig::default()
+    })
+    .unwrap();
+    let (status, body) = call(&app, &key, "POST", "/v1/sessions", Some(config)).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
+    assert_eq!(body["code"], "UNSUPPORTED", "{body}");
+
+    // And an isolate preference is still fine on the same server.
+    let id = session(&app, &key, TierPreference::Isolate).await;
+    assert!(!id.is_empty());
+}
+
+#[tokio::test]
 async fn a_streamed_command_the_isolate_tier_lacks_ends_with_needs_vm_without_an_image() {
     let auth = Arc::new(AuthManager::new());
     let key = auth.create_key();
