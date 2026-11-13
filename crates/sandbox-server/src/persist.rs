@@ -360,22 +360,7 @@ impl Store {
     async fn append(&self, state: &mut LogState, bytes: Vec<u8>) -> Result<(), SandboxError> {
         let path = self.dir.join(log_name(state.epoch));
         let len = bytes.len() as u64;
-        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            use std::io::Write;
-            let mut options = std::fs::OpenOptions::new();
-            options.create(true).append(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&path)?;
-            file.write_all(&bytes)?;
-            file.sync_data()
-        })
-        .await
-        .map_err(|e| SandboxError::internal(format!("state write task failed: {e}")))?
-        .map_err(|e| SandboxError::internal(format!("cannot append to the state log: {e}")))?;
+        append_synced(&path, &bytes).await?;
         state.log_bytes += len;
         Ok(())
     }
@@ -601,6 +586,33 @@ async fn create_empty(path: PathBuf) -> Result<(), SandboxError> {
     .await
     .map_err(|e| SandboxError::internal(format!("state write task failed: {e}")))?
     .map_err(|e| SandboxError::internal(format!("cannot create the state log: {e}")))
+}
+
+/// Appends `bytes` to `path`, creating it owner-only (0600) if missing, and
+/// syncs the data to disk before returning. Runs the blocking I/O off the async
+/// runtime. Shared by the state log and the billing stream.
+pub async fn append_synced(path: &Path, bytes: &[u8]) -> Result<(), SandboxError> {
+    use std::io::Write;
+    let path = path.to_path_buf();
+    let path_for_err = path.clone();
+    let bytes = bytes.to_vec();
+    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&path)?;
+        file.write_all(&bytes)?;
+        file.sync_data()
+    })
+    .await
+    .map_err(|e| SandboxError::internal(format!("state write task failed: {e}")))?
+    .map_err(|e| {
+        SandboxError::internal(format!("cannot append to {}: {e}", path_for_err.display()))
+    })
 }
 
 /// Creates `path` and its parents. A directory this call creates is owner-only on
