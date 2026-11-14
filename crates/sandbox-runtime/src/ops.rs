@@ -222,16 +222,45 @@ pub mod fs {
     }
 }
 
+/// Session context: the working directory and environment variables for the
+/// script's session. Put into `OpState` before the bootstrap runs, so the
+/// `node:` shim can read the real session values instead of hardcoded defaults.
+pub struct ScriptContext {
+    pub cwd: String,
+    pub env: std::collections::HashMap<String, String>,
+}
+
 /// Environment ops.
 pub mod env {
     use super::*;
 
-    /// Returns the current environment variables as a JSON string.
-    #[op2(async(lazy), fast)]
+    /// Returns the session environment variables as a JSON string.
+    /// Empty when no `ScriptContext` is installed: the host environment is never
+    /// exposed to a script.
+    #[op2]
     #[string]
-    pub async fn op_sandbox_env(_state: Rc<RefCell<OpState>>) -> Result<String, JsErrorBox> {
-        let env: Vec<(String, String)> = std::env::vars().collect();
-        serde_json::to_string(&env).map_err(JsErrorBox::from_err)
+    pub fn op_sandbox_env(state: &mut OpState) -> Result<String, JsErrorBox> {
+        let vars: Vec<(String, String)> = state
+            .try_borrow::<ScriptContext>()
+            .map(|ctx| {
+                ctx.env
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        serde_json::to_string(&vars).map_err(JsErrorBox::from_err)
+    }
+
+    /// Returns the session working directory.
+    #[op2]
+    #[string]
+    pub fn op_sandbox_cwd(state: &mut OpState) -> Result<String, JsErrorBox> {
+        let cwd = state
+            .try_borrow::<ScriptContext>()
+            .map(|c| c.cwd.clone())
+            .unwrap_or_else(|| "/".to_string());
+        Ok(cwd)
     }
 }
 

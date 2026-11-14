@@ -9,8 +9,8 @@
 //! [`install_in_process_script_runner`] is an explicit opt-out for development and
 //! tests. It gives no containment.
 
-use crate::runtime::{execute_script_streamed, ScriptLimits, ScriptOutcome};
-use crate::StreamObserver;
+use crate::runtime::{execute_script_streamed_with_context, ScriptLimits, ScriptOutcome};
+use crate::{ScriptContext, StreamObserver};
 use async_trait::async_trait;
 use sandbox_types::{ErrorCode, SandboxError};
 use sandbox_vfs::Vfs;
@@ -22,12 +22,16 @@ pub trait ScriptRunner: Send + Sync {
     /// Runs `code` under `limits`, telling `observer` each kept piece of stdout.
     /// A script failure is an `Ok` outcome. An `Err` means the runner could not
     /// run the script at all, such as when its isolation is unavailable.
+    ///
+    /// `context` carries the session's cwd and env into the script. Runners must not
+    /// substitute host values for it: with no context, the script sees an empty env.
     async fn run(
         &self,
         code: &str,
         limits: ScriptLimits,
         observer: Option<StreamObserver>,
         vfs: Option<Arc<Vfs>>,
+        context: Option<ScriptContext>,
     ) -> Result<ScriptOutcome, SandboxError>;
 }
 
@@ -57,8 +61,20 @@ pub async fn execute_script_contained(
     observer: Option<StreamObserver>,
     vfs: Option<Arc<Vfs>>,
 ) -> Result<ScriptOutcome, SandboxError> {
+    execute_script_contained_with_context(code, limits, observer, vfs, None).await
+}
+
+/// Like [`execute_script_contained`], but also passes a [`ScriptContext`] (cwd,
+/// session env) to the runner, so the `node:` shim reads the real session values.
+pub async fn execute_script_contained_with_context(
+    code: &str,
+    limits: ScriptLimits,
+    observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
+    context: Option<ScriptContext>,
+) -> Result<ScriptOutcome, SandboxError> {
     match RUNNER.get() {
-        Some(runner) => runner.run(code, limits, observer, vfs).await,
+        Some(runner) => runner.run(code, limits, observer, vfs, context).await,
         None => Err(SandboxError::new(
             ErrorCode::Unsupported,
             "node is disabled: no contained script runner is installed on this host",
@@ -77,7 +93,8 @@ impl ScriptRunner for InProcessRunner {
         limits: ScriptLimits,
         observer: Option<StreamObserver>,
         vfs: Option<Arc<Vfs>>,
+        context: Option<ScriptContext>,
     ) -> Result<ScriptOutcome, SandboxError> {
-        execute_script_streamed(code, limits, observer, vfs).await
+        execute_script_streamed_with_context(code, limits, observer, vfs, context).await
     }
 }

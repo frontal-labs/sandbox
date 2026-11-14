@@ -1027,8 +1027,8 @@ impl Shell {
         }
     }
 
-    /// Runs JavaScript in a fresh V8 isolate. This is not Node.js: only
-    /// `console.log` is provided, and there is no filesystem or module access.
+    /// Runs JavaScript in a fresh V8 isolate, with the session's cwd and env
+    /// available through the `node:` module shim.
     async fn node(&self, args: &[String], stdin: Vec<u8>) -> ExecutionResult {
         let code = match args {
             [] => String::from_utf8_lossy(&stdin).into_owned(),
@@ -1050,11 +1050,16 @@ impl Shell {
             }
             _ => return failure("node: usage: node [-e CODE | FILE]".to_string()),
         };
-        match sandbox_runtime::execute_script_contained(
+        let context = sandbox_runtime::ScriptContext {
+            cwd: self.cwd().to_string(),
+            env: self.env().clone(),
+        };
+        match sandbox_runtime::execute_script_contained_with_context(
             &code,
             sandbox_runtime::ScriptLimits::default(),
             self.tool_stdout(),
             Some(self.fs().clone()),
+            Some(context),
         )
         .await
         {
