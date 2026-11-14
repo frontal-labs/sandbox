@@ -328,9 +328,9 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
     let mut table = state.sessions.0.write().await;
     let parked = parked_counts(state);
     if table.len() + parked.total() >= MAX_SESSIONS_TOTAL {
-        return Err(retryable(
-            SandboxError::resource_exhausted("the server is at its session limit"),
-        ));
+        return Err(retryable(SandboxError::resource_exhausted(
+            "the server is at its session limit",
+        )));
     }
     let held = table.values().filter(|e| e.owner == *owner).count() + parked.sessions_of_key(owner);
     if held >= MAX_SESSIONS_PER_KEY {
@@ -2054,9 +2054,7 @@ async fn run_with_promotion(
     observer: Option<OutputObserver>,
 ) -> Result<(ExecResult, Option<u64>), ApiError> {
     match run_exec(state, owner, own, request.clone(), observer.clone()).await {
-        Err(error)
-            if error.code() == ErrorCode::NeedsVm && promotable(state, &own.state) =>
-        {
+        Err(error) if error.code() == ErrorCode::NeedsVm && promotable(state, &own.state) => {
             let promoted = promote_session(state, owner, own).await?;
             run_exec(state, owner, &promoted, request, observer).await
         }
