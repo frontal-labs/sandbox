@@ -121,3 +121,89 @@ async fn a_promoted_session_runs_and_stores_its_files_in_the_guest() {
 
     Box::new(promoted).destroy().await.unwrap();
 }
+
+/// T-07: a Tier 2 session refuses the filesystem operations the guest protocol
+/// does not carry, with a message that names exactly which one is missing.
+#[tokio::test]
+#[ignore = "needs SANDBOX_VM_IMAGE; see docker/run-vm-tests.sh"]
+async fn tier2_fs_limitations_are_honest_501s() {
+    let dir = PathBuf::from(std::env::var("SANDBOX_VM_IMAGE").expect("set SANDBOX_VM_IMAGE"));
+
+    // A Tier 1 session with a file, promoted into the guest.
+    let session = IsolateBackend::new(SessionConfig {
+        tenant_id: TenantId::new(),
+        ..SessionConfig::default()
+    })
+    .await
+    .unwrap();
+    session.run_script("echo hi > /work.txt").await.unwrap();
+
+    let mut vm = QemuVm::start(&spec(&dir)).await.unwrap();
+    vm.wait_for_agent(Duration::from_secs(180)).await.unwrap();
+    let (promoted, _report) = promote_to_vm(&session, vm).await.unwrap();
+
+    // symlink is refused, and the message names the missing operation.
+    let msg = promoted
+        .fs()
+        .symlink(Path::new("/target.txt"), Path::new("/link.txt"))
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        msg.contains("symbolic"),
+        "message should name the missing op: {msg}"
+    );
+
+    // readlink is refused the same way.
+    let rmsg = promoted
+        .fs()
+        .readlink(Path::new("/link.txt"))
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        rmsg.contains("symbolic"),
+        "message should name the missing op: {rmsg}"
+    );
+
+    // watch is refused.
+    let wmsg = promoted
+        .fs()
+        .watch(Path::new("/"))
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        wmsg.contains("watching"),
+        "message should name the missing op: {wmsg}"
+    );
+
+    // Extending a file past its size is refused; shrinking is served.
+    let extended = promoted.fs().truncate(Path::new("/work.txt"), 1024).await;
+    assert!(
+        extended.is_err(),
+        "extending a file must be refused on Tier 2"
+    );
+    let emsg = extended.unwrap_err().to_string();
+    assert!(
+        emsg.contains("extending"),
+        "message should name the missing op: {emsg}"
+    );
+
+    let shrunk = promoted.fs().truncate(Path::new("/work.txt"), 2).await;
+    assert!(shrunk.is_ok(), "shrinking a file is supported on Tier 2");
+    assert_eq!(
+        promoted
+            .fs()
+            .stat(Path::new("/work.txt"))
+            .await
+            .unwrap()
+            .size,
+        2
+    );
+
+    Box::new(promoted).destroy().await.unwrap();
+}

@@ -80,7 +80,9 @@ use utoipa::{Modify, OpenApi};
     tags(
         (name = "sessions", description = "Session lifecycle"),
         (name = "exec", description = "Running commands"),
-        (name = "fs", description = "Files inside a session"),
+        (name = "fs", description = "Files inside a session. A Tier 2 (VM) session does not \
+            yet support symbolic links, reading symbolic links, extending a file to a larger \
+            size, or watching a directory for changes; those calls are refused with 501."),
         (name = "snapshots", description = "Snapshots and forks"),
         (name = "templates", description = "Reusable named templates over snapshots"),
     )
