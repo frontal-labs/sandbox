@@ -40,37 +40,9 @@ pub fn decode(buf: &[u8]) -> Result<Option<(&[u8], usize)>, SandboxError> {
     Ok(Some((&buf[HEADER_BYTES..end], end)))
 }
 
-fn too_large(len: usize) -> SandboxError {
+pub(crate) fn too_large(len: usize) -> SandboxError {
     SandboxError::new(
         ErrorCode::ResourceExhausted,
         format!("frame of {len} bytes exceeds the {MAX_FRAME_BYTES} byte limit"),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn frames_round_trip_and_partial_input_waits() {
-        let frame = encode(b"hello").unwrap();
-        assert_eq!(decode(&frame[..3]).unwrap(), None);
-        let (payload, used) = decode(&frame).unwrap().unwrap();
-        assert_eq!(payload, b"hello");
-        assert_eq!(used, frame.len());
-    }
-
-    #[test]
-    fn oversize_length_is_refused_before_reading_the_body() {
-        // A header claiming 17 MiB with no body must fail, not wait for data.
-        let header = ((MAX_FRAME_BYTES as u32) + 1).to_be_bytes();
-        let err = decode(&header).unwrap_err();
-        assert_eq!(err.code, ErrorCode::ResourceExhausted);
-    }
-
-    #[test]
-    fn oversize_payload_is_refused_on_encode() {
-        let big = vec![0u8; MAX_FRAME_BYTES + 1];
-        assert_eq!(encode(&big).unwrap_err().code, ErrorCode::ResourceExhausted);
-    }
 }

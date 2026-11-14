@@ -2,7 +2,7 @@
 //! key that did not create a session sees it as not found.
 
 use crate::auth::{AuthManager, KeyId};
-use crate::persist::{CheckpointRoot, SpilledRun};
+pub use crate::persist::{CheckpointRoot, SpilledRun};
 use axum::extract::ws::{Message, WebSocket};
 use axum::{
     body::{Body, Bytes},
@@ -744,7 +744,7 @@ impl IntoResponse for ApiError {
 
 /// Maps VFS errors to API errors. The orphan rule keeps this out of `From`.
 /// Whether a file of `size` bytes is too large to read in one call.
-fn over_read_limit(size: u64) -> bool {
+pub fn over_read_limit(size: u64) -> bool {
     size > MAX_READ_BYTES
 }
 
@@ -2599,7 +2599,7 @@ fn spilled_budget_per_session() -> u64 {
 }
 
 /// Parses a spill budget. A zero or unparseable value falls back to the default.
-fn parse_spill_budget(raw: Option<&str>) -> u64 {
+pub fn parse_spill_budget(raw: Option<&str>) -> u64 {
     match raw.and_then(|value| value.trim().parse::<u64>().ok()) {
         Some(bytes) if bytes > 0 => bytes,
         _ => DEFAULT_SPILLED_BYTES_PER_SESSION,
@@ -3491,7 +3491,7 @@ fn checkpoint_budget_per_key() -> u64 {
 
 /// Parses a byte budget. A zero or unparseable value is refused in favour of the default,
 /// since a zero budget would refuse every checkpoint.
-fn parse_checkpoint_budget(raw: Option<&str>) -> u64 {
+pub fn parse_checkpoint_budget(raw: Option<&str>) -> u64 {
     match raw.and_then(|value| value.trim().parse::<u64>().ok()) {
         Some(bytes) if bytes > 0 => bytes,
         _ => DEFAULT_CHECKPOINT_BYTES_PER_KEY,
@@ -3501,7 +3501,7 @@ fn parse_checkpoint_budget(raw: Option<&str>) -> u64 {
 /// Drops the oldest pinned roots across `lists` until their total is within `budget`.
 /// Each list keeps its newest root. When the newest roots alone are over budget,
 /// nothing changes and this returns false.
-fn evict_to_budget(lists: &mut [&mut Vec<CheckpointRoot>], budget: u64) -> bool {
+pub fn evict_to_budget(lists: &mut [&mut Vec<CheckpointRoot>], budget: u64) -> bool {
     let newest_total: u64 = lists
         .iter()
         .filter_map(|roots| roots.last())
@@ -4032,72 +4032,6 @@ fn usage_error(message: &str) -> ExecResult {
     }
 }
 
-#[cfg(test)]
-mod checkpoint_budget_tests {
-    use super::*;
-    use sandbox_types::hash::ContentHash;
-
-    #[test]
-    fn the_spill_budget_setting_falls_back_to_the_default_when_unusable() {
-        assert_eq!(parse_spill_budget(None), DEFAULT_SPILLED_BYTES_PER_SESSION);
-        assert_eq!(
-            parse_spill_budget(Some("x")),
-            DEFAULT_SPILLED_BYTES_PER_SESSION
-        );
-        assert_eq!(
-            parse_spill_budget(Some("0")),
-            DEFAULT_SPILLED_BYTES_PER_SESSION
-        );
-        assert_eq!(parse_spill_budget(Some(" 1024 ")), 1024);
-    }
-
-    #[test]
-    fn the_budget_setting_falls_back_to_the_default_when_unusable() {
-        assert_eq!(
-            parse_checkpoint_budget(None),
-            DEFAULT_CHECKPOINT_BYTES_PER_KEY
-        );
-        assert_eq!(
-            parse_checkpoint_budget(Some("abc")),
-            DEFAULT_CHECKPOINT_BYTES_PER_KEY
-        );
-        assert_eq!(
-            parse_checkpoint_budget(Some("0")),
-            DEFAULT_CHECKPOINT_BYTES_PER_KEY
-        );
-        assert_eq!(parse_checkpoint_budget(Some(" 4096 ")), 4096);
-    }
-
-    fn root(byte: u8, bytes: u64) -> CheckpointRoot {
-        CheckpointRoot {
-            root: ContentHash::new(&[byte]),
-            bytes,
-        }
-    }
-
-    #[test]
-    fn eviction_drops_the_oldest_roots_until_the_total_fits() {
-        let mut a = vec![root(1, 40), root(2, 40), root(3, 40)];
-        let mut b = vec![root(4, 30), root(5, 30)];
-        assert!(evict_to_budget(&mut [&mut a, &mut b], 100));
-        assert!(
-            a.iter().map(|r| r.bytes).sum::<u64>() + b.iter().map(|r| r.bytes).sum::<u64>() <= 100
-        );
-        // Every list keeps its newest root.
-        assert_eq!(a.last().unwrap().root, ContentHash::new(&[3]));
-        assert_eq!(b.last().unwrap().root, ContentHash::new(&[5]));
-    }
-
-    #[test]
-    fn eviction_changes_nothing_when_the_newest_roots_do_not_fit() {
-        let mut a = vec![root(1, 10), root(2, 60)];
-        let mut b = vec![root(3, 60)];
-        assert!(!evict_to_budget(&mut [&mut a, &mut b], 100));
-        assert_eq!(a.len(), 2);
-        assert_eq!(b.len(), 1);
-    }
-}
-
 fn parse_snapshot_id(raw: &str) -> Result<SnapshotId, ApiError> {
     raw.parse()
         .map_err(|_| SandboxError::not_found(format!("snapshot {raw} not found")).into())
@@ -4370,19 +4304,5 @@ fn read_flags() -> OpenFlags {
         create: false,
         truncate: false,
         exclusive: false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_are_capped_at_the_limit() {
-        assert!(!over_read_limit(0));
-        assert!(!over_read_limit(MAX_READ_BYTES));
-        assert!(over_read_limit(MAX_READ_BYTES + 1));
-        // The VFS allows 100 MiB per file, which is above the read cap.
-        assert!(over_read_limit(100 * 1024 * 1024));
     }
 }

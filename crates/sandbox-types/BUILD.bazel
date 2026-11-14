@@ -21,10 +21,14 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# Unit tests in src/ (the lib compiled with cfg(test)).
+# Integration tests in tests/, one target per file.
 rust_test(
-    name = "sandbox_types_unit_test",
-    crate = ":sandbox_types",
+    name = "sandbox_types_rfc3339_test",
+    srcs = ["tests/rfc3339.rs"],
+    crate_root = "tests/rfc3339.rs",
     edition = "2021",
+    deps = [
+        ":sandbox_types",
+    ],
     visibility = ["//visibility:public"],
 )

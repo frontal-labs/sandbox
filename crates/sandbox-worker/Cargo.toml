@@ -32,3 +32,6 @@ nix = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 seccompiler = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"

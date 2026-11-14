@@ -57,7 +57,7 @@ impl TieredStore {
         self.stats.read().await.clone()
     }
 
-    fn object_path(hash: &ContentHash) -> ObjectPath {
+    pub fn object_path(hash: &ContentHash) -> ObjectPath {
         ObjectPath::from(hash.to_hex())
     }
 }
@@ -205,64 +205,5 @@ impl BlobStore for TieredStore {
 
     fn name(&self) -> &'static str {
         "tiered"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::blob_store::PutOptions;
-    use crate::mem_store::MemStore;
-    use object_store::memory::InMemory;
-
-    #[tokio::test]
-    async fn test_tiered_store_read_through() {
-        let local = Arc::new(MemStore::new());
-        let remote = Arc::new(InMemory::new());
-        let store = TieredStore::new(local.clone(), remote.clone(), CachePolicy::ReadThrough);
-
-        let data = b"tiered test";
-        let hash = ContentHash::new(data);
-
-        remote
-            .put(
-                &TieredStore::object_path(&hash),
-                Bytes::from_static(data).into(),
-            )
-            .await
-            .unwrap();
-
-        let retrieved = store.get(&hash).await.unwrap().unwrap();
-        assert_eq!(retrieved.as_ref(), data);
-
-        assert!(local.has(&hash).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn a_blob_the_local_store_has_still_reaches_the_remote() {
-        let local = Arc::new(MemStore::new());
-        let remote = Arc::new(InMemory::new());
-        let store = TieredStore::new(local.clone(), remote.clone(), CachePolicy::WriteThrough);
-
-        // Written locally before the remote existed, so only the local store has it.
-        let data = b"written before the remote";
-        let hash = local.put(data, PutOptions::default()).await.unwrap();
-        assert!(remote.head(&TieredStore::object_path(&hash)).await.is_err());
-
-        store.put(data, PutOptions::default()).await.unwrap();
-        assert!(remote.head(&TieredStore::object_path(&hash)).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_tiered_store_write_through() {
-        let local = Arc::new(MemStore::new());
-        let remote = Arc::new(InMemory::new());
-        let store = TieredStore::new(local.clone(), remote.clone(), CachePolicy::WriteThrough);
-
-        let data = b"write through test";
-        let hash = store.put(data, PutOptions::default()).await.unwrap();
-
-        assert!(local.has(&hash).await.unwrap());
-        assert!(remote.head(&TieredStore::object_path(&hash)).await.is_ok());
     }
 }

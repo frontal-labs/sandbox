@@ -22,11 +22,33 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# Unit tests in src/ (the lib compiled with cfg(test)).
+# Integration tests in tests/ (the lib used as a dependency).
 rust_test(
-    name = "sandbox_vfs_unit_test",
-    crate = ":sandbox_vfs",
+    name = "sandbox_vfs_vfs_test",
+    crate_root = "tests/vfs.rs",
     edition = "2021",
-    deps = ["@crates//:proptest"],
+    srcs = ["tests/vfs.rs"],
+    deps = [
+        ":sandbox_vfs",
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:tokio",
+        "@crates//:serde_json",
+        "@crates//:proptest",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_vfs_diff_test",
+    crate_root = "tests/diff.rs",
+    edition = "2021",
+    srcs = ["tests/diff.rs"],
+    deps = [
+        ":sandbox_vfs",
+        "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:tokio",
+    ],
     visibility = ["//visibility:public"],
 )

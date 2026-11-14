@@ -2,11 +2,11 @@
 
 pub mod api;
 pub mod auth;
-mod billing;
+pub mod billing;
 pub mod config;
 pub mod gc;
 pub mod idle;
-mod metering;
+pub mod metering;
 pub mod middleware;
 pub mod openapi;
 pub mod otel;
@@ -14,7 +14,7 @@ pub mod parked;
 pub mod persist;
 #[cfg(feature = "clustered")]
 pub mod pg_store;
-mod pty;
+pub mod pty;
 
 pub use api::{
     create_router, create_router_with_options, create_router_with_python, create_router_with_state,

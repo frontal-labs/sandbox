@@ -6,8 +6,9 @@ pub mod output;
 pub mod session;
 
 pub use backend::{
-    blob_store, changed_since, committed_root, install_blob_store, quotas_for, restore,
-    restore_checkpoint, restore_checkpoint_limited, restore_limited, IsolateBackend, ENV_JSON_PATH,
+    blob_store, changed_since, committed_root, effective_timeout, install_blob_store, quotas_for,
+    restore, restore_checkpoint, restore_checkpoint_limited, restore_limited, session_wall_secs,
+    IsolateBackend, ENV_JSON_PATH,
 };
 pub use filesystem::{delete_file, replay_run, vfs_error, write_file};
 pub use output::{cap_output, DEFAULT_OUTPUT_LIMIT};

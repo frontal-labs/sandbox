@@ -125,7 +125,7 @@ async fn run_in(
 }
 
 /// Single-quotes a string for the shell that `chroot` starts.
-fn quote(text: &str) -> String {
+pub fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
@@ -147,7 +147,7 @@ const MOUNTED_DIRS: [&str; 5] = ["/sbin", "/lib", "/lib64", "/usr", "/dev"];
 /// Chromium read them to find out about the machine.
 const KERNEL_MOUNTS: [(&str, &str); 3] = [("proc", "proc"), ("sysfs", "sys"), ("tmpfs", "dev/shm")];
 
-fn in_system_dir(path: &str) -> bool {
+pub fn in_system_dir(path: &str) -> bool {
     SYSTEM_DIRS
         .iter()
         .any(|dir| path == *dir || path.starts_with(&format!("{dir}/")))
@@ -381,23 +381,4 @@ async fn copy_back(vfs: &Vfs, root: &Path) -> Result<(), SandboxError> {
 
 fn io_error(error: std::io::Error) -> SandboxError {
     SandboxError::new(ErrorCode::Internal, format!("guest copy: {error}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn quoting_survives_quotes_and_spaces() {
-        assert_eq!(quote("/a b"), "'/a b'");
-        assert_eq!(quote("it's"), "'it'\\''s'");
-    }
-
-    #[test]
-    fn the_system_directory_is_recognised() {
-        assert!(in_system_dir("/bin"));
-        assert!(in_system_dir("/bin/busybox"));
-        assert!(!in_system_dir("/binary/x"));
-        assert!(!in_system_dir("/work"));
-    }
 }
