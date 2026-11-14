@@ -2408,6 +2408,7 @@
       },
       "Tier": {
         "type": "string",
+        "description": "Execution tier. `isolate` (Tier 1) runs in a WASM sandbox; `vm` (Tier 2) runs\nin a QEMU microVM. A Tier 2 session does not yet support symbolic links,\nreading symbolic links, extending a file to a larger size, or watching a\ndirectory for changes; those calls are refused with 501.",
         "enum": [
           "isolate",
           "vm"
@@ -2452,7 +2453,7 @@
     },
     {
       "name": "fs",
-      "description": "Files inside a session"
+      "description": "Files inside a session. A Tier 2 (VM) session does not yet support symbolic links, reading symbolic links, extending a file to a larger size, or watching a directory for changes; those calls are refused with 501."
     },
     {
       "name": "snapshots",

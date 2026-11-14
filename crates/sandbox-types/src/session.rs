@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+/// Execution tier. `isolate` (Tier 1) runs in a WASM sandbox; `vm` (Tier 2) runs
+/// in a QEMU microVM. A Tier 2 session does not yet support symbolic links,
+/// reading symbolic links, extending a file to a larger size, or watching a
+/// directory for changes; those calls are refused with 501.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

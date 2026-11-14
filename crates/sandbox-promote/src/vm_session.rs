@@ -95,8 +95,12 @@ fn map_status(status: tonic::Status, path: &str) -> VfsError {
     }
 }
 
-fn unsupported(what: &str) -> VfsError {
-    VfsError::Unsupported(format!("{what} is not available on a Tier 2 session yet"))
+fn unsupported(detail: &str) -> VfsError {
+    VfsError::Unsupported(format!(
+        "not available on a Tier 2 (VM) session: {detail}. The guest filesystem does not yet \
+         support this operation over the guest agent protocol. On a Tier 1 (isolate) session \
+         the same call succeeds."
+    ))
 }
 
 #[async_trait]
@@ -282,18 +286,20 @@ impl SessionFs for GuestFs {
     }
 
     async fn symlink(&self, _target: &Path, _link: &Path) -> VfsResult<()> {
-        Err(unsupported("symbolic links"))
+        Err(unsupported("creating symbolic links"))
     }
 
     async fn readlink(&self, _path: &Path) -> VfsResult<String> {
-        Err(unsupported("symbolic links"))
+        Err(unsupported("reading symbolic links"))
     }
 
     async fn truncate(&self, path: &Path, size: u64) -> VfsResult<()> {
         let name = path.to_string_lossy().into_owned();
         let stat = self.stat(path).await?;
         if size > stat.size {
-            return Err(unsupported("extending a file"));
+            return Err(unsupported(
+                "extending a file with zero bytes (truncate to a larger size)",
+            ));
         }
         // The protocol has no truncate call, so the kept bytes are rewritten.
         let kept = self.read_all(&name, size).await?;
@@ -301,7 +307,7 @@ impl SessionFs for GuestFs {
     }
 
     async fn watch(&self, _path: &Path) -> VfsResult<sandbox_vfs::Watch> {
-        Err(unsupported("watching a directory"))
+        Err(unsupported("watching a directory for changes"))
     }
 
     fn close(&self, handle: &FileHandle) {
