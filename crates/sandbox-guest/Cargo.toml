@@ -22,7 +22,6 @@ serde = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tonic = { workspace = true }
-vsock = { workspace = true, optional = true }
 
 [[bin]]
 name = "sandbox-guest-agent"
@@ -30,4 +29,3 @@ path = "src/main.rs"
 
 [features]
 default = []
-vsock = ["dep:vsock"]

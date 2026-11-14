@@ -2,7 +2,7 @@
 # Boots the guest agent in an emulated Linux VM and runs the guest-protocol test
 # against it. This needs no KVM: QEMU runs the guest in software (TCG), so it works
 # in Docker Desktop on hosts without hardware virtualisation. It is slow, and it
-# tests the agent under a real kernel, not Firecracker (PLAN.md section 4.10).
+# tests the agent under a real kernel, not KVM (PLAN.md section 4.10).
 #
 #   docker/run-emulated-vm.sh
 set -eu

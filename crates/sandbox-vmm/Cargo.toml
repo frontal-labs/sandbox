@@ -5,7 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frontal-labs/sandbox"
 authors = ["Frontal Labs"]
-description = "Firecracker VMM driver for the sandbox system"
+description = "QEMU VM driver for Tier 2 microVM execution"
 
 [dependencies]
 sandbox-types = { path = "../sandbox-types" }
@@ -23,7 +23,6 @@ nix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-firecracker = { version = "0.2", optional = true }
 tokio-util = { workspace = true, features = ["codec"] }
 tonic = { workspace = true }
 which = "6"
@@ -32,6 +31,5 @@ sandbox-proto = { path = "../sandbox-proto" }
 [features]
 default = []
 seccomp = ["seccompiler"]
-firecracker = ["dep:firecracker"]
 
 [dev-dependencies]

@@ -19,13 +19,15 @@ Rust workspace with TypeScript and Python SDKs.
 | `sandbox-vfs` | Copy-on-write overlay, Merkle directory tree with incremental commit, symlink resolution, quotas, and ops. Unit and proptest coverage |
 | `sandbox-policy`, `sandbox-scheduler` | Types and logic. No tests yet |
 | `sandbox-shell` | Parser, interpreter, VFS-backed builtins, variables, globs, control flow, functions, command substitution, and WASI tools from the registry or `/bin`. Subset of sh: no `case`, arithmetic, or host binaries |
-| `sandbox-snapshot`, `sandbox-trace`, `sandbox-vmm`, `sandbox-guest` | Early or partial scaffolding |
-| `sandbox-runtime` | `execute_script` runs JS in a fresh V8 isolate with a timeout, a heap cap, and captured `console.log`. No modules |
+| `sandbox-snapshot`, `sandbox-trace` | Early or partial scaffolding |
+| `sandbox-vmm` | QEMU driver (`QemuVm`) that boots a real guest (TCG or KVM), waits for the agent, and saves/resumes state through the QEMU monitor. Warm pool (`VmPool`) of pre-booted guests. The Firecracker driver and jailer were removed (T-05); they were scaffolding |
+| `sandbox-guest` | Guest agent (gRPC) over the VFS, run as the guest's init |
+| `sandbox-runtime` | `execute_script` runs JS in a fresh V8 isolate with a timeout, a heap cap, a `node:` module shim, and per-script cwd/env |
 | `sandbox-wasm` | Runs WASI preview1 command modules. Files are the VFS directory mounted as the preopen. Stdio is in memory. Tool registry at `/etc/tools.toml`. Compiled modules cached per process |
 | `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot`, `restore`, and `sleep` (a checkpoint) work; the server releases a sleeping session (ADR 0006) |
 | `sandbox-worker` | One child process per session, served as gRPC over a private Unix socket (mode 0700), with crash isolation. No seccomp, cgroups, or namespaces |
 | `sandbox-proto` | Generated protobuf and gRPC bindings from `proto/`, with conversions to and from `sandbox-types` |
-| `sandbox-promote` | Stub. Needs a Linux host with KVM |
+| `sandbox-promote` | `promote_to_vm` (Tier 1 to Tier 2 handoff) and `import_from_dir` (recover an ext4 image's contents into a session VFS). Needs a Linux host with QEMU; KVM for speed |
 | `sandbox-server` | Session, exec, filesystem, snapshot, and fork routes run against in-memory sessions behind API-key auth |
 | `sdks/rust` | Client methods return `Unsupported`; embedded mode is not wired |
 | `cli` | `run` and `shell` execute; other subcommands return `Unsupported` |
@@ -37,7 +39,7 @@ Rust workspace with TypeScript and Python SDKs.
 Client (Rust SDK / TypeScript SDK / Python SDK / CLI)
   -> server -> scheduler -> worker
                          -> isolate backend (shell, V8, WASM, VFS)
-                         -> VM backend (Firecracker + guest agent)
+                         -> VM backend (QEMU + guest agent)
   snapshot store + trace sink
 ```
 
@@ -69,7 +71,7 @@ changes must preserve them.
 - Target: sub-5 ms cold start from a warm pool (not measured)
 
 ### Tier 2: VM Backend
-- Firecracker microVMs (`sandbox-vmm`)
+- QEMU microVMs (TCG or KVM) (`sandbox-vmm`)
 - In-VM guest agent (`sandbox-guest`)
 - Full Linux compatibility
 - Promotion triggered by a `NeedsVm` signal (`sandbox-promote`)
@@ -89,7 +91,7 @@ crates/
 ├── sandbox-wasm        # Wasmtime and WASI tool host
 ├── sandbox-session     # Session trait and backends
 ├── sandbox-snapshot    # Snapshot, fork, and restore
-├── sandbox-vmm         # Firecracker driver
+├── sandbox-vmm         # QEMU driver
 ├── sandbox-guest       # In-VM guest agent
 ├── sandbox-promote     # Isolate-to-VM handoff
 ├── sandbox-policy      # Capabilities, network policy, limits

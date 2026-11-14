@@ -14,7 +14,7 @@ use tokio_stream::wrappers::{TcpListenerStream, UnixListenerStream};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::info;
 
-/// Where the agent accepts connections. A Firecracker guest uses a Unix socket. The
+/// Where the agent accepts connections. A KVM guest uses a Unix socket over vsock. The
 /// emulated test guest (`docker/emulated-vm/run.sh`) uses TCP over a forwarded port.
 enum Listener {
     Unix(UnixListener),

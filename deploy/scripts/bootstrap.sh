@@ -58,7 +58,7 @@ install -d -o sandbox -g sandbox -m 0755 /var/run/sandbox
 
 if [[ "$NO_KVM" -eq 0 ]] && [[ -c /dev/kvm ]]; then
   usermod -aG kvm sandbox || true
-  install -d -m 0755 -o sandbox -g sandbox /var/run/sandbox/firecracker
+  install -d -m 0755 -o sandbox -g sandbox /var/run/sandbox/vmm
 fi
 
 if command -v ufw >/dev/null 2>&1; then

@@ -139,7 +139,7 @@ Three service configs, each with a JSON Schema file under
 - `isolation` { `seccomp` (bool), `cgroups_v2` (bool), `namespaces` (bool) }
 - `resources` { `memory_limit_bytes` (u64), `cpu_limit_ms` (u64), `pids_limit` (u32) }
 - `tier2` { `enabled` (bool), `kvm_device` (string, default `/dev/kvm`),
-  `firecracker_binary` (string), `socket_dir` (string) }
+  `firecracker_binary` (string, kept for config compatibility; the current driver is QEMU), `socket_dir` (string) }
 
 ### 4.3 Loading precedence (highest wins)
 

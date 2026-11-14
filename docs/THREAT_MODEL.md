@@ -12,7 +12,7 @@
 - **VFS/CAS storage**: Content-addressed blob store with session snapshots
 - **Scheduler metadata**: Session state, tenant assignments, resource usage
 - **Worker processes**: One per tenant, running with isolation
-- **Firecracker VMs**: Tier 2 microVMs (when promoted)
+- **QEMU VMs**: Tier 2 microVMs (when promoted)
 
 ### 1.3 Derived Assets
 - **Generated artifacts**: Build outputs, test results, reports
@@ -65,11 +65,11 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                      Host OS                                │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │              Firecracker VMM                        │   │
+│  │               QEMU VMM (KVM/TCG)                 │   │
 │  │  ┌─────────────────────────────────────────────┐   │   │
 │  │  │           MicroVM (per session)             │   │   │
 │  │  │  ┌─────────────────────────────────────┐   │   │   │
-│  │  │  │      Guest Agent (vsock)           │   │   │   │
+│  │  │  │   Guest Agent (forwarded port)      │   │   │   │
 │  │  │  │  ┌────────┐  ┌────────┐  ┌───────┐  │   │   │   │
 │  │  │  │  │ Linux  │  │  VFS   │  │ User  │  │   │   │   │
 │  │  │  │  │ Kernel │  │ Export │  │ Code  │  │   │   │   │
@@ -81,9 +81,9 @@
 ```
 
 **Trust Assumptions:**
-- Firecracker + jailer provide hardware-enforced boundary
-- Guest agent communicates only over vsock
-- VM network egress controlled by host nftables mirroring sandbox-policy
+- QEMU with KVM provides the hardware-enforced boundary (TCG is software emulation, not a boundary)
+- Guest agent communicates only over a forwarded loopback port
+- VM network egress is controlled by whatever interface QEMU exposes to the guest; the current driver forwards the agent port on loopback only
 
 ### 3.3 Cross-Cutting Boundaries
 - **Scheduler ↔ Worker**: gRPC over Unix socket (same host)
@@ -106,7 +106,7 @@
 ### 4.2 Code Execution (Tier 2)
 | Vector | Mitigation | Status |
 |--------|-----------|--------|
-| VM escape | Firecracker + jailer (chroot, cgroups, netns, seccomp, dropped caps) | ⚠️ **Driver and jailer implemented, not production-ready** |
+| VM escape | QEMU device model (KVM or TCG), no host devices passed | ⚠️ **Driver and promotion implemented; not the default tier, TCG is not a boundary** |
 | Guest agent compromise | Protocol is framed, all commands capability-checked | ⚠️ **Agent implemented, not production-ready** |
 | VM-to-VM | Separate tap devices, nftables isolation | ❌ Not implemented |
 | Host kernel attack | Minimal kernel, no host mounts in VM | ❌ Not implemented |
@@ -146,15 +146,14 @@
 | Tenant A → Tenant B | Separate worker process per tenant, no shared heaps | ✅ Implemented |
 | Session → Session | Copy-on-write VFS, independent overlays | ✅ Implemented |
 | Worker → Host | `NO_NEW_PRIVS`, seccomp denylist, cgroups, namespaces | ⚠️ Seccomp is denylist (allowlist planned) |
-| VM → Host | Firecracker device model, no host devices passed | ❌ Not implemented |
+| VM → Host | QEMU device model (KVM or TCG), no host devices passed | ⚠️ Driver and promote implemented; not the default tier |
 
 ## 5. Controls by Layer (Outer to Inner)
 
 ### 5.1 Hardware (Tier 2 Only)
-- **Firecracker microVM**: KVM-based virtualization
-- **Jailer**: chroot, cgroups v2, network namespace, seccomp, dropped capabilities
-- **Block device**: Read-only base image + per-session writable overlay
-- **Network**: tap device per VM, nftables egress rules
+- **QEMU microVM**: KVM-based virtualisation (`Accel::Kvm`), or software emulation (`Accel::Tcg`) where `/dev/kvm` is absent
+- **Block device**: Read-only base image (kernel + initrd) + per-session writable state
+- **Network**: guest agent on a forwarded loopback port, not a network interface
 
 ### 5.2 OS Process (Per Tenant)
 - **`prctl(PR_SET_NO_NEW_PRIVS)`**: Prevent privilege escalation
@@ -178,9 +177,9 @@
 
 ### 6.1 High Severity
 1. **Seccomp is denylist, not allowlist** - **Allowlist implemented, not yet default**
-2. **No Firecracker integration** - **Driver and jailer implemented, not production-ready**
+2. **No QEMU integration** - **Driver (`QemuVm`), warm pool (`VmPool`), and promotion implemented; not production-ready, TCG is not a boundary**
 3. **No guest agent** - **Agent implemented, not production-ready**
-4. **No promotion logic** - Tier 1 → Tier 2 handoff not built
+4. **No automatic promotion** - `promote_to_vm` is wired for `vm`-tier sessions; the automatic `NeedsVm` re-promotion of an isolate session is not built
 5. **No external security review** - Worker and VMM not reviewed
 
 ### 6.2 Medium Severity
@@ -208,7 +207,7 @@
 
 ### 7.2 Missing
 - **Tier 2 fuzzing**: Guest protocol fuzzed but no agent to serve
-- **Firecracker escape tests**: Not possible without implementation
+- **QEMU escape tests**: Gated on `SANDBOX_VM_IMAGE`; run in the Linux VM job
 - **Chaos testing**: Kill workers mid-exec, corrupt blobs, fill disk
 - **Determinism tests**: Replay with recorded network responses
 
@@ -219,7 +218,7 @@
 - [ ] Fuzz targets for all parsers and protocol decoders ⚠️ Partial
 - [ ] Escape test suite passes ⚠️ Tier 1 only
 - [ ] Never share V8 heap or wasmtime store across tenants ✅
-- [ ] Pin and track V8/wasmtime/Firecracker CVEs ✅ Process
+- [ ] Pin and track V8/wasmtime/QEMU CVEs ✅ Process
 - [ ] cargo-deny and cargo-audit in CI ✅
 - [ ] `unsafe` only in named modules with comments ⚠️ Check needed
 
@@ -227,8 +226,8 @@
 
 | Layer | Tier 1 | Tier 2 |
 |-------|--------|--------|
-| Hardware | N/A | ⚠️ **Driver implemented** |
-| OS Process | ✅ | ⚠️ **Jailer implemented** |
+| Hardware | N/A | ⚠️ **QEMU driver implemented (KVM/TCG)** |
+| OS Process | ✅ | ✅ (guest runs its own OS) |
 | Language Runtime | ✅ | ✅ (same) |
 | Capability System | ✅ | ⚠️ **Via guest agent** |
 | Network | ✅ | ❌ |
@@ -242,7 +241,7 @@
 3. Add per-request DNS resolution for egress
 
 ### Short-term (M4)
-4. Implement Firecracker driver and jailer
+4. QEMU driver (`QemuVm`), warm pool (`VmPool`), and promotion (`promote_to_vm`) implemented; the automatic `NeedsVm` re-promotion is not wired
 5. Build sandbox-guest static musl binary
 6. Implement promotion logic with VFS export_ext4
 7. Build base and browser VM images

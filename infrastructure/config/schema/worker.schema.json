@@ -62,12 +62,12 @@
         "firecracker_binary": {
           "type": "string",
           "default": "/usr/local/bin/firecracker",
-          "description": "Path to the Firecracker binary"
+          "description": "Path to the VMM binary (kept for config compatibility; the current driver is QEMU)"
         },
         "socket_dir": {
           "type": "string",
           "default": "/var/run/sandbox/firecracker",
-          "description": "Directory for Firecracker Unix-socket APIs"
+          "description": "Directory for VMM socket files (kept for config compatibility; the current driver is QEMU)"
         }
       },
       "additionalProperties": false
