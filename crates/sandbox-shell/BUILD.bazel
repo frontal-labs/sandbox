@@ -323,6 +323,7 @@ rust_test(
     compile_data = ["//crates/sandbox-wasm:fixtures"],
     deps = [
         "//crates/sandbox-cas:sandbox_cas",
+        "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-types:sandbox_types",
         "//crates/sandbox-vfs:sandbox_vfs",
         "@crates//:tokio",
