@@ -1,7 +1,8 @@
 # Architecture
 
-> **Status:** the design below is the target architecture from the project specification. Most components are scaffolds or stubs today. The
-> "Current state" section lists what exists. Treat everything else as planned.
+> **Status:** the design below is the target architecture from the project specification. The
+> "Current state" section lists what exists and what is scaffold. Treat everything not
+> listed there as planned.
 
 ## Overview
 
@@ -27,8 +28,8 @@ Rust workspace with TypeScript and Python SDKs.
 | `sandbox-session` | `IsolateBackend` owns a VFS and a shell; `exec` and `run_script` work; `snapshot`, `restore`, and `sleep` (a checkpoint) work; the server releases a sleeping session (ADR 0006) |
 | `sandbox-worker` | One child process per session, served as gRPC over a private Unix socket (mode 0700), with crash isolation. No seccomp, cgroups, or namespaces |
 | `sandbox-proto` | Generated protobuf and gRPC bindings from `proto/`, with conversions to and from `sandbox-types` |
-| `sandbox-promote` | `promote_to_vm` (Tier 1 to Tier 2 handoff) and `import_from_dir` (recover an ext4 image's contents into a session VFS). Needs a Linux host with QEMU; KVM for speed |
-| `sandbox-server` | Session, exec, filesystem, snapshot, and fork routes run against in-memory sessions behind API-key auth |
+| `sandbox-promote` | `promote_to_vm` (Tier 1 to Tier 2 handoff), `export_ext4` (session VFS to ext4 image), and `import_from_dir` (recover an ext4 image's contents into a session VFS). Needs a Linux host with QEMU; KVM for speed |
+| `sandbox-server` | Session, exec, filesystem, snapshot, and fork routes run against in-memory sessions behind API-key auth, with OpenAPI, 429 + Retry-After on session admission refusals, and file-backed billing |
 | `sdks/rust` | Client methods return `Unsupported`; embedded mode is not wired |
 | `cli` | `run` and `shell` execute; other subcommands return `Unsupported` |
 | `sdks/typescript`, `sdks/python` | Client code and types. Not run end to end against the server |

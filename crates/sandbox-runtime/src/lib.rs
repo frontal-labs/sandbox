@@ -5,6 +5,17 @@
 //! It runs in the host process. `execute_script_contained` runs through the
 //! installed [`ScriptRunner`], and fails closed when none is installed.
 //! See [`contain`].
+//!
+//! The `node:` shim provides `fs` (backed by the session VFS), `env`,
+//! `process`, `buffer`, `path`, `url`, `crypto`, `os`, `events`, `stream`,
+//! `util`, `assert`, `string_decoder`, and `querystring`. The following are
+//! intentionally not implemented in the V8 tier:
+//!
+//! - **Network** — no `http`, `https`, `net`, `dgram`, or `tls` modules.
+//! - **ESM / dynamic `import()`** — only CommonJS `require()` is supported.
+//! - **`child_process`** — present as a stub; every method throws.
+//! - **`zlib`** — present as a stub; every method throws.
+//! - **`crypto.createHash`** — returns a no-op stub (empty digest).
 
 pub mod contain;
 pub mod ops;
