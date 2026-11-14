@@ -1,6 +1,6 @@
 # Security Model
 
-**Status: pre-alpha. Nothing in this repository is a security boundary yet.** The layers below describe the intended design from the project specification section 5. Each item is marked as:
+**Status: pre-alpha. Nothing in this repository is a security boundary yet.** No external security review has been performed — see [SECURITY_REVIEW.md](SECURITY_REVIEW.md). The layers below describe the intended design from the project specification section 5. Each item is marked as:
 
 - **Implemented**: code exists and is wired into a path that runs.
 - **Partial**: code exists, but it is not enforced or not reachable from the public API.
@@ -119,7 +119,7 @@ Planned (project specification section 4.7): an in-process HTTP client that is t
 
 - `cargo deny check` (licenses, advisories, bans, sources) is configured by `deny.toml`. Permissive licenses are allowed, and GPL and AGPL are refused. An advisory is ignored only when `deny.toml` gives a reason.
 - `cargo audit` reads `.cargo/audit.toml`, which carries the same advisory decisions.
-- Both run in the `supply-chain` job of `.github/workflows/ci.yml`, with pinned tool versions. They were run locally on 2026-10-19 and pass. The GitHub job has not been observed.
+- Both run in the `supply-chain` job of `.github/workflows/ci.yml`, with pinned tool versions. They were run locally on 2026-10-19 and pass, and the GitHub job runs green on every pull request and main push (confirmed 2026-11-14). The KVM VM workflow (`.github/workflows/vm-kvm.yml`) also runs green on main pushes and pull requests, executing the full `--ignored` VM test suites with hardware virtualisation.
 - `unsafe` policy: allowed only in named modules with a `// SAFETY:` comment and a test (project specification section 5). Not enforced by a lint in the repository.
 - `unwrap()`: project specification section 11 forbids it outside tests and `main`. Not enforced by a lint in the repository.
 
@@ -128,7 +128,7 @@ Planned (project specification section 4.7): an in-process HTTP client that is t
 The project specification section 5 lists these. Some are done, and the rest are open.
 
 - [x] Threat model document: `docs/THREAT_MODEL.md`
-- [ ] External security review of the worker and VMM
+- [ ] External security review of the worker and VMM — **not yet performed** (see [SECURITY_REVIEW.md](SECURITY_REVIEW.md))
 - [x] Fuzz targets: shell parser, VFS path handling, WASI fs shim, guest protocol decoder (`cargo-fuzz`). All four are in `fuzz/` (see DEVELOPMENT.md). The guest protocol target covers the wire frames and the generated messages; the guest agent itself does not exist yet, and the 24 h run that PLAN §9 M4 asks for has not been done
 - [ ] Escape tests: host file reads, metadata IP reachability, memory/CPU/inode/PID exhaustion, fork-bomb equivalents, symlink races, zip bombs
 - [ ] Never share a V8 heap or wasmtime store across tenants
