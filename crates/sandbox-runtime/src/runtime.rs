@@ -7,7 +7,7 @@
 //! would abort the whole process on out-of-memory.
 
 use crate::ops::{
-    env::op_sandbox_env,
+    env::{op_sandbox_cwd, op_sandbox_env},
     fs::{
         op_fs_mkdir, op_fs_read, op_fs_readdir, op_fs_readlink, op_fs_rename, op_fs_rm, op_fs_stat,
         op_fs_symlink, op_fs_truncate, op_fs_write,
@@ -15,7 +15,7 @@ use crate::ops::{
     op_sandbox_print,
     stdio::{op_stderr_write, op_stdout_write},
     time::op_sandbox_now,
-    ScriptOutput, StreamObserver,
+    ScriptContext, ScriptOutput, StreamObserver,
 };
 use deno_core::{extension, JsRuntime, RuntimeOptions};
 use sandbox_types::{ErrorCode, SandboxError};
@@ -28,6 +28,7 @@ extension!(
     ops = [
         op_sandbox_print,
         op_sandbox_env,
+        op_sandbox_cwd,
         op_sandbox_now,
         op_fs_read,
         op_fs_write,
@@ -50,8 +51,18 @@ extension!(
 /// It keeps the ops it needs and then deletes the `Deno` global. The
 /// default deno_core ops (such as `op_print`, which writes to the host's
 /// stdout) would otherwise let scripts forge worker protocol responses.
+// The whole bootstrap runs inside one function scope, so its helper bindings never
+// become top-level lexical declarations. A user script can then declare `print`,
+// `class AssertionError`, and so on without a SyntaxError.
 const BOOTSTRAP: &str = r#"
+(() => {
 const print = Deno.core.ops.op_sandbox_print;
+// Decodes UTF-8 bytes. Invalid input yields U+FFFD for the whole run rather than throwing.
+function utf8Decode(bytes) {
+  let escaped = "";
+  for (const b of bytes) escaped += "%" + b.toString(16).padStart(2, "0");
+  try { return decodeURIComponent(escaped); } catch { return "�"; }
+}
 globalThis.console = Object.freeze({
   log: (...args) => {
     const text = args.map((a) => {
@@ -85,7 +96,7 @@ const timeOps = {
 };
 
 const processOps = {
-  spawn: Deno.core.ops.op_spawn,
+  cwd: Deno.core.ops.op_sandbox_cwd,
 };
 
 const stdioOps = {
@@ -137,14 +148,10 @@ globalThis.nodeModules = Object.freeze({
       fsOps.truncate(path, len);
     },
   }),
-  env: Object.freeze({
-    get env() {
-      return envOps.get();
-    },
-  }),
+  env: Object.fromEntries(JSON.parse(envOps.get())),
   process: Object.freeze({
-    cwd: () => "/",
-    env: {},
+    cwd: () => processOps.cwd(),
+    env: Object.fromEntries(JSON.parse(envOps.get())),
     nextTick: (fn) => setTimeout(fn, 0),
     hrtime: () => {
       const ns = timeOps.now() * 1000000;
@@ -153,22 +160,10 @@ globalThis.nodeModules = Object.freeze({
     exit: (code) => { throw { code: code || 0, isExit: true }; },
   }),
   child_process: Object.freeze({
-    execSync: (command) => {
-      const result = processOps.spawn(command);
-      if (result.exitCode !== 0) {
-        throw new Error(result.stderr);
-      }
-      return new TextEncoder().encode(result.stdout);
-    },
-    spawnSync: (command, args, options) => {
-      const fullCommand = [command, ...(args || [])].join(" ");
-      const result = processOps.spawn(fullCommand);
-      return {
-        status: result.exitCode,
-        stdout: new TextEncoder().encode(result.stdout),
-        stderr: new TextEncoder().encode(result.stderr),
-      };
-    },
+    execSync: () => { throw new Error("child_process.execSync is not supported in the sandbox"); },
+    spawnSync: () => { throw new Error("child_process.spawnSync is not supported in the sandbox"); },
+    spawn: () => { throw new Error("child_process.spawn is not supported in the sandbox"); },
+    exec: () => { throw new Error("child_process.exec is not supported in the sandbox"); },
   }),
   buffer: Object.freeze({
     Buffer: class Buffer extends Uint8Array {
@@ -245,9 +240,176 @@ globalThis.nodeModules = Object.freeze({
     inspect: (obj) => JSON.stringify(obj),
     promisify: (fn) => (...args) => Promise.resolve(fn(...args)),
   }),
+  assert: (() => {
+    // Structural equality: same prototype, same own keys, recursively equal values.
+    const deepEqual = (a, b) => {
+      if (Object.is(a, b)) return true;
+      if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+      if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+      if (a instanceof Map || a instanceof Set) return deepEqual([...a], [...b]);
+      const keys = Object.keys(a);
+      if (keys.length !== Object.keys(b).length) return false;
+      return keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+    };
+    const assert = (value, message) => assert.ok(value, message);
+    return Object.freeze(Object.assign(assert, {
+      ok: (value, message) => { if (!value) throw new AssertionError(message || "Assertion failed"); },
+      strict: Object.freeze({
+        equal: (a, b, message) => { if (!Object.is(a, b)) throw new AssertionError(message || `expected ${String(a)} to equal ${String(b)}`); },
+        deepEqual: (a, b, message) => { if (!deepEqual(a, b)) throw new AssertionError(message || "expected values to be deeply equal"); },
+      }),
+      throws: (fn, errorMatcher, message) => {
+        let threw = false;
+        try { fn(); } catch (e) {
+          threw = true;
+          if (errorMatcher instanceof RegExp && !errorMatcher.test(e.message)) throw new AssertionError(message || "error message did not match");
+          if (typeof errorMatcher === "function" && !(e instanceof errorMatcher)) throw new AssertionError(message || "error type did not match");
+        }
+        if (!threw) throw new AssertionError(message || "expected function to throw");
+      },
+      doesNotThrow: (fn, message) => {
+        try { fn(); } catch (e) { throw new AssertionError(message || `unexpected error: ${e.message}`); }
+      },
+    }));
+  })(),
+  zlib: Object.freeze({
+    gzipSync: () => { throw new Error("zlib.gzipSync is not supported in the sandbox"); },
+    gunzipSync: () => { throw new Error("zlib.gunzipSync is not supported in the sandbox"); },
+    deflateSync: () => { throw new Error("zlib.deflateSync is not supported in the sandbox"); },
+    inflateSync: () => { throw new Error("zlib.inflateSync is not supported in the sandbox"); },
+  }),
+  string_decoder: Object.freeze({
+    // Only UTF-8 is supported. TextDecoder is not a global here, so bytes are decoded
+    // through decodeURIComponent, which is available.
+    StringDecoder: class StringDecoder {
+      constructor(encoding) {
+        const enc = (encoding || "utf8").toLowerCase();
+        if (enc !== "utf8" && enc !== "utf-8") throw new Error(`StringDecoder: encoding '${encoding}' is not supported in the sandbox`);
+        this._pending = [];
+      }
+      // Decodes whole characters and keeps an incomplete trailing sequence for the next write.
+      write(buf) {
+        const bytes = this._pending.concat(Array.from(buf));
+        let cut = bytes.length;
+        for (let i = bytes.length - 1; i >= Math.max(0, bytes.length - 3); i--) {
+          const b = bytes[i];
+          if ((b & 0xc0) === 0x80) continue;
+          const needed = b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1;
+          if (bytes.length - i < needed) cut = i;
+          break;
+        }
+        this._pending = bytes.slice(cut);
+        return utf8Decode(bytes.slice(0, cut));
+      }
+      end(buf) {
+        const bytes = this._pending.concat(buf ? Array.from(buf) : []);
+        this._pending = [];
+        return utf8Decode(bytes);
+      }
+    },
+  }),
+  querystring: Object.freeze({
+    parse: (str, sep, eq) => {
+      const result = {};
+      const s = str.startsWith("?") ? str.slice(1) : str;
+      const sepChar = sep || "&";
+      const eqChar = eq || "=";
+      // Malformed escapes such as "%E0" are kept as written, not thrown, as in Node.
+      const dec = (part) => { try { return decodeURIComponent(part); } catch { return part; } };
+      for (const pair of s.split(sepChar)) {
+        if (!pair) continue;
+        const idx = pair.indexOf(eqChar);
+        if (idx === -1) { result[dec(pair)] = ""; }
+        else { result[dec(pair.slice(0, idx))] = dec(pair.slice(idx + 1)); }
+      }
+      return result;
+    },
+    stringify: (obj, sep, eq) => {
+      const sepChar = sep || "&";
+      const eqChar = eq || "=";
+      return Object.entries(obj)
+        .map(([k, v]) => `${encodeURIComponent(k)}${eqChar}${encodeURIComponent(v)}`)
+        .join(sepChar);
+    },
+    escape: encodeURIComponent,
+    unescape: decodeURIComponent,
+  }),
+  module: Object.freeze({
+    Module: class Module {
+      constructor(id, parent) { this.id = id; this.parent = parent; this.loaded = false; this.exports = {}; }
+      static _load() { throw new Error("Module._load is not supported in the sandbox"); }
+      static _resolveFilename() { throw new Error("Module._resolveFilename is not supported in the sandbox"); }
+    },
+  }),
+  readline: Object.freeze({
+    // Interactive input is not available, so fail loudly rather than answering "" silently.
+    createInterface: () => { throw new Error("readline.createInterface is not supported in the sandbox (no stdin)"); },
+  }),
+  http: Object.freeze({
+    createServer: () => { throw new Error("http.createServer is not supported in the sandbox (no network)"); },
+    get: () => { throw new Error("http.get is not supported in the sandbox (no network)"); },
+    request: () => { throw new Error("http.request is not supported in the sandbox (no network)"); },
+  }),
+  https: Object.freeze({
+    createServer: () => { throw new Error("https.createServer is not supported in the sandbox (no network)"); },
+    get: () => { throw new Error("https.get is not supported in the sandbox (no network)"); },
+    request: () => { throw new Error("https.request is not supported in the sandbox (no network)"); },
+  }),
+  net: Object.freeze({
+    createServer: () => { throw new Error("net.createServer is not supported in the sandbox (no network)"); },
+    connect: () => { throw new Error("net.connect is not supported in the sandbox (no network)"); },
+    Socket: class Socket {
+      constructor() { throw new Error("net.Socket is not supported in the sandbox (no network)"); }
+    },
+  }),
+  dns: Object.freeze({
+    lookup: () => { throw new Error("dns.lookup is not supported in the sandbox (no network)"); },
+    resolve: () => { throw new Error("dns.resolve is not supported in the sandbox (no network)"); },
+  }),
+  tls: Object.freeze({
+    createServer: () => { throw new Error("tls.createServer is not supported in the sandbox (no network)"); },
+    connect: () => { throw new Error("tls.connect is not supported in the sandbox (no network)"); },
+  }),
+  worker_threads: Object.freeze({
+    get isMainThread() { return true; },
+    workerData: null,
+    parentPort: null,
+    threadId: 0,
+    Worker: class Worker {
+      constructor() { throw new Error("worker_threads.Worker is not supported in the sandbox"); }
+    },
+    BroadcastChannel: class BroadcastChannel {
+      constructor() { throw new Error("worker_threads.BroadcastChannel is not supported in the sandbox"); }
+    },
+    MessageChannel: class MessageChannel {
+      constructor() { throw new Error("worker_threads.MessageChannel is not supported in the sandbox"); }
+    },
+    MessagePort: class MessagePort {
+      constructor() { throw new Error("worker_threads.MessagePort is not supported in the sandbox"); }
+    },
+    markAsUntransferable: (obj) => obj,
+    receiveMessageOnPort: () => { throw new Error("worker_threads.receiveMessageOnPort is not supported in the sandbox"); },
+  }),
 });
 
+class AssertionError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AssertionError";
+  }
+}
+
+globalThis.require = (name) => {
+  const key = name.startsWith("node:") ? name.slice(5) : name;
+  const mod = globalThis.nodeModules[key];
+  if (!mod) {
+    throw new Error(`Cannot find module '${name}'`);
+  }
+  return mod;
+};
+
 delete globalThis.Deno;
+})();
 "#;
 
 #[derive(Debug, Clone, Copy)]
@@ -305,16 +467,30 @@ pub async fn execute_script_streamed(
     observer: Option<StreamObserver>,
     vfs: Option<Arc<Vfs>>,
 ) -> Result<ScriptOutcome, SandboxError> {
+    execute_script_streamed_with_context(code, limits, observer, vfs, None).await
+}
+
+/// Like [`execute_script_streamed`], but also installs a [`ScriptContext`] (cwd,
+/// session env) in the isolate's `OpState`, so the `node:` shim reads the real
+/// session values instead of host defaults.
+pub async fn execute_script_streamed_with_context(
+    code: &str,
+    limits: ScriptLimits,
+    observer: Option<StreamObserver>,
+    vfs: Option<Arc<Vfs>>,
+    context: Option<ScriptContext>,
+) -> Result<ScriptOutcome, SandboxError> {
     let code = code.to_string();
     tokio::task::spawn_blocking(move || {
         // A warm isolate is built for the default heap limit only. Any other limit
-        // builds its own isolate, as it always did.
-        if limits.max_heap_bytes == ScriptLimits::default().max_heap_bytes {
+        // builds its own isolate, as it always did. A context also forces a fresh
+        // build, because the warm isolate was bootstrapped with host defaults.
+        if limits.max_heap_bytes == ScriptLimits::default().max_heap_bytes && context.is_none() {
             if let Some(outcome) = run_warm(&code, limits, observer.clone(), vfs.clone()) {
                 return outcome;
             }
         }
-        run_isolate(&code, limits, observer, vfs)
+        run_isolate(&code, limits, observer, vfs, context)
     })
     .await
     .map_err(|e| SandboxError::new(ErrorCode::RuntimeError, format!("script task failed: {e}")))
@@ -368,8 +544,9 @@ fn run_isolate(
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
     vfs: Option<Arc<Vfs>>,
+    context: Option<ScriptContext>,
 ) -> ScriptOutcome {
-    match build(limits, vfs.clone()) {
+    match build(limits, vfs.clone(), context) {
         Ok(built) => run_built(built, code, limits, observer, vfs),
         Err(message) => failed(message),
     }
@@ -387,7 +564,11 @@ struct Built {
 }
 
 /// Builds an isolate with the heap limit of `limits`, the heap guard, and the bootstrap.
-fn build(limits: ScriptLimits, vfs: Option<Arc<Vfs>>) -> Result<Built, String> {
+fn build(
+    limits: ScriptLimits,
+    vfs: Option<Arc<Vfs>>,
+    context: Option<ScriptContext>,
+) -> Result<Built, String> {
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![sandbox_script::init()],
         create_params: Some(
@@ -410,6 +591,9 @@ fn build(limits: ScriptLimits, vfs: Option<Arc<Vfs>>) -> Result<Built, String> {
     let mut built = Built { runtime, guard };
     if let Some(vfs) = vfs {
         built.runtime.op_state().borrow_mut().put(vfs);
+    }
+    if let Some(context) = context {
+        built.runtime.op_state().borrow_mut().put(context);
     }
     if let Err(e) = built
         .runtime
@@ -538,7 +722,7 @@ fn spawn_warm(pool: std::sync::Arc<WarmPool>) {
                 return;
             };
             let _entered = rt.enter();
-            let Ok(built) = build(ScriptLimits::default(), None) else {
+            let Ok(built) = build(ScriptLimits::default(), None, None) else {
                 return;
             };
             let (offer, jobs) = mpsc::channel::<WarmJob>();
@@ -645,11 +829,46 @@ mod tests {
 
     #[tokio::test]
     async fn host_filesystem_and_environment_are_not_reachable() {
+        // Deno is deleted. `require` is the only node: shim global; `process` is
+        // reachable through `require("process")`, not as a global.
         let out = run("console.log(typeof Deno, typeof process, typeof require);").await;
         assert_eq!(
             String::from_utf8_lossy(&out.stdout),
-            "undefined undefined undefined\n"
+            "undefined undefined function\n"
         );
+    }
+
+    #[tokio::test]
+    async fn require_resolves_node_modules() {
+        let out = run(r#"
+            const fs = require("node:fs");
+            const path = require("path");
+            console.log(typeof fs.readFileSync, typeof path.join);
+            "#)
+        .await;
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "function function\n");
+    }
+
+    #[tokio::test]
+    async fn require_unknown_module_throws() {
+        let out = run("require('node:nonexistent')").await;
+        assert_eq!(out.exit_code, 1);
+        assert!(String::from_utf8_lossy(&out.stderr).contains("Cannot find module"));
+    }
+
+    #[tokio::test]
+    async fn process_env_starts_empty_without_a_session() {
+        // Without a ScriptContext the host environment must not be visible.
+        let out = run(r#"
+            const env = require("process").env;
+            const before = Object.keys(env).length;
+            env.FOO = "bar";
+            console.log(before, env.FOO, Object.keys(env).length);
+            "#)
+        .await;
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "0 bar 1\n");
     }
 
     #[tokio::test]
@@ -659,6 +878,53 @@ mod tests {
         let out = run("try { globalThis.Deno.core.print('forged\\n', false); } catch (e) { console.log('blocked'); }").await;
         assert_eq!(out.exit_code, 0);
         assert_eq!(String::from_utf8_lossy(&out.stdout), "blocked\n");
+    }
+
+    #[tokio::test]
+    async fn user_scripts_can_reuse_names_declared_by_the_shim() {
+        // The bootstrap's top-level bindings must not collide with a script's own declarations.
+        let out = run(r#"
+            class AssertionError extends Error {}
+            const timeOps = 1;
+            console.log(new AssertionError("x") instanceof Error, timeOps);
+            "#)
+        .await;
+        assert_eq!(
+            out.exit_code,
+            0,
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "true 1\n");
+    }
+
+    #[tokio::test]
+    async fn node_shim_modules_behave_like_node() {
+        let out = run(r#"
+            const { StringDecoder } = require("string_decoder");
+            const dec = new StringDecoder("utf8");
+            const euro = [0xe2, 0x82, 0xac]; // "€" in UTF-8
+            const first = dec.write(euro.slice(0, 1));
+            const rest = dec.write(euro.slice(1));
+            const qs = require("querystring").parse("a=%E0&b=2");
+            const assert = require("assert");
+            assert({ x: [1, { y: 2 }] }.x.length === 2, "callable");
+            assert.strict.deepEqual({ a: [1, 2], b: { c: 3 } }, { a: [1, 2], b: { c: 3 } });
+            let threw = false;
+            try { require("readline").createInterface({}); } catch (e) { threw = true; }
+            console.log(JSON.stringify([first, rest, qs.a, qs.b, threw]));
+            "#)
+        .await;
+        assert_eq!(
+            out.exit_code,
+            0,
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "[\"\",\"€\",\"%E0\",\"2\",true]\n"
+        );
     }
 
     #[tokio::test]

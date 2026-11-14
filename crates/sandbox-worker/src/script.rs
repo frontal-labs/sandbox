@@ -19,7 +19,8 @@
 use crate::isolation::{enter, Isolation};
 use async_trait::async_trait;
 use sandbox_runtime::{
-    execute_script_streamed, ScriptLimits, ScriptOutcome, ScriptRunner, StreamObserver,
+    execute_script_streamed_with_context, ScriptContext, ScriptLimits, ScriptOutcome, ScriptRunner,
+    StreamObserver,
 };
 #[cfg(not(target_os = "linux"))]
 use sandbox_types::ErrorCode;
@@ -55,6 +56,12 @@ struct ScriptRequest {
     timeout_ms: u64,
     max_output_bytes: usize,
     max_heap_bytes: usize,
+    /// The session's working directory, when known.
+    #[serde(default)]
+    cwd: Option<String>,
+    /// Session environment variables, when known.
+    #[serde(default)]
+    env: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Runs each `node` script in a fresh, isolated child process.
@@ -85,10 +92,11 @@ impl ScriptRunner for ScriptProcess {
         limits: ScriptLimits,
         observer: Option<StreamObserver>,
         vfs: Option<Arc<Vfs>>,
+        context: Option<ScriptContext>,
     ) -> Result<ScriptOutcome, SandboxError> {
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (code, limits, observer, vfs, &self.program);
+            let _ = (code, limits, observer, vfs, context, &self.program);
             Err(SandboxError::new(
                 ErrorCode::Unsupported,
                 "contained scripts need Linux namespaces, seccomp, and cgroups",
@@ -96,7 +104,7 @@ impl ScriptRunner for ScriptProcess {
         }
         #[cfg(target_os = "linux")]
         {
-            run_contained(&self.program, code, limits, observer, vfs).await
+            run_contained(&self.program, code, limits, observer, vfs, context).await
         }
     }
 }
@@ -108,6 +116,7 @@ async fn run_contained(
     limits: ScriptLimits,
     observer: Option<StreamObserver>,
     _vfs: Option<Arc<Vfs>>,
+    context: Option<ScriptContext>,
 ) -> Result<ScriptOutcome, SandboxError> {
     use crate::isolation::{CgroupGuard, CgroupLimits};
     use std::process::Stdio;
@@ -123,7 +132,10 @@ async fn run_contained(
     let cgroup = CgroupGuard::create(&name, cgroup_limits)?;
 
     let mut command = Command::new(program);
+    // The child gets no host environment. Session env reaches the script only through
+    // the request body, so host secrets never cross into the contained process.
     command
+        .env_clear()
         .arg(SCRIPT_RUN_SUBCOMMAND)
         .arg("--namespaces")
         .arg("--seccomp")
@@ -146,6 +158,8 @@ async fn run_contained(
         timeout_ms: limits.timeout.as_millis() as u64,
         max_output_bytes: limits.max_output_bytes,
         max_heap_bytes: limits.max_heap_bytes,
+        cwd: context.as_ref().map(|c| c.cwd.clone()),
+        env: context.as_ref().map(|c| c.env.clone()),
     };
     let body = serde_json::to_vec(&request)
         .map_err(|e| SandboxError::internal(format!("encoding script request: {e}")))?;
@@ -299,11 +313,20 @@ pub fn run_script_child(isolation: &Isolation) -> Result<(), SandboxError> {
             let _ = write_frame(TAG_STDOUT, chunk);
         }
     });
-    let (exit_code, stderr) = match runtime.block_on(execute_script_streamed(
+    let context = if request.cwd.is_some() || request.env.is_some() {
+        Some(ScriptContext {
+            cwd: request.cwd.unwrap_or_else(|| "/".to_string()),
+            env: request.env.unwrap_or_default(),
+        })
+    } else {
+        None
+    };
+    let (exit_code, stderr) = match runtime.block_on(execute_script_streamed_with_context(
         &request.code,
         limits,
         Some(observer),
         None,
+        context,
     )) {
         Ok(outcome) => (outcome.exit_code, outcome.stderr),
         Err(e) => (1, e.message.into_bytes()),
