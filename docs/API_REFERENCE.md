@@ -278,10 +278,14 @@ POST /v1/snapshots/{id}/fork
 Response: `200` with `{ "session_ids": [...] }`. `count` is 1 to 64. The caller
 must own the snapshot.
 
-## Rate limiting (planned)
+## Rate limiting
 
-Planned: per-key limits with `429` and `Retry-After`. Nothing enforces limits
-yet. The `middleware.rs` module only adds a request ID.
+Session admission is bounded by per-key, per-tenant, and server-wide limits.
+When a request would exceed a limit, it is refused with `429`
+(`RESOURCE_EXHAUSTED`) and a `Retry-After` header (in seconds), so clients can
+back off instead of retrying into the limit. The per-key and server-wide limits
+are enforced on `POST /v1/sessions` and on snapshot forks; the per-tenant limit
+is enforced on top of them. The `middleware.rs` module only adds a request ID.
 
 ## CLI
 
