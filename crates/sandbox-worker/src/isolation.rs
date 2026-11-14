@@ -403,7 +403,7 @@ pub fn install_seccomp() -> Result<(), SandboxError> {
 /// The host's cgroup for one worker. Removed on drop, once the worker has exited
 /// and the kernel has emptied it.
 #[cfg(target_os = "linux")]
-pub(crate) struct CgroupGuard {
+pub struct CgroupGuard {
     path: std::path::PathBuf,
 }
 
