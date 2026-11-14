@@ -41,7 +41,7 @@
     "name": "Frontal Sandbox",
     "description": "Rust-first, isolate-first execution platform for AI agents",
     "technologyStack": {
-      "runtime": "Rust, V8, Wasmtime, and Firecracker",
+      "runtime": "Rust, V8, Wasmtime, and QEMU",
       "language": "Rust with a thin TypeScript SDK",
       "transport": "HTTP + WebSocket",
       "storage": "Content-addressed snapshots",

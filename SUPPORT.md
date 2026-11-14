@@ -20,4 +20,4 @@ See [SECURITY.md](SECURITY.md) for the coordinated disclosure policy.
 
 Frontal Sandbox is an execution platform for AI agents: isolate-first sessions,
 capability-checked access, copy-on-write filesystems, snapshots, and explicit
-promotion to Firecracker microVMs.
+promotion to QEMU microVMs.

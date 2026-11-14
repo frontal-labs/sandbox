@@ -33,7 +33,7 @@ sudo ./scripts/deploy.sh \
 ## Milestone alignment
 
 - M3: Dockerfile, compose.prod.yaml, systemd units, deploy/smoke scripts, config example
-- M4: deploy.sh Tier 2 (KVM/Firecracker) flags, bootstrap.sh kvm enablement
+- M4: deploy.sh Tier 2 (KVM/QEMU) flags, bootstrap.sh kvm enablement
 - M5: backup.sh/restore.sh for object-store CAS + Postgres metadata
 
 See `infrastructure/PLAN.md` for the full plan and acceptance criteria.

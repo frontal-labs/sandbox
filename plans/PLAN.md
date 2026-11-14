@@ -12,7 +12,7 @@ This document is the full spec for a coding agent to build `sandbox` in Rust. Wo
 - Thousands of concurrent idle sessions per host; idle cost near zero.
 - A shell and filesystem agents can use like a Linux box: `git`, `node`, `python`, `jq`, `grep`, `sed`, pipes, redirects.
 - Snapshot and fork in O(1) using content-addressed storage.
-- Automatic promotion to a Firecracker microVM when a command needs a real binary.
+- Automatic promotion to a QEMU microVM when a command needs a real binary.
 - A tiny API: `create`, `exec`, `fs`, `snapshot`, `fork`, `destroy`.
 - Full trace of every command and file change, replayable.
 
@@ -41,7 +41,7 @@ worker process (one per tenant, seccomp + cgroups)
         |     |-- wasm   (wasmtime + WASI tools)
         |     |-- vfs    (copy-on-write, content-addressed)
         |-- VmBackend (Tier 2)
-              |-- vmm (Firecracker + guest agent)
+              |-- vmm (QEMU + guest agent)
 snapshot store (object storage + local cache)
 trace sink (append-only event log)
 ```
@@ -75,7 +75,7 @@ sandbox/
 │   ├── sandbox-wasm/             # wasmtime/WASI host
 │   ├── sandbox-session/          # Session trait + IsolateBackend
 │   ├── sandbox-snapshot/         # snapshot, fork, restore
-│   ├── sandbox-vmm/              # Firecracker driver
+│   ├── sandbox-vmm/              # QEMU driver
 │   ├── sandbox-guest/            # in-VM agent (static musl binary)
 │   ├── sandbox-promote/          # Tier 1 to Tier 2 handoff
 │   ├── sandbox-policy/           # capabilities, network policy, limits
@@ -201,7 +201,7 @@ pub struct ExecHandle {
 ```
 
 - `IsolateBackend` wires shell + runtime + wasm + vfs + policy.
-- `VmBackend` proxies to the guest agent over vsock.
+- `VmBackend` proxies to the guest agent over a forwarded loopback port (or a Unix socket on vsock-backed guests).
 - `Auto` tier: start in Isolate; on `NeedsVm`, call `sandbox-promote`.
 
 ### 4.9 `sandbox-snapshot`
@@ -210,17 +210,17 @@ pub struct ExecHandle {
 - `take(session)`: commit VFS, serialize shell state (env, cwd, functions, aliases), optionally V8 heap snapshot for warm isolate state.
 - `restore(id) -> Session`: O(1) for the VFS (just mount the root hash), fast path for runtime blob.
 - `fork(id, n) -> Vec<Session>`: n sessions sharing the same base, independent overlays.
-- VM snapshots (Firecracker memory + disk) are a separate `VmSnapshot` kind, M5+.
+- VM snapshots (QEMU memory + disk) are a separate `VmSnapshot` kind, M5+.
 - Snapshot retention policy and labels; GC integration with `sandbox-cas`.
 
 ### 4.10 `sandbox-vmm` and `sandbox-guest`
 
-- Drive Firecracker over its Unix-socket REST API (`reqwest` + `hyperlocal` or hand-rolled hyper client). Jailer for each VM: chroot, cgroups, netns, seccomp, dropped caps.
+- Drive QEMU directly (spawned process, `tokio::process::Command`). The guest agent is the guest's init, reachable on a forwarded loopback port. Software emulation (`-accel tcg`) works without hardware virtualisation; KVM (`-accel kvm`) runs the guest at hardware speed.
 - Base images: minimal Debian/Alpine rootfs plus `sandbox-guest`; separate `browser` image with Chromium + Playwright deps. Built reproducibly in `tools/`.
 - Boot path: kernel + rootfs (read-only, shared across VMs) + per-session writable overlay block device populated from the VFS export.
-- **`sandbox-guest`:** static musl binary, PID 1 or child of a tiny init. Listens on vsock. Protocol: length-prefixed protobuf or MessagePack frames: `Exec`, `Signal`, `ReadFile`, `WriteFile`, `ListDir`, `Sync(to host VFS)`, `Ping`. Streams stdout/stderr as frames.
+- **`sandbox-guest`:** static musl binary, PID 1 or child of a tiny init. Listens on a TCP port (the host forwards it for emulated guests; a vsock-backed guest uses a Unix socket). Protocol: gRPC over the protobuf service in `proto/sandbox/v1/guest/`: `Exec`, `Signal`, `ReadFile`, `WriteFile`, `ListDir`, `Stat`, `MkDir`, `Rename`, `Remove`, `Sync(to host VFS)`, `Ping`. Streams stdout/stderr as frames.
 - Networking: tap device per VM, nftables egress rules mirroring `sandbox-policy`, same private-range blocks.
-- Fast resume: Firecracker snapshot/restore with userfaultfd lazy memory loading. Target under 150 ms.
+- Fast resume: QEMU snapshot/restore through the monitor (`savevm` / `loadvm`), on a qcow2 that holds the saved state (`QemuVm::start_with` and `Snapshotting`).
 - Warm pool of pre-booted VMs per image.
 
 ### 4.11 `sandbox-promote`
@@ -297,7 +297,7 @@ let forks = snap.fork(3).await?;
 
 **Layers, outermost first**
 
-1. Hardware boundary (Tier 2 only): Firecracker + jailer.
+1. Hardware boundary (Tier 2 only): QEMU microVM (KVM when available).
 2. Per-tenant OS process: seccomp allowlist, cgroup limits, namespaces, no host mounts, read-only binary.
 3. V8 isolate / wasmtime store: memory and CPU caps.
 4. Capability ops: only exposed ops exist; each checks policy.
@@ -308,7 +308,7 @@ let forks = snap.fork(3).await?;
 - Fuzz targets: shell parser, VFS path handling, WASI fs shim, guest protocol decoder (`cargo-fuzz`).
 - Escape tests: attempts to read host files, reach the metadata IP, exhaust memory/CPU/inodes/PIDs, fork-bomb equivalents, symlink races, zip-bombs.
 - Never share a V8 heap or wasmtime store across tenants.
-- Pin and track V8/wasmtime/Firecracker CVEs; automate dependency updates.
+- Pin and track V8/wasmtime/QEMU CVEs; automate dependency updates.
 - `cargo-deny` and `cargo-audit` in CI; `unsafe` allowed only in named modules with comments.
 
 ## 6. Performance targets and benchmarks
@@ -367,7 +367,7 @@ Rule: justify every new dependency in the PR description; prefer well-maintained
 
 ### M4: Tier 2 (weeks 14-19)
 
-- `sandbox-vmm`, `sandbox-guest`, base and browser images, `export_ext4`, `sandbox-promote`, VM warm pool, Firecracker snapshots.
+- `sandbox-vmm`, `sandbox-guest`, base and browser images, `export_ext4`, `sandbox-promote`, VM warm pool, QEMU snapshots.
 - **Accept:** `ffmpeg` and headless Chromium run via auto-promotion; promotion under 400 ms; VM resume < 150 ms; guest protocol fuzzed for 24 h clean.
 
 ### M5: Production hardening (weeks 20-24)
@@ -385,7 +385,7 @@ Rule: justify every new dependency in the PR description; prefer well-maintained
 - Logs: structured JSON, request ID plus session ID on every line.
 - Traces: OpenTelemetry spans across server, scheduler, worker.
 - Admin: `sandbox admin` for draining a host, forcing GC, inspecting a session's trace.
-- Deploy: single static binary + systemd unit for single node; container image; Terraform for cloud (bare metal or KVM-capable instances, since Firecracker needs `/dev/kvm`).
+- Deploy: single static binary + systemd unit for single node; container image; Terraform for cloud (bare metal or KVM-capable instances, since the VM tier needs `/dev/kvm` for hardware acceleration).
 
 ## 11. Instructions for the building agent
 
@@ -453,19 +453,19 @@ This section records what the code does today against the plan above. Update it 
 - **Ad-hoc guest protocol removed:** `crates/sandbox-guest/src/protocol.rs` (the unused second protocol) was deleted; only the protobuf-defined protocol in `proto/sandbox/v1/guest/` remains.
 - **Per-session CPU/process/open-file limits (§4.7, ADR 0014):** The isolate backend now accepts and enforces `cpu_ms_per_sec`, `max_processes`, and `max_open_files` limits at runtime. Updated tests to reflect acceptance (201) instead of refusal (501).
 - **Clustered scheduler (§4.8, ADR 0023):** `ClusterScheduler` with multi-node placement, worker transport, and integration with PgStore for shared state.
-- **Firecracker VMM driver (§4.10, M4):** `VmmDriver` with Firecracker client API and direct binary spawning, `Jailer` for chroot setup.
+- **QEMU VMM driver (§4.10, M4):** `QemuVm` boots a guest with QEMU (TCG or KVM), waits for the guest agent, and saves and resumes state through the QEMU monitor. `VmPool` keeps a warm pool of pre-booted guests. The earlier Firecracker driver and jailer were scaffolding (their entry points returned canned `unsupported` errors); they were removed in T-05, and QEMU is the Tier 2 driver.
 - **Guest agent (§4.10, M4):** `GuestAgent` with gRPC protocol (Ping, Exec, ReadFile, WriteFile, ListDir, Sync) over Unix socket.
 - **Seccomp allowlist (§4.13, ADR 0022):** Allowlist-based seccomp filter (`allowed_syscalls`, `install_seccomp_allowlist`) replacing the denylist.
 - **Threat model updated:** `docs/THREAT_MODEL.md` updated to reflect completed items.
 
 ### Open, and planned in the milestones above
 - **Per-byte streaming for shell builtins (ADR 0028):** Implemented. All builtins (echo, printf, pwd, cat, ls, grep, head, tail, wc) now write through a sink and stream output when the command's output is plain (not captured, piped, or redirected). Tests verify streaming behavior for pipelines, redirections, substitutions, and compound commands.
-- **Threat model (§5):** `docs/THREAT_MODEL.md` covers assets, actors, trust boundaries, controls cited to code, and residual risks. **Updated to reflect completed items: seccomp allowlist implemented, Firecracker driver and jailer implemented, guest agent implemented, per-session CPU/process/open-file limits enforced, stale temp cleanup, lockfile cleanup.**
+- **Threat model (§5):** `docs/THREAT_MODEL.md` covers assets, actors, trust boundaries, controls cited to code, and residual risks. **Updated to reflect completed items: seccomp allowlist implemented, QEMU VMM driver implemented, guest agent implemented, per-session CPU/process/open-file limits enforced, stale temp cleanup, lockfile cleanup.**
 - **The guest does not exist.** The `GuestService` schema and the frame decoder are fuzzed, but there is no agent to serve them, so the Tier 2 path is untested end to end. **Guest agent now implemented (sandbox-guest), but not production-ready.**
 - **GitHub CI:** the `supply-chain` job and the existing jobs have not been seen passing on GitHub.
 - **Unmaintained advisories, ignored with reasons in `deny.toml`:** `paste` (via `deno_v8`), `proc-macro-error` and `unsafe-libyaml` (via utoipa 4), `rustls-pemfile` (via tonic 0.12), and `number_prefix` (benchmarks). Each waits on an upgrade.
 - **Duplicate crate versions:** `cargo deny` reports about 40. They are warnings, not failures. **Reduced via cargo update.**
-- **VM tier (§4.10, §4.11), Firecracker, promotion, guest agent:** M4. **Firecracker driver (VmmDriver) and jailer implemented. Guest agent (sandbox-guest) implemented with gRPC protocol. Promotion logic not built.**
+- **VM tier (§4.10, §4.11), QEMU, promotion, guest agent:** M4. **QEMU driver (`QemuVm`) and warm pool (`VmPool`) implemented. Guest agent (sandbox-guest) implemented with gRPC protocol. Promotion (`sandbox-promote::promote_to_vm`) is wired into the server for sessions created with the `vm` tier preference; the automatic `NeedsVm` re-promotion of an existing isolate session on a failed command is not built.**
 - **Worker isolation (§4.13, §5), on Linux (ADR 0022):** the worker unshares its network, IPC, UTS, and mount namespaces, installs a **seccomp allowlist** with `NO_NEW_PRIVS`, and runs in a cgroup v2 with memory, pid, and CPU limits. Each layer fails closed. The host needs a delegated cgroup in `SANDBOX_CGROUP_ROOT`, which a systemd unit with `Delegate=yes` provides. The cost of the layers on a running command has not been measured. Tests run in the Linux container (`docker/run-linux.sh`). On macOS the isolation is `Unsupported`, and the worker does not start with it. Remaining (§5): the Tier 2 VM and an external review.
 - **V8 runtime (§4.5) and WASM tools (§4.6):** `node -e` and `node FILE` run JavaScript in V8 with a 5 s wall limit and a 64 MiB heap cap. `node FILE.ts` strips the types with swc and then runs the result (ADR 0024). The types are not checked. A warm pool of two isolates makes the median `node` run 0.41 ms, down from 5.10 ms, and the tail under back-to-back load is the cold path (ADR 0025). The `wasm` builtin runs WASI preview1 command modules. **The `node:` module shim is now implemented (fs, path, os, child_process, events, stream, util, buffer, url, crypto).** File change tracing is implemented (traces include FileChange records). Demo WASI tools (`echo_tool`, `cat_tool`, `env_tool`) are built and registered; of the M2 tools, `jq`, `ripgrep`, and `sqlite3` are real (see above). `git` and `python` are not built. `git` needs gix or a WASI build of a git implementation and a subset of its porcelain, and `python` needs a CPython WASI build with its stdlib. Each is a milestone of its own.
 - **Streaming output (§4.15, ADR 0020, ADR 0021, ADR 0028):** the server streams NDJSON as each command finishes. `node` and WASI tools also stream each write as it happens, through the runtime and WASI observers. **Shell builtins (echo, printf, pwd, cat, ls, grep, head, tail, wc) now also stream each write as it happens, through the BuiltinStdout sink.** A tool's stderr is sent when its command finishes. NDJSON covers the streaming requirement. The WebSocket item below records what exists.
@@ -509,7 +509,7 @@ This section records what the code does today against the plan above. Update it 
 - **Verified 2026-11-01 (stale temp cleanup, lockfile, guest protocol, WASM demo tools):** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast`, `cargo deny check` all passed. Stale temp file cleanup on store open (ADR 0017), lockfile residue (`rsa`) removed via `cargo update`, ad-hoc guest protocol deleted, demo WASI tools (`echo_tool`, `cat_tool`, `env_tool`) compiled for wasm32-wasip1 and registered.
 - **Verified 2026-11-01 (per-byte streaming for shell builtins):** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast`, `cargo deny check` all passed. Per-byte streaming for shell builtins (echo, printf, pwd, cat, ls, grep, head, tail, wc) implemented via ADR 0028. All 17 streaming tests pass including pipeline streaming, redirection handling, substitution isolation, and chunk concatenation verification.
 - **Verified 2026-11-02 (per-session limits enforcement):** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast`, `cargo deny check` all passed. Per-session CPU (`cpu_ms_per_sec`), process (`max_processes`), and open-file (`max_open_files`) limits are now accepted and enforced by the isolate backend. Zero quotas are accepted at session creation and enforced at runtime.
-- **Verified 2026-11-02 (M4/M5 items - clustered scheduler, Firecracker, guest agent, seccomp allowlist, threat model):** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast`, `cargo deny check` all passed. Clustered scheduler (ClusterScheduler with multi-node placement), Firecracker VMM driver and jailer, guest agent with gRPC protocol, seccomp allowlist implementation, and updated threat model documentation. All tests pass.
+- **Verified 2026-11-02 (M4/M5 items - clustered scheduler, QEMU, guest agent, seccomp allowlist, threat model):** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast`, `cargo deny check` all passed. Clustered scheduler (ClusterScheduler with multi-node placement), QEMU VMM driver (`QemuVm` + `VmPool`; the earlier Firecracker driver and jailer were scaffolding and were removed in T-05), guest agent with gRPC protocol, seccomp allowlist implementation, and updated threat model documentation. All tests pass.
 
 - **Disk full:** the earlier `ENOSPC` blocker is cleared. The system volume has about 82 GiB free and the project volume about 337 GiB, and writes succeed. On 2026-10-19 `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` all passed after the file-change trace change (ADR 0011).
 - **Docker:** `docker` cannot reach its daemon (the socket at `~/.docker/run/docker.sock` refuses connections), so nothing was removed. Starting Docker Desktop and confirming the scope of any cleanup is pending the operator.

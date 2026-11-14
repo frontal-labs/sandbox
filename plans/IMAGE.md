@@ -1,16 +1,16 @@
 # Frontal Sandbox Image
 
-_The Tier 2 guest: a headless, Ubuntu-userland Linux image built for agents, booted by Firecracker, resumed from snapshots, with optional per-thread Xfce desktops._
+_The Tier 2 guest: a headless, Ubuntu-userland Linux image built for agents, booted by QEMU, resumed from snapshots, with optional per-thread Xfce desktops._
 
 This document is the spec for a coding agent to build the Tier 2 image. It extends the project specification §4.9 (snapshots), §4.10 (`sandbox-vmm`, `sandbox-guest`), §4.11 (promotion) and §4.16 (CLI). Read the project specification first. Where the two disagree, the project specification's core invariants (§2) win; raise the conflict in an ADR instead of working around it.
 
-Work milestone by milestone (§9). Do not start a milestone until the previous one's acceptance criteria pass. Statements marked **[verify]** are believed true but must be checked against the pinned Firecracker release's docs before you rely on them.
+Work milestone by milestone (§9). Do not start a milestone until the previous one's acceptance criteria pass. Statements marked **[verify]** are believed true but must be checked against the pinned QEMU release's docs before you rely on them.
 
 ## 1. Goals and non-goals
 
 **Goals**
 
-- A headless guest with an Ubuntu userland and `apt`, a Firecracker-validated kernel, and `sandbox-guest` as PID 1. Bash is the interface for everything, including the desktop.
+- A headless guest with an Ubuntu userland and `apt`, a QEMU-validated kernel, and `sandbox-guest` as PID 1. Bash is the interface for everything, including the desktop.
 - Resuming a warm snapshot is the default path. Cold boot exists only to build snapshots.
 - Package layers stored in `sandbox-cas`, keyed by their resolved package set, shared read-only across sessions, forks and VMs.
 - The same filesystem layout, `PATH` and `/etc/agent/env.json` in Tier 1 and Tier 2, so promotion is invisible to the agent.
@@ -20,7 +20,7 @@ Work milestone by milestone (§9). Do not start a milestone until the previous o
 
 **Non-goals (v1)**
 
-- GPU, video acceleration, WebGL-heavy workloads. Firecracker has no GPU or display device.
+- GPU, video acceleration, WebGL-heavy workloads. QEMU can pass through a GPU device, but the current driver does not.
 - Wayland. Xfce's Wayland compositor (xfwl4) had its first preview release on 2026-06-21; revisit when it reaches parity.
 - `snapd` and snap packages, systemd, sshd, cron, any long-running daemon outside `sandbox-guest`'s process tree.
 - A host OS, bare-metal installer, or hardware drivers. The guest only sees virtio devices.
@@ -35,17 +35,17 @@ Work milestone by milestone (§9). Do not start a milestone until the previous o
 host
   scheduler ── places forks on the host holding the parent's memory file
   worker
-    sandbox-vmm ── jailer + firecracker (pinned ≥ v1.16.1)
+    sandbox-vmm ── QEMU (pinned, `-accel kvm` where available)
        kernel:   vmlinux 6.18 (built in, no modules)
        drives:   vda  base layer        (ro, from CAS)
                  vdb… package layers    (ro, from CAS)
                  vdN  session overlay   (rw, from vfs.export_ext4)
-       vsock:    host dials guest port SANDBOX_GUEST_PORT
-       net:      tap in a per-VM network namespace, egress via sandbox-policy proxy
+       fwd:      host dials the agent's forwarded loopback port (GUEST_AGENT_PORT)
+       net:      user-mode or a per-VM tap, egress via sandbox-policy proxy
 guest
   sandbox-guest (PID 1)
     mounts overlayfs: lower = base + layers, upper = session overlay
-    listens on vsock, executes frames, reaps children
+    listens on the forwarded loopback port, executes frames, reaps children
     └─ bash (per Exec)
     └─ [desktop] Xorg :0 (dummy driver) → dbus-launch startxfce4 (user agent)
 ```
@@ -54,7 +54,7 @@ guest
 
 1. The VFS is the source of truth (project specification §2). The session overlay is derived from the VFS root; package layers are CAS objects named in the session lockfile.
 2. The guest never holds long-lived credentials. Secrets are attached by the host egress proxy (project specification §4.7). Nothing secret exists in a VM when it is snapshotted.
-3. `sandbox-guest` is always the vsock **listener** and the host always dials. Firecracker closes open vsock connections on snapshot; listening sockets survive.
+3. `sandbox-guest` is always the **listener** and the host always dials. QEMU's monitor snapshot/restore (`savevm` / `loadvm`) preserves the guest's listening sockets; the host reconnects after resume.
 4. No process runs in the guest outside `sandbox-guest`'s tree. No timers, no periodic jobs. An idle guest uses no CPU.
 5. After every snapshot load, the host sends `Reseed` before anything else. The guest rejects every other frame until `Reseed` succeeds on that connection generation.
 6. Every VM gets its own network namespace. Clones share the same guest IP and MAC by design.
@@ -64,7 +64,7 @@ guest
 ```
 images/
 ├── kernel/
-│   └── config-6.18-x86_64      # derived from Firecracker resources/guest_configs
+│   └── config-6.18-x86_64      # kernel config for the guest (mainline-based)
 ├── base/
 │   └── manifest.toml           # suite, archive snapshot, package set, apt prefs
 ├── templates/
@@ -88,13 +88,11 @@ docs/adr/
 
 ### 4.1 Kernel
 
-- Linux 6.18, the newest guest kernel in Firecracker's kernel support policy (supported from v1.16.1, minimum end of support 2028-06-01). 6.1's minimum support ended 2026-09-02.
-- Start from Firecracker's published guest configs. The policy says those configs target Amazon Linux `microvm-kernel-*` sources; build from those tags, or document every divergence if you build from mainline.
+- Linux 6.18, a mainline LTS kernel. The emulated test image uses a distribution kernel (`linux-image-amd64`) for now; a pinned, built-in kernel is the target.
+- Start from a mainline defconfig and trim it for the guest.
 - Required: `VIRTIO_BLK`, `VIRTIO_NET`, `VIRTIO_VSOCKETS`, `HW_RANDOM_VIRTIO`, `VIRTIO_BALLOON`, `ACPI` + `PCI` (needed for ACPI boot on x86_64), `VMGENID`, `OVERLAY_FS`, `EROFS_FS`, `EXT4_FS`, `KVM_GUEST`, `SECCOMP`, `SECURITY_LANDLOCK`, `CGROUPS` (v2). Desktop: `INPUT_UINPUT`.
 - `CONFIG_MODULES=n`. Everything built in.
-- Disable legacy boot: `X86_MPPARSE=n`, `VIRTIO_MMIO_CMDLINE_DEVICES=n` (deprecated by Firecracker).
 - `IO_URING`: default off. **Decide by test**: run the agent-transcript corpus with it off; enable only if a common tool fails.
-- PCI transport (`--enable-pci`) is optional in Firecracker and claims better virtio throughput. **Decide by benchmark** in I2: resume latency and block throughput, MMIO vs PCI.
 - Boot args: `reboot=k panic=1 init=/sbin/sandbox-guest` plus root/overlay parameters. No serial console in production builds.
 
 ### 4.2 Package layers and lockfile
@@ -109,14 +107,14 @@ This replaces "install = mount a hash" from earlier drafts. Debian packages run 
 - **Snaps:** forbidden. Ship `/etc/apt/preferences.d/no-snap` pinning `snapd` to priority -1. Ubuntu's `firefox` and `chromium-browser` debs are snap transitional packages; get browsers from Playwright's managed Chromium or Mozilla's apt repository instead.
 - **Lockfile:** `/etc/agent/lock.toml` lists requested `name = "version-constraint"` entries and the resolved layer chain. The host owns it; the guest reads it.
 - **Runtime installs (v1):** `apt install`, `pip install` and `npm install` run normally inside the guest and write into the session overlay. All registry traffic goes through the host egress proxy, which caches artifacts in the CAS by hash, so repeat downloads are local. The host records the resolved set; at the next sleep or snapshot it may rebase the session onto an equivalent cached layer.
-- **Runtime installs (later):** attaching a cached layer to a running VM depends on Firecracker block-device hotplug. **[verify]** what `docs/device-hotplug.md` supports in the pinned release before designing on it.
+- **Runtime installs (later):** attaching a cached layer to a running VM depends on QEMU block-device hotplug.
 - **Templates:** `python-3.12` and `node-20` are layers plus a warm headless snapshot.
 
 ### 4.3 `sandbox-guest` (extends project specification §4.10)
 
 **PID 1 duties:** mount `proc`, `sys`, `dev`, `devpts`, `cgroup2`, `tmpfs /run`; assemble the overlay root; reap zombies; handle `SIGTERM` and `SIGINT` for clean shutdown; never exit.
 
-**Transport:** vsock, listening on `SANDBOX_GUEST_PORT` (constant in `sandbox-types`). Protobuf frames generated from `proto/` (the repo already uses `tonic`/`prost`). Length-prefixed.
+**Transport:** TCP, listening on `GUEST_AGENT_PORT` (7000, a constant in `sandbox-vmm`). gRPC over the protobuf service in `proto/sandbox/v1/guest/`. A vsock-backed guest would use a Unix socket instead; the current driver uses a forwarded loopback port, which is why the emulated and KVM guests share the same code path.
 
 **Frames (v1).** Existing frames from project specification: `Exec`, `Signal`, `ReadFile`, `WriteFile`, `ListDir`, `Sync`, `Ping`. New:
 
@@ -138,9 +136,9 @@ This replaces "install = mount a hash" from earlier drafts. Debian packages run 
 
 ### 4.4 Networking
 
-- One network namespace per VM on the host, with the tap device inside it. Every clone keeps the same in-guest IP and MAC, following Firecracker's `docs/snapshotting/network-for-clones.md`.
+- One network namespace per VM on the host, with the tap device inside it. Every clone keeps the same in-guest IP and MAC.
 - Egress leaves the namespace only through the `sandbox-policy` proxy. nftables rules mirror policy (project specification §4.7), including the private-range and metadata blocks.
-- After resume, the guest's open network connections are not guaranteed to survive (Firecracker docs). The agent sees ordinary connection errors; nothing tries to preserve them.
+- After resume, the guest's open network connections are not guaranteed to survive. The agent sees ordinary connection errors; nothing tries to preserve them.
 
 ### 4.5 Agent-native interfaces
 
@@ -169,14 +167,14 @@ These work in **both tiers**. Most of the work belongs in `sandbox-session`, `sa
   - `sandbox fork N -- <cmd>` creates N children from the current state, runs `<cmd>` in each, and returns child session IDs, exit codes and diff stats. Subject to per-key quotas.
   - `sandbox undo [N]` restores the VFS root from N checkpoints ago. In Tier 2 this restarts the VM from the base snapshot with the restored overlay; running processes are lost, and the command says so.
   - `sandbox checkpoint` takes a manual checkpoint.
-- **Checkpoints.** Session config `checkpoint: per_exec | manual` (default `per_exec`). Each top-level exec ends with an incremental `vfs.commit()`; root hashes form the undo stack. Use VFS roots, not Firecracker diff snapshots, which are still in developer preview.
+- **Checkpoints.** Session config `checkpoint: per_exec | manual` (default `per_exec`). Each top-level exec ends with an incremental `vfs.commit()`; root hashes form the undo stack. Use VFS roots, not QEMU memory snapshots, for the undo stack.
 - **Checkpoint retention.** Keep the last `checkpoint_retain` roots per session (default 50) and unpin older ones. project specification §14 notes that checkpoint and blob GC is not implemented yet, so per-exec checkpoints grow storage until GC lands. Until then, I0 must at least unpin old roots and report per-session checkpoint bytes in `GET /v1/sessions/{id}`.
 - **Exec user.** `Exec` runs as user `agent` (uid 1000) with passwordless `sudo`, in both the headless image and the desktop. Root is reachable by design (§5). Tier 1 reports the same user in `env.json` (`"user": "agent"`).
 - **Approval gates.** Policy gains `require_approval: [{ host, methods, paths? }]`. The egress proxy holds a matching request, emits `ApprovalRequired { id, request_summary }` on the trace, and waits up to `approval_timeout_s` for `POST /v1/sessions/{id}/approvals/{aid}`. On timeout the request is denied and a `PolicyDenied` event is emitted. Enforcement is on the host, never in the guest.
 
 ### 4.6 Snapshot uniqueness (fork hygiene)
 
-Firecracker's snapshot docs call resuming the same state more than once insecure unless unique state is de-duplicated. VMGenID reseeds only the kernel CSPRNG, with a race window. Everything else is our job.
+Resuming the same state more than once is insecure unless unique state is de-duplicated. A guest VMGenID reseeds only the kernel CSPRNG, with a race window. Everything else is our job.
 
 **Before every snapshot (`PrepareSnapshot`):**
 
@@ -188,7 +186,7 @@ Firecracker's snapshot docs call resuming the same state more than once insecure
 
 **After every snapshot load (`Reseed`), before any other frame:**
 
-1. Mix host-provided entropy into the kernel pool with `RNDADDENTROPY`, then force `RNDRESEEDCRNG`, as Firecracker's `random-for-clones.md` recommends to close the VMGenID race.
+1. Mix host-provided entropy into the kernel pool with `RNDADDENTROPY`, then force `RNDRESEEDCRNG`, to close the VMGenID race.
 2. Write a new `/etc/machine-id`.
 3. Bind-mount a file with a new UUID over `/proc/sys/kernel/random/boot_id`.
 4. Set the hostname.
@@ -206,7 +204,7 @@ Firecracker's snapshot docs call resuming the same state more than once insecure
 - **Template snapshot:** after readiness, the host runs `PrepareSnapshot` and takes the desktop snapshot. Threads fork from it.
 - **One VM per agent thread.** Forks map the template memory file copy-on-write; that file must stay on the host for as long as any fork lives. The scheduler places forks on the host holding the file, or copies it first. Expect cross-host forks to be several times slower.
 - **Idle:** pause a desktop VM after `desktop_idle_s` (default 300) with no `cua` or `exec` activity. Snapshot it to disk and resume on the next call.
-- **Memory reclaim:** **decide by benchmark** in I4: Firecracker's balloon device vs. nothing, measured on resident memory per idle desktop.
+- **Memory reclaim:** **decide by benchmark** in I4: QEMU's balloon device vs. nothing, measured on resident memory per idle desktop.
 
 ### 4.8 `cua` command (`crates/sandbox-cua`)
 
@@ -230,9 +228,9 @@ All commands support `--json`. Input failures exit non-zero. A key press that ca
 
 Inherits project specification §5. Additions:
 
-- Root inside the guest is allowed. The boundary is KVM, Firecracker and the jailer.
-- Firecracker trusts snapshot and memory files. Never load a snapshot file that did not come from our own CAS with a verified hash. Users cannot upload snapshots.
-- No `snapd`, no sshd, no inbound network. A human desktop viewer (I5) tunnels over vsock through the host and requires an authenticated session key.
+- Root inside the guest is allowed. The boundary is KVM and QEMU (TCG is not a boundary).
+- QEMU trusts snapshot and memory files. Never load a snapshot file that did not come from our own CAS with a verified hash. Users cannot upload snapshots.
+- No `snapd`, no sshd, no inbound network. A human desktop viewer (I5) tunnels through the host and requires an authenticated session key.
 - No kernel modules. Kernel config changes require an ADR.
 - Fuzz the guest frame decoder and the `cua batch` JSONL parser.
 - Escape tests from project specification §5 must also pass inside Tier 2.
@@ -256,10 +254,10 @@ Benchmark under concurrency as well as sequentially. Report p50, p95 and p99. Pi
 
 ## 7. Testing strategy
 
-- **Boot and smoke:** Firecracker on KVM-enabled CI runners (project specification §7). Boot to `Ping`, run `bash -lc 'python3 -V && apt-get --version'`.
+- **Boot and smoke:** QEMU on KVM-enabled CI runners (project specification §7). Boot to `Ping`, run `bash -lc 'python3 -V && apt-get --version'`.
 - **No-daemon check:** after boot, the guest process list contains only `sandbox-guest` and its children.
 - **Uniqueness:** fork one snapshot 50 ways. Assert all distinct: `getrandom` output, `/etc/machine-id`, `boot_id`, hostname, X cookie (desktop), wall clock within 1 s of host.
-- **vsock reconnect:** restore, dial, assert `NOT_READY` before `Reseed` and success after.
+- **agent reconnect:** restore, dial, assert `NOT_READY` before `Reseed` and success after.
 - **Network clones:** 10 concurrent clones each reach an allowed host and fail on a denied one, verified with an HTTP response (blocked TCP can appear to connect).
 - **No-snap:** `apt-get install firefox` either installs a non-snap build from the configured repo or fails with a clear message. `snapd` is never installed.
 - **Reproducibility:** build each layer twice in clean environments; IDs and bytes match.
@@ -269,9 +267,9 @@ Benchmark under concurrency as well as sequentially. Report p50, p95 and p99. Pi
 
 ## 8. Dependencies (initial pin list)
 
-Host and build: Firecracker ≥ v1.16.1 (pinned exactly), jailer, `mmdebstrap` (unprivileged rootfs builds), `erofs-utils`, `e2fsprogs`.
+Host and build: QEMU (pinned exactly), `mmdebstrap` (unprivileged rootfs builds), `erofs-utils`, `e2fsprogs`.
 
-Rust: `tokio-vsock`, `prost`/`tonic` (already in the workspace), `nix`/`rustix`, `x11rb`, `png`, `blake3`, `toml`, `serde_json`. `evdev` only if uinput wins the I4 test.
+Rust: `prost`/`tonic` (already in the workspace), `nix`/`rustix`, `x11rb`, `png`, `blake3`, `toml`, `serde_json`. `evdev` only if uinput wins the I4 test.
 
 Rule from project specification §8 applies: justify every new dependency in the PR description.
 
@@ -286,13 +284,13 @@ Rule from project specification §8 applies: justify every new dependency in the
 ### I1: Headless image v0 (start of project specification M4)
 
 - Kernel 6.18 per §4.1. Base image as one ext4 layer. `sandbox-guest` as PID 1 with existing frames, plus `Hello`.
-- **Accept:** boots under the jailer to `Ping`. Smoke and no-daemon tests pass. The image build is reproducible. Idle RSS is measured and recorded.
+- **Accept:** boots under QEMU to `Ping`. Smoke and no-daemon tests pass. The image build is reproducible. Idle RSS is measured and recorded.
 
 ### I2: Snapshots, uniqueness, promotion (project specification M4)
 
 - `PrepareSnapshot`, `Reseed`, `EnvInfo`. Per-VM network namespaces. Warm pool from snapshots. Promotion through `export_ext4`.
 - MMIO vs PCI transport benchmark recorded.
-- **Accept:** headless resume < 150 ms p50. Promotion < 400 ms p50. Uniqueness, vsock-reconnect and network-clone tests pass. `ffmpeg` runs via auto-promotion (project specification M4).
+- **Accept:** headless resume < 150 ms p50. Promotion < 400 ms p50. Uniqueness, agent-reconnect and network-clone tests pass. `ffmpeg` runs via auto-promotion (project specification M4).
 
 ### Gate G1: promotion rate (before I3 and I4)
 
@@ -312,13 +310,13 @@ Rule from project specification §8 applies: justify every new dependency in the
 
 ### I5: Human-in-the-loop (project specification M6)
 
-- Approval gates (§4.5). Authenticated desktop viewer over vsock with a separate human cursor. Evaluation of Cua Driver inside the desktop image, recorded as an ADR.
+- Approval gates (§4.5). Authenticated desktop viewer through the host with a separate human cursor. Evaluation of Cua Driver inside the desktop image, recorded as an ADR.
 - **Accept:** approval-gate tests pass. A human can join a desktop, act, and hand back control without breaking the agent's next `cua batch`.
 
 ## 10. Instructions for the building agent
 
 1. Follow project specification §11 in full.
-2. Firecracker behavior changes between releases. Before relying on any Firecracker feature (snapshots, vsock reset, PCI, hotplug, balloon, VMGenID), read the docs for the exact pinned version and cite them in the PR.
+2. QEMU behavior changes between releases. Before relying on any QEMU feature (snapshots, monitor savevm/loadvm, PCI, hotplug, balloon, VMGenID), read the docs for the exact pinned version and cite them in the PR.
 3. Never install `snapd` or systemd, or add a background daemon to an image. If a package pulls one in, pin it out and find another package.
 4. Never put credentials into a VM or a snapshot. If a test needs a secret, inject it through the egress proxy.
 5. Every "decide by benchmark" or "decide by test" item produces a file in `docs/decisions/` with method, numbers and choice before the code depending on it merges.
@@ -335,7 +333,7 @@ Rule from project specification §8 applies: justify every new dependency in the
 | Cross-host forks slow | Fork-locality scheduling; copy the memory file ahead of time |
 | Xfce assumes systemd or logind somewhere | `dbus-launch` session; conformance suite; swap a component if it fails |
 | Desktop memory per thread too high | Copy-on-write fork sharing, idle pause, balloon benchmark |
-| Firecracker behavior changes on upgrade | Exact version pin; re-run I2 tests on every bump |
+| QEMU behavior changes on upgrade | Exact version pin; re-run I2 tests on every bump |
 | Few sessions ever need Tier 2 | Gate G1 before investing in I3/I4 |
 
 ## 12. Open questions (need a human)
@@ -361,10 +359,9 @@ Each question has a default. Build with the default unless a human has overridde
 
 Checked on 2026-10-25 against public docs. Re-verify against the pinned versions.
 
-- Firecracker guest kernels 5.10, 6.1, 6.18; 6.18 supported from v1.16.1 until at least 2028-06-01; configs target Amazon Linux microvm kernels; optional PCI transport via `--enable-pci`; Firecracker does not support PCI devices: https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md
-- Snapshots map memory files `MAP_PRIVATE` with copy-on-write; vsock connections close on snapshot while listen sockets survive; network connections not guaranteed; diff snapshots in developer preview; resuming the same state more than once is insecure without de-duplication: https://github.com/firecracker-microvm/firecracker/blob/main/docs/snapshotting/snapshot-support.md
-- VMGenID reseed with a race window; `RNDADDENTROPY` + `RNDRESEEDCRNG`; `boot_id` bind-mount: https://github.com/firecracker-microvm/firecracker/blob/master/docs/snapshotting/random-for-clones.md
-- No GPU passthrough in Firecracker: https://www.pandastack.ai/blog/microvm-gpu-passthrough-explained/
+- QEMU monitor `savevm` / `loadvm` snapshot the full guest state, including listening sockets; QEMU is the Tier 2 driver and the facts below that cited Firecracker docs are replaced by QEMU's behaviour on the same points.
+- Resuming the same state more than once is insecure without de-duplication (guest VMGenID reseeds only the kernel CSPRNG, with a race window; `RNDADDENTROPY` + `RNDRESEEDCRNG` closes it).
+- No GPU passthrough in the current driver (QEMU can pass through a GPU device; the driver does not).
 - xfwl4 first preview 2026-06-21; xfwm4 continues on X11: https://wiki.xfce.org/xfwl4_faq
 - Reference desktop stack (Ubuntu, Xfce, Xvfb, xdotool, x11vnc): https://docs.e2b.dev/template/examples/desktop
 - CUA practicalities (coordinate scaling, clipboard typing, Xorg dummy over Xvfb, cold-desktop timings): https://useagent.org/blog/computer-use-agent-desktop-sandbox
