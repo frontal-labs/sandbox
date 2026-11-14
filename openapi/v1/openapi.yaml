@@ -76,6 +76,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: The key, tenant, or server is at its session limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '501':
           description: A requested setting is not enforced yet, so the request is refused
           content:
@@ -802,6 +808,12 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '404':
           description: No such snapshot for this key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: The key, tenant, or server is at its session limit
           content:
             application/json:
               schema:

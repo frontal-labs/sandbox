@@ -414,6 +414,35 @@ async fn session_limit_is_per_key() {
 }
 
 #[tokio::test]
+async fn session_limit_refusal_carries_retry_after() {
+    use sandbox_server::api::MAX_SESSIONS_PER_KEY;
+    let (app, owner, _other) = router();
+    for _ in 0..MAX_SESSIONS_PER_KEY {
+        create(&app, &owner).await;
+    }
+    // A refused admission answers 429 with a Retry-After header so a client can back off.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions")
+                .header(header::AUTHORIZATION, format!("Bearer {owner}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&config()).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        response.headers().get(header::RETRY_AFTER),
+        Some(&header::HeaderValue::from_static("30")),
+        "a 429 admission refusal must carry Retry-After"
+    );
+}
+
+#[tokio::test]
 async fn snapshot_limit_is_per_key() {
     use sandbox_server::api::MAX_SNAPSHOTS_PER_KEY;
     let (app, owner, other) = router();

@@ -307,6 +307,11 @@ async fn record_meter(
     .await
 }
 
+/// When a key or the server is at its session limit, how long a client should wait
+/// before retrying. A session is not destroyed on admission failure, so the time is
+/// a hint for backpressure, not a promise that a slot opens then.
+const RETRY_AFTER_SECS: &str = "30";
+
 async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<(), ApiError> {
     let id = entry.state.id;
     // The start is written first: if the stream cannot take it, the session is not admitted.
@@ -323,14 +328,15 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
     let mut table = state.sessions.0.write().await;
     let parked = parked_counts(state);
     if table.len() + parked.total() >= MAX_SESSIONS_TOTAL {
-        return Err(SandboxError::resource_exhausted("the server is at its session limit").into());
+        return Err(retryable(
+            SandboxError::resource_exhausted("the server is at its session limit"),
+        ));
     }
     let held = table.values().filter(|e| e.owner == *owner).count() + parked.sessions_of_key(owner);
     if held >= MAX_SESSIONS_PER_KEY {
-        return Err(SandboxError::resource_exhausted(format!(
+        return Err(retryable(SandboxError::resource_exhausted(format!(
             "this key already holds {MAX_SESSIONS_PER_KEY} sessions"
-        ))
-        .into());
+        ))));
     }
     let tenant = entry.state.tenant_id;
     let tenant_held = table
@@ -339,13 +345,18 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
         .count()
         + parked.sessions_of_tenant(tenant);
     if tenant_held >= MAX_SESSIONS_PER_TENANT {
-        return Err(SandboxError::resource_exhausted(format!(
+        return Err(retryable(SandboxError::resource_exhausted(format!(
             "this tenant already holds {MAX_SESSIONS_PER_TENANT} sessions"
-        ))
-        .into());
+        ))));
     }
     table.insert(id, entry);
     Ok(())
+}
+
+/// A refused admission, answered with 429 and a `Retry-After` header so a client can
+/// back off instead of retrying into the limit (PLAN §4.14).
+fn retryable(error: SandboxError) -> ApiError {
+    ApiError::with_retry_after(error, Some(RETRY_AFTER_SECS))
 }
 
 /// Live sessions, keyed by ID, each with the key that owns it.
@@ -659,18 +670,55 @@ pub struct ForkResponse {
 }
 
 /// An error that renders as an [`ErrorBody`] with the status its code implies.
+/// When `retry_after` is set, the response includes a `Retry-After` header.
 #[derive(Debug)]
-pub struct ApiError(SandboxError);
+pub struct ApiError {
+    inner: SandboxError,
+    retry_after: Option<String>,
+}
+
+impl ApiError {
+    /// Creates a new error with an optional `Retry-After` value (seconds).
+    pub fn with_retry_after(error: SandboxError, retry_after: Option<&str>) -> Self {
+        Self {
+            inner: error,
+            retry_after: retry_after.map(|s| s.to_string()),
+        }
+    }
+
+    /// The error code.
+    pub fn code(&self) -> ErrorCode {
+        self.inner.code
+    }
+
+    /// The error message.
+    pub fn message(&self) -> &str {
+        &self.inner.message
+    }
+
+    /// Consumes the error, returning the underlying `SandboxError`.
+    pub fn into_inner(self) -> SandboxError {
+        self.inner
+    }
+
+    /// A reference to the underlying `SandboxError`.
+    pub fn inner(&self) -> &SandboxError {
+        &self.inner
+    }
+}
 
 impl From<SandboxError> for ApiError {
     fn from(error: SandboxError) -> Self {
-        Self(error)
+        Self {
+            inner: error,
+            retry_after: None,
+        }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match self.0.code {
+        let status = match self.inner.code {
             ErrorCode::NotFound => StatusCode::NOT_FOUND,
             ErrorCode::InvalidArgument | ErrorCode::ShellError => StatusCode::BAD_REQUEST,
             ErrorCode::AlreadyExists | ErrorCode::InvalidState => StatusCode::CONFLICT,
@@ -682,10 +730,15 @@ impl IntoResponse for ApiError {
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let body = ErrorBody {
-            code: self.0.code,
-            message: self.0.message,
+            code: self.inner.code,
+            message: self.inner.message,
         };
-        (status, Json(body)).into_response()
+        let mut response = (status, Json(body)).into_response();
+        if let Some(retry_after) = self.retry_after {
+            let headers = response.headers_mut();
+            headers.insert(header::RETRY_AFTER, retry_after.parse().unwrap());
+        }
+        response
     }
 }
 
@@ -1220,7 +1273,7 @@ async fn attach_store(
         store: Some(Arc::new(store)),
     };
     restore(&state, saved).await?;
-    persist(&state).await.map_err(|e| e.0)?;
+    persist(&state).await.map_err(|e| e.into_inner())?;
     Ok((build_router(state.clone()), state, new_key))
 }
 
@@ -1654,6 +1707,7 @@ async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
         (status = 400, description = "Invalid session config", body = ErrorBody),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 404, description = "initial_snapshot is not one of this key's snapshots", body = ErrorBody),
+        (status = 429, description = "The key, tenant, or server is at its session limit", body = ErrorBody),
         (status = 501, description = "A requested setting is not enforced yet, so the request is refused", body = ErrorBody),
     ),
     security(("bearer" = []))
@@ -2000,8 +2054,8 @@ async fn run_with_promotion(
     observer: Option<OutputObserver>,
 ) -> Result<(ExecResult, Option<u64>), ApiError> {
     match run_exec(state, owner, own, request.clone(), observer.clone()).await {
-        Err(ApiError(error))
-            if error.code == ErrorCode::NeedsVm && promotable(state, &own.state) =>
+        Err(error)
+            if error.code() == ErrorCode::NeedsVm && promotable(state, &own.state) =>
         {
             let promoted = promote_session(state, owner, own).await?;
             run_exec(state, owner, &promoted, request, observer).await
@@ -2160,9 +2214,9 @@ fn start_exec(
                     cpu_ms: result.cpu_ms,
                     wall_ms: result.wall_ms,
                 },
-                Err(ApiError(error)) => ExecEvent::Error {
-                    code: error.code,
-                    message: error.message,
+                Err(error) => ExecEvent::Error {
+                    code: error.code(),
+                    message: error.message().to_string(),
                 },
             },
             () = cancel.cancelled() => ExecEvent::Error {
@@ -2237,16 +2291,16 @@ impl crate::pty::Runner for PtyRunner {
                     result,
                 )
                 .await
-                .map_err(|e| e.0)?;
+                .map_err(|e| e.into_inner())?;
                 let files = files_since(self.session.as_ref(), before).await;
                 record_exec(&self.state, self.id, &request, result, files, random_state).await;
             }
             checkpoint_after_exec(&self.state, &self.owner, self.id, &self.session)
                 .await
-                .map_err(|e| e.0)?;
+                .map_err(|e| e.into_inner())?;
             save_session(&self.state, self.id, &self.session)
                 .await
-                .map_err(|e| e.0)
+                .map_err(|e| e.into_inner())
         })
     }
 
@@ -3372,6 +3426,7 @@ async fn wake_parked(
         (status = 400, description = "Count must be between 1 and 64", body = ErrorBody),
         (status = 401, description = "Missing or invalid API key", body = ErrorBody),
         (status = 404, description = "No such snapshot for this key", body = ErrorBody),
+        (status = 429, description = "The key, tenant, or server is at its session limit", body = ErrorBody),
     ),
     security(("bearer" = []))
 )]
@@ -3549,7 +3604,7 @@ async fn checkpoint_after_exec(
         return Ok(());
     }
     match checkpoint_now(state, owner, id, session).await {
-        Err(ApiError(error)) if error.code == ErrorCode::ResourceExhausted => Ok(()),
+        Err(error) if error.code() == ErrorCode::ResourceExhausted => Ok(()),
         other => other.map(drop),
     }
 }
@@ -3894,11 +3949,11 @@ async fn host_sandbox_command(
         ["sandbox", "checkpoint"] => checkpoint_locked(state, own)
             .await
             .map(|r| r.root.to_string())
-            .map_err(|ApiError(e)| e),
+            .map_err(|e| e),
         ["sandbox", "undo"] => undo_locked(state, own, 1)
             .await
             .map(|r| r.root.to_string())
-            .map_err(|ApiError(e)| e),
+            .map_err(|e| e),
         ["sandbox", "undo", steps] => {
             let Ok(steps) = steps.parse::<u32>() else {
                 return Some(usage_error("sandbox undo: steps must be a number"));
@@ -3906,7 +3961,7 @@ async fn host_sandbox_command(
             undo_locked(state, own, steps)
                 .await
                 .map(|r| r.root.to_string())
-                .map_err(|ApiError(e)| e)
+                .map_err(|e| e)
         }
         ["sandbox", "fork", count, "--", command @ ..] if !command.is_empty() => {
             let Ok(count) = count.parse::<u32>() else {
@@ -3941,7 +3996,7 @@ async fn host_sandbox_command(
                         wall_ms: 0,
                     }
                 }
-                Err(ApiError(error)) => failed_command(error),
+                Err(error) => failed_command(error),
             });
         }
         ["sandbox", "checkpoint" | "undo" | "fork", ..] => {
@@ -3964,11 +4019,11 @@ async fn host_sandbox_command(
 }
 
 /// A command that failed as a host operation: exit 1, with the reason on stderr.
-fn failed_command(error: SandboxError) -> ExecResult {
+fn failed_command(error: ApiError) -> ExecResult {
     ExecResult {
         exit_code: 1,
         stdout: Vec::new(),
-        stderr: format!("{}\n", error.message).into_bytes(),
+        stderr: format!("{}\n", error.message()).into_bytes(),
         cpu_ms: 0,
         wall_ms: 0,
     }
