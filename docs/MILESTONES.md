@@ -6,7 +6,7 @@ but not working, or implemented without tests, stay unticked and are marked
 **Partial**. Acceptance criteria are not ticked unless they were demonstrated,
 and none has been demonstrated yet.
 
-Last reviewed against the source tree on 2026-10-19.
+Last reviewed against the source tree on 2026-11-14.
 
 ## M0: Foundations (Week 1)
 
@@ -14,10 +14,12 @@ Last reviewed against the source tree on 2026-10-19.
 
 ### Deliverables
 - [x] Cargo workspace with all 18 crate members present (`Cargo.toml`)
-- [ ] **Partial.** CI pipeline: fmt, clippy `-D warnings`, test, and a
-      `supply-chain` job (cargo-deny, cargo-audit) are in `ci.yml`. Every
-      command passes locally on 2026-10-19. The GitHub run has not been seen
-      yet.
+- [x] CI pipeline: fmt, clippy `-D warnings`, test, and a
+      `supply-chain` job (cargo-deny, cargo-audit) are in `ci.yml`. The
+      GitHub run is green on every pull request and main push
+      (confirmed 2026-11-14). The KVM VM workflow
+      (`.github/workflows/vm-kvm.yml`) runs the `--ignored` VM suites on
+      main pushes and pull requests.
 - [x] `sandbox-types`: IDs, errors, events, config, and `serde` are present.
       The OpenAPI spec comes from `utoipa` behind the `openapi` feature (ADR 0001).
       `schemars` was removed as unused (PLAN §4.1)
@@ -27,13 +29,13 @@ Last reviewed against the source tree on 2026-10-19.
       a sweep keeps what live blobs name
 
 ### Acceptance Criteria
-- [ ] CI green on all platforms. The same commands pass locally on macOS
-      (2026-10-19). The Linux and GitHub run is not observed
+- [x] CI green on all platforms. The GitHub run is green on every pull
+      request and main push (confirmed 2026-11-14)
 - [x] CAS property tests pass (`cargo test -p sandbox-cas`, 2026-10-19)
 - [x] `cargo deny check` passes (`deny.toml`, 2026-10-19)
 - [x] `cargo audit --deny warnings` passes (`.cargo/audit.toml`, 2026-10-19)
 
-### Status: **In progress**
+### Status: **Done**
 
 ---
 
@@ -43,10 +45,13 @@ Last reviewed against the source tree on 2026-10-19.
 
 ### Deliverables
 - [x] `sandbox-vfs`: copy-on-write overlay, Merkle commit, symlinks, quotas,
-      proptest model checks. ext4 export is not implemented.
+      proptest model checks.
 - [x] `sandbox-runtime`: `execute_script` runs JavaScript in a fresh V8 isolate with
-      `console.log` captured, a wall-clock timeout, an output cap, and a heap cap.
-      Module loading is not implemented.
+      `console.log` captured, a wall-clock timeout, an output cap, a heap cap,
+      and a `node:` module shim (fs, env, process, buffer, path, url, crypto,
+      os, events, stream, util, assert, string_decoder, querystring). Network,
+      ESM, child_process, and zlib are intentionally unimplemented (see
+      `sandbox-runtime` crate doc).
 - [x] `sandbox-shell`: parser (quotes, `|`, `&&`, `||`, `;`, `<`, `>`, `>>`),
       interpreter, VFS-backed builtins, variables, globs, and `/bin` WASI tools.
       `case`, `$((...))`, parameter operators, and fd redirection are implemented.
@@ -54,7 +59,8 @@ Last reviewed against the source tree on 2026-10-19.
       the run (ADR 0018). Fuzz targets exist for the parser, the interpreter, VFS
       paths, and the WASI fs shim (`fuzz/`).
 - [x] `sandbox-session`: `IsolateBackend` owns a VFS and runs commands through
-      the shell. Snapshot and sleep are not implemented.
+      the shell. Snapshot, restore, and sleep (checkpoint) work; the server
+      releases a sleeping session's VFS (ADR 0006).
 - [ ] **Partial.** `sandbox-sdk` (Rust): embedded `exec` and `create_session`
       return `Unsupported`; the in-process path is `sandbox-session` directly
 - [x] `cli` (`sandbox run`, `sandbox shell`): execute in an isolate session
@@ -78,7 +84,7 @@ Last reviewed against the source tree on 2026-10-19.
       fuel, a memory cap, a VFS-backed preopen, and a tool registry.
 - [ ] Tools: `jq`, `ripgrep`, `sqlite3`, `git`, `python`
 - [ ] Coreutils to 40 commands
-- [ ] `node:` shim (`fs`, `path`, `os`, `child_process`, `events`, `stream`, `util`, `buffer`, `url`, `crypto`)
+- [x] `node:` shim (`fs`, `path`, `os`, `events`, `stream`, `util`, `buffer`, `url`, `crypto`, `env`, `process`, `assert`, `string_decoder`, `querystring`). `child_process` and `zlib` are stubs that throw; network and ESM are intentionally unimplemented
 - [x] `sandbox-trace`: trace format, recording from `run` and `shell`, and replay (ADR 0007). The event log in `log.rs` is still unused. Early
 
 ### Acceptance Criteria
@@ -98,11 +104,11 @@ Last reviewed against the source tree on 2026-10-19.
 ### Deliverables
 - [ ] **Partial.** `sandbox-policy`: capability, limits, and network modules
       exist; no tests
-- [ ] **Partial.** `sandbox-snapshot`: early (single module)
+- [ ] **Partial.** `sandbox-snapshot`: `SnapshotManager` (in-memory, 87 lines);
+      not wired into the server (the server uses its own snapshot table)
 - [x] `sandbox-worker`: one child process per session, gRPC over a private Unix socket, with
       crash isolation. Seccomp, cgroups, namespaces, and gRPC are not implemented.
-- [ ] **Partial.** `sandbox-server`: session, exec, filesystem, snapshot, and fork routes at `/v1` run on in-memory sessions
-      handlers; API keys not implemented (`auth.rs` TODO); no OpenAPI
+- [ ] **Partial.** `sandbox-server`: session, exec, filesystem, snapshot, and fork routes at `/v1` run on in-memory sessions behind API-key auth, with OpenAPI (utoipa), 429 + Retry-After on session admission refusals (T-08), and file-backed billing (T-03)
 - [ ] **Partial.** `sandbox-scheduler`: placement, pools, and scheduler modules
       exist; no tests; sleep/wake and metering not verified
 
@@ -113,7 +119,7 @@ Last reviewed against the source tree on 2026-10-19.
 - [ ] Escape test suite passes
 - [ ] TS SDK generated from OpenAPI (current TS SDK is hand-written)
 
-### Status: **Not started (server scaffold only)**
+### Status: **Partial**
 
 ---
 
@@ -135,7 +141,7 @@ Last reviewed against the source tree on 2026-10-19.
 - [ ] VM resume < 150 ms
 - [ ] Guest protocol fuzzed for 24h clean
 
-### Status: **Not started**
+### Status: **Partial**
 
 ---
 
@@ -149,7 +155,8 @@ Last reviewed against the source tree on 2026-10-19.
 - [ ] CAS GC from live roots
 - [ ] Multi-tenant quotas, billing export
 - [ ] Dashboards, runbooks
-- [ ] External security review
+- [ ] External security review (not yet performed; status recorded in
+      [SECURITY_REVIEW.md](SECURITY_REVIEW.md))
 
 ### Acceptance Criteria
 - [ ] Chaos suite passes
@@ -192,11 +199,11 @@ Last reviewed against the source tree on 2026-10-19.
 
 | Milestone | Target Week | Status | Blockers |
 |-----------|-------------|--------|----------|
-| M0 | 1 | In progress | GitHub CI run not yet observed; `supply-chain` job added 2026-10-19 |
+| M0 | 1 | Done | CI green on all PRs and main pushes (confirmed 2026-11-14); KVM VM workflow runs `--ignored` suites |
 | M1 | 2-5 | Partial | Shell and isolate `exec` work over the VFS; 219 conformance cases pass against GNU bash (acceptance: 200+ cases). `node -e`, `.ts` against VFS, and the cold-start benchmark are still open |
 | M2 | 6-9 | Partial | WASI command modules run over a VFS preopen, with a tool registry; no persistent AOT cache, no preview2 |
-| M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory; API-key auth exists; worker runs one child process per session |
-| M4 | 14-19 | Not started | Promotion stub; VMM and guest scaffolding only |
+| M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory behind API-key auth with OpenAPI and 429 + Retry-After; worker runs one child process per session |
+| M4 | 14-19 | Partial | QEMU VMM with warm pool, guest agent, promote_to_vm, import_from_dir/export_ext4 all working; auto-promotion, performance targets, and rootfs images not done |
 | M5 | 20-24 | Partial | Postgres state store (one node at a time, conditional writes, tested on Postgres 18). Clustered scheduler, placement, and object-store blobs are not built |
 | M6 | Ongoing | Not started | - |
 
