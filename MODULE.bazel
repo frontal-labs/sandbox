@@ -65,9 +65,8 @@ crate.from_cargo(
     ],
 )
 
-# Optional features are left out of the universe unless a spec asks for them. These
-# two back the `clustered` feature of sandbox-scheduler and the `vsock` feature of
-# sandbox-guest. Their Bazel targets depend on them.
+# Optional features are left out of the universe unless a spec asks for them. This
+# backs the `clustered` feature of sandbox-scheduler.
 crate.spec(
     package = "sqlx",
     version = "0.9.0",
@@ -83,11 +82,6 @@ crate.annotation(
     crate = "sqlx-postgres",
     version = "0.9.0",
     crate_features = ["offline"],
-)
-
-crate.spec(
-    package = "vsock",
-    version = "0.4.0",
 )
 
 # The prebuilt static V8 library is the release asset that matches the `v8` crate

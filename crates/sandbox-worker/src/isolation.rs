@@ -267,7 +267,7 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_sigaltstack,
         // Futex (for threading)
         libc::SYS_futex,
-        // Socket (for vsock)
+        // Socket (for the guest agent's forwarded port)
         libc::SYS_socket,
         libc::SYS_connect,
         libc::SYS_bind,

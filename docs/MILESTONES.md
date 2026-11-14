@@ -119,15 +119,15 @@ Last reviewed against the source tree on 2026-10-19.
 
 ## M4: Tier 2 (Weeks 14-19)
 
-**Goal**: Firecracker microVMs, promotion, guest agent
+**Goal**: QEMU microVMs, promotion, guest agent
 
 ### Deliverables
-- [ ] **Partial.** `sandbox-vmm`: driver, jailer, and pool scaffolding
-- [ ] **Partial.** `sandbox-guest`: agent and protocol scaffolding
+- [x] **Working.** `sandbox-vmm`: QEMU driver (`QemuVm`), warm pool (`VmPool`), snapshot/restore via QEMU monitor. The Firecracker driver and jailer were scaffolding and were removed (T-05).
+- [x] **Working.** `sandbox-guest`: agent implementing `GuestService` over gRPC, booted as init in the emulated test guest
 - [ ] Base + browser rootfs images
-- [ ] `export_ext4` for promotion
-- [ ] `sandbox-promote`: stub. Needs a Linux host with KVM (see M4).
-- [ ] VM warm pool, Firecracker snapshots
+- [x] `import_from_dir` for promotion (recovers an ext4 image into the host VFS); `export_ext4` (host VFS to image) is the round-trip counterpart
+- [x] `sandbox-promote`: `promote_to_vm` implemented, wired into the server for `vm`-tier sessions. The automatic `NeedsVm` re-promotion of an existing isolate session is not built.
+- [x] VM warm pool, QEMU snapshots (`savevm`/`loadvm`)
 
 ### Acceptance Criteria
 - [ ] `ffmpeg` and headless Chromium run via auto-promotion

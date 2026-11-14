@@ -15,7 +15,7 @@ These assumptions are explicit so they can be checked as the code changes.
 1. **Single-tenant development only today.** No tenant isolation is enforced. The `TenantId` field exists in `SessionConfig`, but nothing uses it for isolation.
 2. **Isolates are not a security boundary on their own.** The project specification invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, and on Linux that process has namespaces, a seccomp denylist, `NO_NEW_PRIVS`, and cgroup v2 limits (ADR 0022). The denylist allows any syscall it does not name. The layers are not tested against a hostile workload, and the Linux-only layers do not exist on macOS.
 3. **Untrusted code is assumed to attempt host access, network exfiltration, resource exhaustion, and sandbox escape.** Each layer below is designed against those attempts.
-4. **The host operating system and Firecracker/KVM are trusted** in the design. Tier 2 would rely on them; Tier 2 is not implemented.
+4. **The host operating system and QEMU/KVM are trusted** in the design. Tier 2 relies on them when enabled; QEMU with KVM is the hardware boundary, and `Accel::Tcg` is not.
 5. **Dependencies (V8 via `deno_core`, `wasmtime`) are trusted only after review and version pinning.** The workspace pins versions in `Cargo.toml`, but no CVE tracking or automated audit runs in CI.
 
 ## Defense in depth
@@ -24,16 +24,16 @@ Layers, outermost first (project specification section 5):
 
 | # | Layer | Status | Where |
 |---|-------|--------|-------|
-| 1 | Hardware boundary: Firecracker + jailer | Planned | `crates/sandbox-vmm/src/jailer.rs` returns `unsupported` from `Jailer::setup` |
+| 1 | Hardware boundary: QEMU microVM (KVM or TCG) | Partial | `crates/sandbox-vmm/src/qemu.rs` boots a real guest; `sandbox-promote::promote_to_vm` is used for `vm`-tier sessions; not the default tier, and TCG is not a boundary |
 | 2 | Per-tenant OS process: seccomp, cgroups, namespaces, `NO_NEW_PRIVS` | Partial (Linux) | `crates/sandbox-worker/src/isolation.rs` applies namespaces and a seccomp denylist in the child, and sets cgroup v2 limits from the host. Each layer fails closed. Tests run on Linux (`cli/tests/worker_isolation.rs`). Off Linux, only the unisolated worker starts. |
 | 3 | V8 isolate / wasmtime store: memory and CPU caps | Partial | V8: wall-clock watchdog, heap cap, fresh isolate per run. WASM: fuel and a linear-memory cap per run. |
 | 4 | Capability operations: each host access checks policy | Partial | Policy helpers in `crates/sandbox-policy`; not called from runtime, shell, or server |
 
-## Layer 1: Hardware boundary (Tier 2, planned)
+## Layer 1: Hardware boundary (Tier 2)
 
-Planned: Firecracker microVM per session, launched by a jailer (chroot, cgroups v2, network namespace, seccomp, dropped capabilities). Requires `/dev/kvm`.
+Planned: a microVM per session, launched by the VMM. KVM acceleration requires `/dev/kvm`; software emulation (`tcg`) works without it.
 
-Current state: `crates/sandbox-vmm` has driver, jailer, and pool scaffolding. `Jailer::setup` returns an unsupported error. `crates/sandbox-promote` returns an unsupported error. No VM is started anywhere.
+Current state: `crates/sandbox-vmm` runs QEMU as the Tier 2 driver (`QemuVm`, with `Accel::Tcg` or `Accel::Kvm`), waits for the guest agent before handing the guest out, and holds a warm pool (`VmPool`). `crates/sandbox-promote` implements `promote_to_vm`, and the server uses it for sessions created with the `vm` tier preference. The earlier Firecracker driver and jailer were scaffolding and were removed (T-05).
 
 ## Layer 2: Per-tenant process (planned)
 
@@ -132,7 +132,7 @@ The project specification section 5 lists these. Some are done, and the rest are
 - [x] Fuzz targets: shell parser, VFS path handling, WASI fs shim, guest protocol decoder (`cargo-fuzz`). All four are in `fuzz/` (see DEVELOPMENT.md). The guest protocol target covers the wire frames and the generated messages; the guest agent itself does not exist yet, and the 24 h run that PLAN §9 M4 asks for has not been done
 - [ ] Escape tests: host file reads, metadata IP reachability, memory/CPU/inode/PID exhaustion, fork-bomb equivalents, symlink races, zip bombs
 - [ ] Never share a V8 heap or wasmtime store across tenants
-- [ ] Pin and track V8, wasmtime, and Firecracker CVEs; automate dependency updates
+- [ ] Pin and track V8, wasmtime, and QEMU CVEs; automate dependency updates
 - [x] `cargo-deny` and `cargo-audit` in CI (the `supply-chain` job; see above)
 
 ## Reporting

@@ -64,8 +64,8 @@ install -d -o sandbox -g sandbox -m 0755 /var/run/sandbox
 # KVM access for Tier 2.
 if [[ "$NO_KVM" -eq 0 ]] && [[ -c /dev/kvm ]]; then
   usermod -aG kvm sandbox || true
-  install -d -m 0755 /var/run/sandbox/firecracker
-  chown sandbox:sandbox /var/run/sandbox/firecracker
+  install -d -m 0755 /var/run/sandbox/vmm
+  chown sandbox:sandbox /var/run/sandbox/vmm
 fi
 
 # Firewall: SSH, API, metrics (VPC-only where possible).

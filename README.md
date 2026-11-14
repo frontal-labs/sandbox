@@ -11,7 +11,7 @@ command requires them.
 ## Product direction
 
 - Tier 1 isolate sessions with warm-pool startup under 5 ms.
-- Tier 2 Firecracker microVM promotion for commands that need a real binary.
+- Tier 2 QEMU microVM promotion for commands that need a real binary.
 - A copy-on-write, content-addressed virtual filesystem shared by every backend.
 - Snapshot, fork, restore, and replayable traces for every command and file change.
 - A small API: `create`, `exec`, `fs`, `snapshot`, `fork`, and `destroy`.
@@ -23,7 +23,7 @@ command requires them.
 Client (Rust SDK / TypeScript SDK / CLI)
   -> server -> scheduler -> worker
                          -> isolate backend (shell, V8, WASM, VFS)
-                         -> VM backend (Firecracker + guest agent)
+                         -> VM backend (QEMU + guest agent)
   snapshot store + trace sink
 ```
 
@@ -42,7 +42,7 @@ crates/                     Rust workspace members (crate names are sandbox-*)
 ├── sandbox-wasm            Wasmtime and WASI tool host
 ├── sandbox-session         Session trait and backends
 ├── sandbox-snapshot        Snapshot, fork, and restore
-├── sandbox-vmm             Firecracker driver
+├── sandbox-vmm             QEMU driver
 ├── sandbox-guest           In-VM guest agent
 ├── sandbox-promote         Isolate-to-VM handoff
 ├── sandbox-policy          Capabilities, network policy, and limits

@@ -59,7 +59,7 @@ cargo run -p cli -- run "echo hi"   # prints "hi"
 These are the targets from the project specification. Versions are not pinned in the repository.
 
 - **Tier 1 (isolate)**: no host requirements are defined yet. The isolate backend runs builtin commands over the VFS (`sandbox-session`, `sandbox-shell`). The V8 runtime and WASM tools are not wired in, and there is no snapshot or sleep.
-- **Tier 2 (Firecracker)**: x86_64 or aarch64 Linux with `/dev/kvm`, cgroups v2, and user namespaces. Firecracker version is to be chosen in milestone M4. The previous "Firecracker 1.8+" note is not verified by this repository.
+- **Tier 2 (QEMU)**: x86_64 or aarch64 Linux. QEMU is required on the host; `/dev/kvm` is needed for hardware acceleration (`Accel::Kvm`), and software emulation (`Accel::Tcg`) works without it, at software speed.
 - **Capacity**: the project specification section 6 targets 10,000+ idle sessions per 64 GB host. This is a target, not a measured result.
 
 ## Planned: single node
@@ -74,14 +74,19 @@ The project specification section 4.14 and milestone M5 call for:
 - CAS on an S3-compatible object store via `object_store`, with a local cache in front (`TieredStore`). The `ObjectStore` implementation is not present. `TieredStore` exists in `crates/sandbox-cas/src/tiered_store.rs`; check its backend before relying on it.
 - Trace sink: JSONL locally, with an optional Parquet or ClickHouse sink. Not implemented.
 
-## Planned: Tier 2 (Firecracker)
+## Tier 2 (QEMU)
 
-Planned pieces, none implemented:
+Implemented:
 
-- Firecracker driven over its Unix-socket REST API, with a jailer per VM (`crates/sandbox-vmm/src/jailer.rs` returns an unsupported error).
-- Base and browser rootfs images built by scripts in `tools/` and `images/` (not present).
-- Warm VM pool per image (`crates/sandbox-vmm/src/pool.rs`, scaffold only).
-- Promotion from Tier 1 (`crates/sandbox-promote` returns an unsupported error).
+- QEMU driven directly (`crates/sandbox-vmm/src/qemu.rs`): a spawned process with a kernel and initrd, the guest agent as init, the agent reachable on a forwarded loopback port.
+- Warm pool of pre-booted guests (`crates/sandbox-vmm/src/pool.rs`).
+- Promotion from Tier 1 (`crates/sandbox-promote/src/promote.rs`), wired into the server for sessions created with the `vm` tier preference.
+- Snapshot/restore through the QEMU monitor (`savevm` / `loadvm`).
+
+Not present yet:
+
+- Base and browser rootfs images built by scripts in `tools/` and `images/` (the emulated test image in `docker/emulated-vm/` exists).
+- Automatic re-promotion of an existing isolate session when a command fails with `NeedsVm`.
 
 ## Planned: operations
 

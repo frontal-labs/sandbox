@@ -38,4 +38,4 @@ tenant_id = "<TENANT_ID>"
 scheduler_addr = "127.0.0.1:50051"
 isolation = { seccomp = true, cgroups_v2 = true, namespaces = true }
 resources = { memory_limit_bytes = 17179869184, cpu_limit_ms = 20000, pids_limit = 512 }
-tier2 = { enabled = false, kvm_device = "/dev/kvm", firecracker_binary = "/usr/local/bin/firecracker", socket_dir = "/var/run/sandbox/firecracker" }
+tier2 = { enabled = false, kvm_device = "/dev/kvm", firecracker_binary = "/usr/local/bin/qemu-system-x86_64", socket_dir = "/var/run/sandbox/vmm" }

@@ -24,33 +24,6 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# Optional vsock feature
-rust_library(
-    name = "sandbox_guest_vsock",
-    edition = "2021",
-    srcs = glob(["src/**/*.rs"]),
-    deps = [
-        "//crates/sandbox-types:sandbox_types",
-        "@crates//:tokio",
-        "@crates//:bytes",
-        "@crates//:tracing",
-        "@crates//:thiserror",
-        "@crates//:serde",
-        "@crates//:prost",
-        "@crates//:prost-types",
-        "@crates//:vsock",
-        "//crates/sandbox-proto:sandbox_proto",
-        "//crates/sandbox-vfs:sandbox_vfs",
-        "//crates/sandbox-shell:sandbox_shell",
-        "@crates//:tokio-stream",
-        "@crates//:tonic",
-    ],
-    proc_macro_deps = [
-    ],
-    visibility = ["//visibility:public"],
-    target_compatible_with = ["@platforms//os:linux"],
-)
-
 # The agent as a process, booted as the emulated test guest's init (docker/emulated-vm).
 rust_binary(
     name = "sandbox_guest_agent",

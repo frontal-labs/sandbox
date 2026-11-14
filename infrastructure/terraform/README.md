@@ -33,7 +33,7 @@ security-group / bucket resources map 1:1.
 
 ## Notes
 
-- Tier 2 (Firecracker) requires `/dev/kvm`; choose KVM-capable instances
+- Tier 2 (QEMU) requires `/dev/kvm` for hardware acceleration; choose KVM-capable instances
   (x86_64 Nitro or aarch64 metal). cgroups v2 is default on Ubuntu 22.04+.
 - The bucket name must be globally unique (S3 namespace).
 - Secrets (API key digest, TLS certs, Postgres DSN) are NOT provisioned here;

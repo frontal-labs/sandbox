@@ -65,7 +65,7 @@
           "type": "integer",
           "default": 4,
           "minimum": 0,
-          "description": "Pre-booted Firecracker VMs kept ready (Tier 2)"
+          "description": "Pre-booted QEMU VMs kept ready (Tier 2)"
         }
       },
       "additionalProperties": false

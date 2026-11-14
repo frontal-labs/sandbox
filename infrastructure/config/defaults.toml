@@ -65,5 +65,6 @@ pids_limit = 512
 [worker.tier2]
 enabled = false
 kvm_device = "/dev/kvm"
-firecracker_binary = "/usr/local/bin/firecracker"
-socket_dir = "/var/run/sandbox/firecracker"
+# VMM binary and socket dir (kept for config compatibility; the current driver is QEMU)
+firecracker_binary = "/usr/local/bin/qemu-system-x86_64"
+socket_dir = "/var/run/sandbox/vmm"

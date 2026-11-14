@@ -89,7 +89,7 @@ That mode keeps everything in memory, and a new key is printed on each start.
 ## Security model
 
 - **Isolation boundary.** Session code runs inside the server process. The
-  container is the outer boundary. Tier 2 (Firecracker microVMs) is not
+  container is the outer boundary. Tier 2 (QEMU microVMs) is not
   implemented, and no `/dev/kvm` device is passed through.
 - **Non-root.** The process runs as uid/gid `10001`, with no login shell.
 - **Read-only root filesystem.** Writes go to the state volume and to a 256 MB

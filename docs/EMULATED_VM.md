@@ -2,7 +2,7 @@
 
 `docker/run-emulated-vm.sh` boots the guest agent under a real Linux kernel and runs the
 guest-protocol test against it. It needs no KVM. Docker Desktop on hosts without hardware
-virtualisation exposes no `/dev/kvm`, and Firecracker cannot run without one. So this
+virtualisation exposes no `/dev/kvm`, and QEMU with KVM cannot run without one. So this
 harness uses QEMU's software emulator (`-accel tcg`) instead.
 
 ## What runs
@@ -25,8 +25,8 @@ harness uses QEMU's software emulator (`-accel tcg`) instead.
   answers the guest protocol over TCP.
 - Does not prove: that commands run in the guest kernel. `Exec` runs the in-process shell,
   as it does on every tier.
-- Does not prove: Firecracker, the jailer, or promotion. Those need KVM, and the promotion
-  path is not built (PLAN.md section 4.10).
+- Does not prove: KVM acceleration or promotion. KVM needs `/dev/kvm`; promotion
+  (`sandbox-promote`) is built and runs against this kind of guest (PLAN.md section 4.10).
 - Sync is a placeholder that returns the nil root. The test checks that it responds, not that
   its answer is correct.
 
