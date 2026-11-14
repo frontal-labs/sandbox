@@ -27,7 +27,7 @@ rust_library(
         "@crates//:thiserror",
         "@crates//:serde",
         "@crates//:serde_json",
-        "@crates//:toml-0.8.23",
+        "@crates//:toml-1.2.1+spec-1.1.0",
         "@crates//:axum",
         "@crates//:tower",
         "@crates//:hyper",
