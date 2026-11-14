@@ -3946,12 +3946,8 @@ async fn host_sandbox_command(
     let outcome = match args.as_slice() {
         ["sandbox", "checkpoint"] => checkpoint_locked(state, own)
             .await
-            .map(|r| r.root.to_string())
-            .map_err(|e| e),
-        ["sandbox", "undo"] => undo_locked(state, own, 1)
-            .await
-            .map(|r| r.root.to_string())
-            .map_err(|e| e),
+            .map(|r| r.root.to_string()),
+        ["sandbox", "undo"] => undo_locked(state, own, 1).await.map(|r| r.root.to_string()),
         ["sandbox", "undo", steps] => {
             let Ok(steps) = steps.parse::<u32>() else {
                 return Some(usage_error("sandbox undo: steps must be a number"));
@@ -3959,7 +3955,6 @@ async fn host_sandbox_command(
             undo_locked(state, own, steps)
                 .await
                 .map(|r| r.root.to_string())
-                .map_err(|e| e)
         }
         ["sandbox", "fork", count, "--", command @ ..] if !command.is_empty() => {
             let Ok(count) = count.parse::<u32>() else {
