@@ -9,7 +9,7 @@ use sandbox_vfs::SessionFs;
 use std::path::Path;
 
 /// Matches a shell glob (`*`, `?`, and literal bytes) against a whole name.
-pub(crate) fn glob_match(pattern: &[u8], name: &[u8]) -> bool {
+pub fn glob_match(pattern: &[u8], name: &[u8]) -> bool {
     match pattern.split_first() {
         None => name.is_empty(),
         Some((b'*', rest)) => (0..=name.len()).any(|i| glob_match(rest, &name[i..])),
@@ -37,7 +37,7 @@ fn join_display(parent: &str, name: &str) -> String {
 
 /// Splits `xargs` input into arguments on blanks and newlines, honouring single and
 /// double quotes. An unmatched quote is an error, as in GNU.
-fn xargs_words(input: &[u8]) -> Result<Vec<String>, String> {
+pub fn xargs_words(input: &[u8]) -> Result<Vec<String>, String> {
     let text = String::from_utf8_lossy(input);
     let mut words = Vec::new();
     let mut current = String::new();
@@ -367,7 +367,7 @@ impl Shell {
 }
 
 /// The path from `base` to `target`, both absolute and normalised.
-fn relative_path(base: &str, target: &str) -> String {
+pub fn relative_path(base: &str, target: &str) -> String {
     let base_parts: Vec<&str> = base.split('/').filter(|p| !p.is_empty()).collect();
     let target_parts: Vec<&str> = target.split('/').filter(|p| !p.is_empty()).collect();
     let common = base_parts
@@ -381,31 +381,5 @@ fn relative_path(base: &str, target: &str) -> String {
         ".".to_string()
     } else {
         parts.join("/")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn glob_matches_stars_and_question_marks() {
-        assert!(glob_match(b"*.txt", b"notes.txt"));
-        assert!(glob_match(b"a?c", b"abc"));
-        assert!(!glob_match(b"*.txt", b"notes.md"));
-        assert!(glob_match(b"*", b""));
-    }
-
-    #[test]
-    fn xargs_splits_on_blanks_and_honours_quotes() {
-        assert_eq!(xargs_words(b"a  b\nc").unwrap(), vec!["a", "b", "c"]);
-        assert_eq!(xargs_words(b"'x y' z").unwrap(), vec!["x y", "z"]);
-        assert!(xargs_words(b"'open").is_err());
-    }
-
-    #[test]
-    fn relative_path_climbs_to_the_common_ancestor() {
-        assert_eq!(relative_path("/a/b", "/a/c/d"), "../c/d");
-        assert_eq!(relative_path("/a", "/a"), ".");
     }
 }

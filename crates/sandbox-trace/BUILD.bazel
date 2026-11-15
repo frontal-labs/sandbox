@@ -21,10 +21,28 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# Unit tests in src/ (the lib compiled with cfg(test)).
+# Integration tests in tests/ (the lib used as a dependency).
 rust_test(
-    name = "sandbox_trace_unit_test",
-    crate = ":sandbox_trace",
+    name = "sandbox_trace_format_test",
+    crate_root = "tests/format.rs",
     edition = "2021",
+    srcs = ["tests/format.rs"],
+    deps = [
+        ":sandbox_trace",
+        "//crates/sandbox-types:sandbox_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_trace_replay_test",
+    crate_root = "tests/replay.rs",
+    edition = "2021",
+    srcs = ["tests/replay.rs"],
+    deps = [
+        ":sandbox_trace",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:tokio",
+    ],
     visibility = ["//visibility:public"],
 )

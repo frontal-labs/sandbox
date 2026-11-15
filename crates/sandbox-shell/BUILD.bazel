@@ -255,16 +255,79 @@ rust_test(
     visibility = ["//visibility:public"],
 )
 
-# Unit tests in src/. tests.rs embeds the wasm tool from sandbox-wasm with
-# include_bytes!, so that fixture must be a compile input.
+# Per-file unit tests moved out of src/.
 rust_test(
-    name = "sandbox_shell_unit_test",
-    crate = ":sandbox_shell",
+    name = "sandbox_shell_arith_test",
+    srcs = ["tests/arith.rs"],
+    crate_root = "tests/arith.rs",
+    edition = "2021",
+    deps = [":sandbox_shell"],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_coreutils_fs_test",
+    srcs = ["tests/coreutils_fs.rs"],
+    crate_root = "tests/coreutils_fs.rs",
+    edition = "2021",
+    deps = [":sandbox_shell"],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_expand_test",
+    srcs = ["tests/expand.rs"],
+    crate_root = "tests/expand.rs",
+    edition = "2021",
+    deps = [":sandbox_shell"],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_live_test",
+    srcs = ["tests/live.rs"],
+    crate_root = "tests/live.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:tokio",
+        ":sandbox_shell",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_printf_test",
+    srcs = ["tests/printf.rs"],
+    crate_root = "tests/printf.rs",
+    edition = "2021",
+    deps = [":sandbox_shell"],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_shell_stream_test",
+    srcs = ["tests/stream.rs"],
+    crate_root = "tests/stream.rs",
+    edition = "2021",
+    deps = [":sandbox_shell"],
+    visibility = ["//visibility:public"],
+)
+
+# shell.rs embeds the wasm tool from sandbox-wasm with include_bytes!,
+# so that fixture must be a compile input.
+rust_test(
+    name = "sandbox_shell_shell_test",
+    srcs = ["tests/shell.rs"],
+    crate_root = "tests/shell.rs",
     edition = "2021",
     compile_data = ["//crates/sandbox-wasm:fixtures"],
     deps = [
         "//crates/sandbox-cas:sandbox_cas",
-        "@crates//:serde_json",
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "@crates//:tokio",
+        ":sandbox_shell",
     ],
     visibility = ["//visibility:public"],
 )

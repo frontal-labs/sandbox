@@ -40,6 +40,18 @@ rust_binary(
     visibility = ["//visibility:public"],
 )
 
+# Unit tests for the program module (quote, in_system_dir), extracted from src.
+rust_test(
+    name = "sandbox_guest_program_test",
+    srcs = ["tests/program.rs"],
+    crate_root = "tests/program.rs",
+    edition = "2021",
+    deps = [
+        ":sandbox_guest",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # The guest protocol over TCP. Ignored unless SANDBOX_GUEST_ADDR is set, as
 # docker/run-emulated-vm.sh does.
 rust_test(

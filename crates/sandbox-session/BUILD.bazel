@@ -29,10 +29,44 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# Unit tests in src/ (the lib compiled with cfg(test)).
+# Integration tests in tests/, one target per file.
 rust_test(
-    name = "sandbox_session_unit_test",
-    crate = ":sandbox_session",
+    name = "sandbox_session_backend_test",
+    srcs = ["tests/backend.rs"],
+    crate_root = "tests/backend.rs",
     edition = "2021",
+    deps = [
+        ":sandbox_session",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "//crates/sandbox-shell:sandbox_shell",
+        "//crates/sandbox-runtime:sandbox_runtime",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_session_filesystem_test",
+    srcs = ["tests/filesystem.rs"],
+    crate_root = "tests/filesystem.rs",
+    edition = "2021",
+    deps = [
+        ":sandbox_session",
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-trace:sandbox_trace",
+        "@crates//:tokio",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_session_output_test",
+    srcs = ["tests/output.rs"],
+    crate_root = "tests/output.rs",
+    edition = "2021",
+    deps = [
+        ":sandbox_session",
+    ],
     visibility = ["//visibility:public"],
 )

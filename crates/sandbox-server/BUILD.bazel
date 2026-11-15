@@ -78,18 +78,26 @@ _SERVER_TEST_DEPS = [
     "@crates//:utoipa",
 ]
 
-# Unit tests in src/ (the lib compiled with cfg(test)).
-rust_test(
-    name = "sandbox_server_unit_test",
-    crate = ":sandbox_server",
+# Unit tests moved from src/ into their own tests/ files, one target each.
+[rust_test(
+    name = "sandbox_server_%s_unit_test" % name,
+    srcs = ["tests/%s.rs" % name],
+    crate_root = "tests/%s.rs" % name,
     edition = "2021",
-    deps = [
-        "@crates//:tower",
-        "@crates//:serde_json",
-        "@crates//:tokio",
-    ],
+    deps = _SERVER_TEST_DEPS,
     visibility = ["//visibility:public"],
-)
+) for name in [
+    "api",
+    "auth",
+    "billing",
+    "config",
+    "metering",
+    "middleware",
+    "otel",
+    "parked",
+    "persist",
+    "pty_unit",
+]]
 
 # Contract tests read the committed spec at openapi/v1 through CARGO_MANIFEST_DIR,
 # which only Cargo sets. rustc_env supplies the same value, relative to the runfiles

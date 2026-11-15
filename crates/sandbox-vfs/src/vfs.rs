@@ -22,15 +22,13 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// Events a slow watcher can fall behind before it gets `Overflow`.
-const EVENT_CAPACITY: usize = 1024;
+/// Events a slow watcher can fall behind before it gets `Overflow`. Exposed so
+/// integration tests can drive the channel past its capacity.
+pub const EVENT_CAPACITY: usize = 1024;
 
 /// The largest a host-owned file may be. Only this many bytes of one are exempt from
 /// quotas. Any excess counts like agent data, so a large file cannot escape the limits.
 pub const SYSTEM_FILE_MAX_BYTES: u64 = 64 * 1024;
-
-#[cfg(test)]
-mod tests;
 
 /// Maximum symlink expansions while resolving one path (as in Linux, ELOOP).
 const MAX_SYMLINK_HOPS: usize = 40;
@@ -44,6 +42,8 @@ pub struct Vfs {
     /// current by `checkpoint`.
     committed_totals: RwLock<Option<(u64, u64)>>,
     overlay: RwLock<Overlay>,
+    /// Open handles. Not exposed directly: see `open_handle_count`, which
+    /// lets integration tests assert no handles leak.
     handles: RwLock<HashMap<u64, OpenFile>>,
     next_handle: AtomicU64,
     /// Change events for watchers, created by the first `watch` call. A VFS that
@@ -128,7 +128,8 @@ impl Vfs {
         }
     }
 
-    /// Handles that are open and not yet closed. Useful for leak checks.
+    /// Number of open file handles. Integration tests use this to assert
+    /// that handles do not leak after `close`.
     pub fn open_handle_count(&self) -> usize {
         self.handles.read().len()
     }

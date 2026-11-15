@@ -38,9 +38,35 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
+# Integration tests in tests/, one target per file.
 rust_test(
-    name = "sandbox_worker_unit_test",
-    crate = ":sandbox_worker",
+    name = "sandbox_worker_isolation_test",
+    srcs = ["tests/isolation.rs"],
+    crate_root = "tests/isolation.rs",
     edition = "2021",
+    deps = [
+        ":sandbox_worker",
+        # Only compiled on Linux, where the seccomp filter exists.
+    ] + select({
+        "@platforms//os:linux": [
+            "@crates//:libc",
+        ],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "sandbox_worker_worker_test",
+    srcs = ["tests/worker.rs"],
+    crate_root = "tests/worker.rs",
+    edition = "2021",
+    deps = [
+        ":sandbox_worker",
+        "//crates/sandbox-proto:sandbox_proto",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:tokio",
+        "@crates//:tonic",
+    ],
     visibility = ["//visibility:public"],
 )

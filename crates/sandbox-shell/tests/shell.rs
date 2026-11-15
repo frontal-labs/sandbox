@@ -1,6 +1,6 @@
-use crate::interpreter::{Shell, ShellConfig};
-use crate::parser::parse;
 use sandbox_cas::MemStore;
+use sandbox_shell::interpreter::{Shell, ShellConfig};
+use sandbox_shell::parser::parse;
 use sandbox_types::{hash::ContentHash, ErrorCode};
 use sandbox_vfs::Vfs;
 use std::sync::Arc;
@@ -10,9 +10,9 @@ fn shell() -> Shell {
     Shell::new(fs, ShellConfig::default())
 }
 
-fn simple(command: &crate::ast::Command) -> &crate::ast::SimpleCommand {
+fn simple(command: &sandbox_shell::ast::Command) -> &sandbox_shell::ast::SimpleCommand {
     match command {
-        crate::ast::Command::Simple(simple) => simple,
+        sandbox_shell::ast::Command::Simple(simple) => simple,
         other => panic!("expected a simple command, got {other:?}"),
     }
 }

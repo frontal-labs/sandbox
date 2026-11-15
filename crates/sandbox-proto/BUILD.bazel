@@ -65,18 +65,5 @@ rust_library(
         data = ["//proto:protos"],
         visibility = ["//visibility:public"],
     )
-    for name in ["roundtrip", "compat"]
+    for name in ["roundtrip", "compat", "framing"]
 ]
-
-# Unit tests in src/ (the lib compiled with cfg(test)).
-rust_test(
-    name = "sandbox_proto_unit_test",
-    crate = ":sandbox_proto",
-    edition = "2021",
-    deps = [
-        "@crates//:proptest",
-        "@crates//:serde",
-        "@crates//:serde_json",
-    ],
-    visibility = ["//visibility:public"],
-)

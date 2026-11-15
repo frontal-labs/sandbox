@@ -1853,7 +1853,7 @@ impl Shell {
         Ok(data?.to_vec())
     }
 
-    pub(crate) async fn write_file(
+    pub async fn write_file(
         &self,
         path: &str,
         data: &[u8],

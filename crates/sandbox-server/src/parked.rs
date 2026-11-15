@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 /// A directory holding one JSON file per record, named `<id>.json`.
-pub(crate) struct JsonDir<I, T> {
+pub struct JsonDir<I, T> {
     dir: PathBuf,
     _records: PhantomData<fn() -> (I, T)>,
 }
@@ -41,19 +41,19 @@ where
         })
     }
 
-    fn path(&self, id: I) -> PathBuf {
+    pub fn path(&self, id: I) -> PathBuf {
         self.dir.join(format!("{id}.json"))
     }
 
     /// Writes a record, replacing any earlier one with the same ID.
-    pub(crate) async fn put(&self, id: I, record: &T) -> Result<(), SandboxError> {
+    pub async fn put(&self, id: I, record: &T) -> Result<(), SandboxError> {
         let bytes = serde_json::to_vec(record)
             .map_err(|e| SandboxError::internal(format!("cannot encode a record: {e}")))?;
         write_file_atomic(self.path(id), bytes).await
     }
 
     /// Reads a record, or `None` when there is none with this ID.
-    pub(crate) async fn get(&self, id: I) -> Result<Option<T>, SandboxError> {
+    pub async fn get(&self, id: I) -> Result<Option<T>, SandboxError> {
         let bytes = match tokio::fs::read(self.path(id)).await {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -65,7 +65,7 @@ where
     }
 
     /// Removes a record. Returns whether there was one.
-    pub(crate) async fn remove(&self, id: I) -> Result<bool, SandboxError> {
+    pub async fn remove(&self, id: I) -> Result<bool, SandboxError> {
         match tokio::fs::remove_file(self.path(id)).await {
             Ok(()) => Ok(true),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -77,7 +77,7 @@ where
 
     /// Every ID with a record. The records are not read. Files whose names are not IDs, and
     /// temporary files left by an interrupted write, are skipped.
-    pub(crate) async fn ids(&self) -> Result<Vec<I>, SandboxError> {
+    pub async fn ids(&self) -> Result<Vec<I>, SandboxError> {
         let list_error =
             |e: std::io::Error| SandboxError::internal(format!("cannot list records: {e}"));
         let mut entries = tokio::fs::read_dir(&self.dir).await.map_err(list_error)?;
@@ -193,96 +193,11 @@ impl SnapshotFiles {
 }
 
 /// The directory of parked sessions in a data directory.
-pub(crate) fn parked_store(data_dir: &Path) -> Result<ParkedStore, SandboxError> {
+pub fn parked_store(data_dir: &Path) -> Result<ParkedStore, SandboxError> {
     ParkedStore::open(&data_dir.join("sessions"))
 }
 
 /// The directory of snapshot records in a data directory.
 pub(crate) fn snapshot_files(data_dir: &Path) -> Result<SnapshotFiles, SandboxError> {
     SnapshotFiles::open(data_dir)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sandbox_types::hash::ContentHash;
-    use sandbox_types::{CheckpointPolicy, SessionState, SessionStatus, TenantId, Tier};
-    use std::collections::HashMap;
-    use std::time::SystemTime;
-
-    fn record(owner: &str) -> SavedSession {
-        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
-        SavedSession {
-            owner: owner.to_string(),
-            state: SessionState {
-                id: SessionId::new(),
-                tenant_id: TenantId::nil(),
-                tier: Tier::Isolate,
-                allow_vm: false,
-                status: SessionStatus::Sleeping,
-                config_hash: ContentHash::nil(),
-                vfs_root: None,
-                created_at: now,
-                updated_at: now,
-                labels: HashMap::new(),
-            },
-            root: ContentHash::nil(),
-            cwd: "/".to_string(),
-            env: HashMap::new(),
-            sleeping: true,
-            limits: Default::default(),
-            trace: String::new(),
-            trace_complete: true,
-            checkpoint_policy: CheckpointPolicy::default(),
-            checkpoint_retain: sandbox_types::session::DEFAULT_CHECKPOINT_RETAIN,
-            roots: Vec::new(),
-            spilled: Vec::new(),
-        }
-    }
-
-    fn dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("parked-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
-    #[tokio::test]
-    async fn a_parked_record_round_trips_and_removes_cleanly() {
-        let data = dir("round-trip");
-        let store = parked_store(&data).unwrap();
-        let id = SessionId::new();
-        assert!(store.get(id).await.unwrap().is_none());
-
-        store.put(id, &record("key-a")).await.unwrap();
-        let back = store.get(id).await.unwrap().unwrap();
-        assert_eq!(back.owner, "key-a");
-        assert_eq!(store.ids().await.unwrap(), vec![id]);
-
-        assert!(store.remove(id).await.unwrap());
-        assert!(!store.remove(id).await.unwrap());
-        assert!(store.get(id).await.unwrap().is_none());
-        let _ = std::fs::remove_dir_all(&data);
-    }
-
-    #[tokio::test]
-    async fn a_damaged_record_is_refused_not_ignored() {
-        let data = dir("damaged");
-        let store = parked_store(&data).unwrap();
-        let id = SessionId::new();
-        std::fs::write(store.path(id), b"{not json").unwrap();
-        assert!(store.get(id).await.is_err());
-        let _ = std::fs::remove_dir_all(&data);
-    }
-
-    #[tokio::test]
-    async fn listing_skips_temporary_and_foreign_files() {
-        let data = dir("listing");
-        let store = parked_store(&data).unwrap();
-        let id = SessionId::new();
-        store.put(id, &record("key-a")).await.unwrap();
-        std::fs::write(data.join("sessions").join("half-written.tmp"), b"x").unwrap();
-        std::fs::write(data.join("sessions").join("notes.txt"), b"x").unwrap();
-        assert_eq!(store.ids().await.unwrap(), vec![id]);
-        let _ = std::fs::remove_dir_all(&data);
-    }
 }

@@ -1,9 +1,13 @@
-use super::*;
-use crate::node::Stored;
-use crate::quota::Quotas;
-use sandbox_cas::MemStore;
+use sandbox_cas::{BlobStore, MemStore};
+use sandbox_types::hash::ContentHash;
+use sandbox_vfs::error::VfsError;
+use sandbox_vfs::node::Stored;
+use sandbox_vfs::ops::{OpenFlags, SessionFs, WatchEvent};
+use sandbox_vfs::quota::Quotas;
+use sandbox_vfs::{Vfs, EVENT_CAPACITY, SYSTEM_FILE_MAX_BYTES};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn new_vfs() -> Vfs {
     Vfs::new(ContentHash::nil(), Arc::new(MemStore::new()))
@@ -589,7 +593,7 @@ async fn closed_handle_is_rejected_and_handles_do_not_leak() {
         vfs.write(&h, 0, b"x").await,
         Err(VfsError::InvalidPath(_))
     ));
-    assert!(vfs.handles.read().is_empty());
+    assert!(vfs.open_handle_count() == 0);
 }
 
 /// A tree with `data` written at `path`, committed, and its root.

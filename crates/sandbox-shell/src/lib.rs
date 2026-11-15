@@ -18,7 +18,7 @@
 pub mod ast;
 pub mod builtins;
 pub mod coreutils;
-mod coreutils_fs;
+pub mod coreutils_fs;
 mod coreutils_text;
 pub mod cpu;
 pub mod expand;
@@ -26,15 +26,12 @@ pub mod interpreter;
 pub mod live;
 pub mod parser;
 
-mod arith;
-mod printf;
-mod stream;
+pub mod arith;
+pub mod printf;
+pub mod stream;
 
 pub use ast::Script;
 pub use builtins::command_may_read_stdin;
 pub use interpreter::{ExecutionResult, OutputChunk, OutputObserver, Shell, ShellConfig};
 pub use live::{live_input, LiveInput, LiveSender};
 pub use parser::parse;
-
-#[cfg(test)]
-mod tests;

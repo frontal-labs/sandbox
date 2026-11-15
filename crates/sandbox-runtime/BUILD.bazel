@@ -75,10 +75,33 @@ rust_test(
     visibility = ["//visibility:public"],
 )
 
-# Unit tests in src/ (the lib compiled with cfg(test)).
+# Integration tests for the runtime module (moved from src/runtime.rs).
 rust_test(
-    name = "sandbox_runtime_unit_test",
-    crate = ":sandbox_runtime",
+    name = "sandbox_runtime_runtime_test",
+    srcs = ["tests/runtime.rs"],
+    crate_root = "tests/runtime.rs",
     edition = "2021",
+    deps = [
+        "//crates/sandbox-types:sandbox_types",
+        "//crates/sandbox-vfs:sandbox_vfs",
+        "@crates//:bytes",
+        "@crates//:deno_console",
+        "@crates//:deno_core",
+        "@crates//:deno_error",
+        "@crates//:deno_url",
+        "@crates//:deno_web",
+        "@crates//:deno_webidl",
+        "@crates//:parking_lot",
+        "@crates//:serde",
+        "@crates//:serde_json",
+        "@crates//:swc_core",
+        "@crates//:thiserror",
+        "@crates//:tokio",
+        "@crates//:tracing",
+        ":sandbox_runtime",
+    ],
+    proc_macro_deps = [
+        "@crates//:async-trait",
+    ],
     visibility = ["//visibility:public"],
 )

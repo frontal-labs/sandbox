@@ -50,12 +50,30 @@ rust_test(
     visibility = ["//visibility:public"],
 )
 
-# Unit tests in src/ (the lib compiled with cfg(test)).
+# Integration tests for the tool registry manifest.
 rust_test(
-    name = "sandbox_wasm_unit_test",
-    crate = ":sandbox_wasm",
+    name = "sandbox_wasm_registry_test",
+    srcs = ["tests/registry.rs"],
+    crate_root = "tests/registry.rs",
     edition = "2021",
-    deps = ["//crates/sandbox-cas:sandbox_cas"],
+    deps = [
+        ":sandbox_wasm",
+        "//crates/sandbox-types:sandbox_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Integration tests for the WASI preview1 host.
+rust_test(
+    name = "sandbox_wasm_wasi_test",
+    srcs = ["tests/wasi.rs"],
+    crate_root = "tests/wasi.rs",
+    edition = "2021",
+    deps = [
+        ":sandbox_wasm",
+        "//crates/sandbox-types:sandbox_types",
+        "@crates//:tokio",
+    ],
     visibility = ["//visibility:public"],
 )
 
