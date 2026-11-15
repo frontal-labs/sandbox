@@ -129,8 +129,12 @@ spec:
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
     spec:
-      # QEMU (Tier 2) needs /dev/kvm. Pin to a node pool tagged for KVM
-      # (bare-metal or KVM-capable instance types). Remove for Tier 1 only.
+      # QEMU (Tier 2) needs /dev/kvm. This nodeSelector only places the Pod on a
+      # KVM-capable node (bare-metal or KVM-capable instance types); it does NOT
+      # expose /dev/kvm to the container. Tier 2 (KVM) is therefore unavailable in
+      # this reference Pod unless the cluster's established device mechanism is
+      # configured (e.g. a hostPath /dev/kvm mount or the cluster's device plugin).
+      # Remove for Tier 1 only.
       nodeSelector:
         sandbox.kubernetes.io/kvm: "true"
       securityContext:

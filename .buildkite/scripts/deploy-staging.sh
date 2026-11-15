@@ -29,12 +29,17 @@ docker push "${IMAGE}"
 
 if [[ -f "$COMPOSE_FILE" ]]; then
   echo "deploy-staging: rolling out via $COMPOSE_FILE"
-  docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+  # Pin the rollout to the image we just pushed so Compose doesn't fall back
+  # to the local ${SANDBOX_IMAGE:-frontal-sandbox:staging} tag. Compose resolves
+  # paths in later files relative to the first file's directory (docker/), so
+  # the base file goes first and the overlay's build context resolves to the
+  # repository root.
+  SANDBOX_IMAGE="${IMAGE}" docker compose -f docker/compose.yaml -f "$COMPOSE_FILE" up -d --force-recreate
 fi
 
 echo "deploy-staging: smoke test"
 SANDBOX_BASE_URL="${STAGING_BASE_URL:-http://127.0.0.1:8080}" \
   SANDBOX_API_KEY="${STAGING_API_KEY:-}" \
-  ./infrastructure/scripts/smoke.sh "$SANDBOX_BASE_URL"
+  bash ./infrastructure/scripts/smoke.sh "$SANDBOX_BASE_URL"
 
 echo "deploy-staging: done"

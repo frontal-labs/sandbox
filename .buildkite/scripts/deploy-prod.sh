@@ -28,12 +28,15 @@ docker push "${IMAGE}"
 
 if [[ -f "$COMPOSE_FILE" ]]; then
   echo "deploy-prod: rolling out via $COMPOSE_FILE"
-  docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+  # Compose resolves paths in later files relative to the first file's
+  # directory (docker/), so include the base file first; the overlay's
+  # build context then resolves to the repository root.
+  docker compose -f docker/compose.yaml -f "$COMPOSE_FILE" up -d --force-recreate
 fi
 
 echo "deploy-prod: smoke test"
 SANDBOX_BASE_URL="${PROD_BASE_URL:-http://127.0.0.1:8080}" \
   SANDBOX_API_KEY="${PROD_API_KEY:-}" \
-  ./infrastructure/scripts/smoke.sh "$SANDBOX_BASE_URL"
+  bash ./infrastructure/scripts/smoke.sh "$SANDBOX_BASE_URL"
 
 echo "deploy-prod: done"

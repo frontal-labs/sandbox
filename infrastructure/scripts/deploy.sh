@@ -11,7 +11,7 @@ set -euo pipefail
 #   /etc/sandbox/config.toml        config (from --config or defaults.toml)
 #   /etc/systemd/system/*.service   systemd units (unless --no-systemd)
 #
-# Then starts sandbox-server (and sandbox-scheduler on a standalone host).
+# Then starts sandbox-server.
 
 BINARY=""
 CONFIG=""
@@ -57,12 +57,9 @@ fi
 if [[ "$NO_SYSTEMD" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
   UNIT_DIR="/etc/systemd/system"
   install -m 0644 "$INFRA_DIR/systemd/sandbox-server.service" "$UNIT_DIR/"
-  install -m 0644 "$INFRA_DIR/systemd/sandbox-scheduler.service" "$UNIT_DIR/"
-  install -m 0644 "$INFRA_DIR/systemd/sandbox-worker@.service"   "$UNIT_DIR/"
-  install -m 0644 "$INFRA_DIR/systemd/sandbox.target"            "$UNIT_DIR/"
+  install -m 0644 "$INFRA_DIR/systemd/sandbox.target"         "$UNIT_DIR/"
   systemctl daemon-reload
   systemctl enable --now sandbox-server.service
-  systemctl enable --now sandbox-scheduler.service
 fi
 
 echo "deploy complete. Check: systemctl status sandbox-server"

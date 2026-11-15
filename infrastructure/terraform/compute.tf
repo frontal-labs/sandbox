@@ -111,6 +111,18 @@ resource "aws_instance" "sandbox" {
 
   lifecycle {
     ignore_changes = [user_data]
+
+    # Guard: Tier 2 needs a KVM-capable type. Standard Nitro (m5/m6i
+    # non-metal) instances do not expose /dev/kvm, so a bare-metal / metal
+    # or KVM-capable family is required. As a precondition this fails at
+    # plan time (before any instance is created) rather than at runtime on
+    # a host without /dev/kvm. The default (m6i.metal when Tier 2 is on)
+    # satisfies this; it only fires if an operator overrides instance_type
+    # with a non-metal type while leaving Tier 2 enabled.
+    precondition {
+      condition     = !var.enable_tier2 || can(regex("(?i)metal|\\bu-|\\.metal", local.effective_instance_type))
+      error_message = "enable_tier2=true requires a KVM-capable instance_type (a bare-metal / metal family). Standard Nitro types like m6i.large do not expose /dev/kvm. Set instance_type to e.g. m6i.metal."
+    }
   }
 }
 

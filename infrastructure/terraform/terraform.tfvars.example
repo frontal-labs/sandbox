@@ -7,8 +7,8 @@ aws_region     = "us-east-1"
 # availability_zones = null   # null auto-discovers AZs in the region.
 
 # Instances. Tier 2 (QEMU /dev/kvm) requires a KVM-capable (metal) type; the
-# default picks m6i.metal-medium automatically when enable_tier2 is true.
-instance_type  = null           # override, e.g. "m6i.metal-medium"
+# default picks m6i.metal automatically when enable_tier2 is true.
+instance_type  = null           # override, e.g. "m6i.metal"
 instance_count = 1
 ssh_key_name   = "<YOUR_SSH_KEY_NAME>"
 ssh_cidr       = "<VPN_OR_OFFICE_CIDR>"   # never 0.0.0.0/0 in prod

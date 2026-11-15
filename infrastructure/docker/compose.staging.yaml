@@ -17,6 +17,9 @@ name: frontal-sandbox-staging
 services:
   sandbox:
     build:
+      # Resolved relative to the first Compose file (docker/compose.yaml),
+      # i.e. the repository root, so this works with the base-plus-overlay
+      # invocation used by deploy-staging.sh.
       context: ..
       dockerfile: docker/Dockerfile
       args:
@@ -43,10 +46,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # Hardening (security_opt/cap_drop) is inherited from the base file;
+    # Compose v2 rejects duplicate array items on merge.
     pids_limit: ${SANDBOX_PIDS_LIMIT:-512}
     mem_limit: ${SANDBOX_MEM_LIMIT:-4g}
     ulimits:

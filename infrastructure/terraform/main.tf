@@ -52,7 +52,7 @@ variable "instance_count" {
 variable "instance_type" {
   type        = string
   default     = null
-  description = "Override instance type. Null picks m6i.metal-medium when Tier 2 is on, m6i.large otherwise."
+  description = "Override instance type. Null picks m6i.metal when Tier 2 is on, m6i.large otherwise."
 }
 
 variable "ssh_key_name" {
@@ -70,24 +70,24 @@ variable "ssh_cidr" {
 }
 
 variable "enable_tier2" {
-  type    = bool
-  default = true
+  type        = bool
+  default     = true
   description = "Whether to expose /dev/kvm for QEMU Tier 2. Forces a KVM-capable instance type."
 }
 
 # Whether to provision a load balancer in front of the hosts. When true, the
 # API port is opened only to the LB and not to the world.
 variable "enable_lb" {
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
   description = "Create an NLB in front of the sandbox hosts and open the API port only to the LB."
 }
 
 # Whether to provision a managed Postgres (RDS) for shared metadata. When
 # false, hosts use the local `redb`/file backend and the DSN is not output.
 variable "enable_rds" {
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
   description = "Provision an encrypted RDS Postgres instance for shared scheduler metadata."
 }
 
@@ -128,25 +128,12 @@ variable "env" {
 locals {
   effective_instance_type = coalesce(
     var.instance_type,
-    var.enable_tier2 ? "m6i.metal-medium" : "m6i.large",
+    var.enable_tier2 ? "m6i.metal" : "m6i.large",
   )
   zones = coalesce(
     var.availability_zones,
     sort([for az in data.aws_availability_zones.available.names : az]),
   )
-}
-
-# Guard: Tier 2 needs a KVM-capable type. Standard Nitro (m5/m6i non-metal)
-# instances do not expose /dev/kvm, so a bare-metal / metal or KVM-capable
-# family is required. This fails at plan time rather than at runtime on a
-# host without /dev/kvm. The default (m6i.metal-medium when Tier 2 is on)
-# satisfies this; it only fires if an operator overrides instance_type with a
-# non-metal type while leaving Tier 2 enabled.
-check "tier2_needs_kvm" {
-  assert {
-    condition     = !var.enable_tier2 || can(regex("(?i)metal|\\bu-|\\.metal", local.effective_instance_type))
-    error_message = "enable_tier2=true requires a KVM-capable instance_type (a bare-metal / metal family). Standard Nitro types like m6i.large do not expose /dev/kvm. Set instance_type to e.g. m6i.metal-medium."
-  }
 }
 
 # KVM-capable instances are large; keep the root disk generous but the CAS
