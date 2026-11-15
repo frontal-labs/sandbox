@@ -102,15 +102,15 @@ Last reviewed against the source tree on 2026-11-14.
 **Goal**: Multi-tenant server with policy, snapshots, scheduling
 
 ### Deliverables
-- [ ] **Partial.** `sandbox-policy`: capability, limits, and network modules
-      exist; no tests
-- [ ] **Partial.** `sandbox-snapshot`: `SnapshotManager` (in-memory, 87 lines);
-      not wired into the server (the server uses its own snapshot table)
+- [x] `sandbox-policy`: capability, limits, and network modules exist, with
+      integration tests (16)
+- [x] `sandbox-snapshot`: removed. The in-memory `SnapshotManager` was dead
+      scaffolding; the server owns snapshot state in its own table (ADR 0049)
 - [x] `sandbox-worker`: one child process per session, gRPC over a private Unix socket, with
       crash isolation. Seccomp, cgroups, namespaces, and gRPC are not implemented.
 - [ ] **Partial.** `sandbox-server`: session, exec, filesystem, snapshot, and fork routes at `/v1` run on in-memory sessions behind API-key auth, with OpenAPI (utoipa), 429 + Retry-After on session admission refusals (T-08), and file-backed billing (T-03)
 - [ ] **Partial.** `sandbox-scheduler`: placement, pools, and scheduler modules
-      exist; no tests; sleep/wake and metering not verified
+      exist, with integration tests (15); sleep/wake and metering not verified
 
 ### Acceptance Criteria
 - [ ] Snapshot/fork under 5 ms

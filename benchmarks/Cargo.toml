@@ -15,7 +15,6 @@ sandbox-shell = { path = "../crates/sandbox-shell" }
 sandbox-runtime = { path = "../crates/sandbox-runtime" }
 sandbox-wasm = { path = "../crates/sandbox-wasm" }
 sandbox-session = { path = "../crates/sandbox-session" }
-sandbox-snapshot = { path = "../crates/sandbox-snapshot" }
 sandbox-promote = { path = "../crates/sandbox-promote" }
 sandbox-policy = { path = "../crates/sandbox-policy" }
 object_store = { workspace = true }

@@ -18,9 +18,9 @@ Rust workspace with TypeScript and Python SDKs.
 | `sandbox-types` | Real types: IDs, content hash (BLAKE3), errors, events, session and policy types |
 | `sandbox-cas` | `BlobStore` trait, `MemStore`, `DiskStore`, `TieredStore`, with inline unit tests |
 | `sandbox-vfs` | Copy-on-write overlay, Merkle directory tree with incremental commit, symlink resolution, quotas, and ops. Unit and proptest coverage |
-| `sandbox-policy`, `sandbox-scheduler` | Types and logic. No tests yet |
+| `sandbox-policy`, `sandbox-scheduler` | Types and logic, with integration tests |
 | `sandbox-shell` | Parser, interpreter, VFS-backed builtins, variables, globs, control flow, functions, command substitution, and WASI tools from the registry or `/bin`. Subset of sh: no `case`, arithmetic, or host binaries |
-| `sandbox-snapshot`, `sandbox-trace` | Early or partial scaffolding |
+| `sandbox-trace` | Early or partial scaffolding |
 | `sandbox-vmm` | QEMU driver (`QemuVm`) that boots a real guest (TCG or KVM), waits for the agent, and saves/resumes state through the QEMU monitor. Warm pool (`VmPool`) of pre-booted guests. The Firecracker driver and jailer were removed (T-05); they were scaffolding |
 | `sandbox-guest` | Guest agent (gRPC) over the VFS, run as the guest's init |
 | `sandbox-runtime` | `execute_script` runs JS in a fresh V8 isolate with a timeout, a heap cap, a `node:` module shim, and per-script cwd/env |
@@ -91,7 +91,6 @@ crates/
 ├── sandbox-runtime     # Deno/V8 isolate host
 ├── sandbox-wasm        # Wasmtime and WASI tool host
 ├── sandbox-session     # Session trait and backends
-├── sandbox-snapshot    # Snapshot, fork, and restore
 ├── sandbox-vmm         # QEMU driver
 ├── sandbox-guest       # In-VM guest agent
 ├── sandbox-promote     # Isolate-to-VM handoff
@@ -164,8 +163,10 @@ implement any of them.
 - **Hashing** (`sandbox-types`): `ContentHash` wraps BLAKE3.
 - **VFS** (`sandbox-vfs`): layered tree (immutable base plus mutable overlay).
   Planned: Merkle hashing of the tree.
-- **Snapshots** (`sandbox-snapshot`): planned as CAS objects that reference a
-  VFS root and runtime state.
+- **Snapshots**: owned by the server (its snapshot table) and, when persisted,
+   stored as CAS objects that reference a VFS root and runtime state. The
+   earlier in-memory `sandbox-snapshot` crate was removed; the server owns
+   snapshot state directly (ADR 0049).
 - **Traces** (`sandbox-trace`): planned as append-only JSONL per session.
 
 ## Observability (planned)

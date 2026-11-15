@@ -51,6 +51,28 @@ jobs:
       - name: Bench compile check
         run: cargo bench --workspace --no-run
 
+  # TieredStore's S3 backend: a blob written on one node is read on another
+  # through an S3-compatible object store. Runs adobe/s3mock in Docker (see
+  # docker/object-store-test.sh), which starts the store, creates a bucket,
+  # and runs the ignored S3 test.
+  s3:
+    name: Object store (S3)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # sandbox-proto's build script runs protoc (see docs/DEVELOPMENT.md);
+      # version pinned to the Bazel protobuf dependency (MODULE.bazel).
+      - name: Install protoc
+        run: |
+          sudo apt-get \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- update
+          sudo apt-get install -y protobuf-compiler=3.33.4-2.1build5 || sudo apt-get install -y protobuf-compiler
+          protoc --version
+      - name: Object-store test against s3mock
+        run: docker/object-store-test.sh
+
   # PLAN §5: cargo-deny (licenses, advisories, sources) and cargo-audit run on
   # every change. Versions are pinned to the ones the policy was checked with.
   supply-chain:

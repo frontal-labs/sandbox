@@ -4027,7 +4027,6 @@ dependencies = [
  "sandbox-runtime",
  "sandbox-session",
  "sandbox-shell",
- "sandbox-snapshot",
  "sandbox-types",
  "sandbox-vfs",
  "sandbox-wasm",
@@ -4131,7 +4130,6 @@ dependencies = [
  "sandbox-proto",
  "sandbox-session",
  "sandbox-shell",
- "sandbox-snapshot",
  "sandbox-types",
  "sandbox-vfs",
  "sandbox-vmm",
@@ -4286,22 +4284,6 @@ dependencies = [
  "sandbox-wasm",
  "serde",
  "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "sandbox-snapshot"
-version = "0.0.0"
-dependencies = [
- "async-trait",
- "bytes",
- "parking_lot 0.13.0",
- "sandbox-cas",
- "sandbox-types",
- "sandbox-vfs",
- "serde",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

@@ -51,7 +51,6 @@ crates/                     Rust workspace members (crate names are sandbox-*)
 ├── sandbox-runtime         Deno/V8 isolate host
 ├── sandbox-wasm            Wasmtime and WASI tool host
 ├── sandbox-session         Session trait and backends
-├── sandbox-snapshot        Snapshot, fork, and restore
 ├── sandbox-vmm             QEMU driver
 ├── sandbox-guest           In-VM guest agent
 ├── sandbox-promote         Isolate-to-VM handoff

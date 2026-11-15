@@ -74,7 +74,6 @@ sandbox/
 │   ├── sandbox-runtime/          # deno_core isolate host
 │   ├── sandbox-wasm/             # wasmtime/WASI host
 │   ├── sandbox-session/          # Session trait + IsolateBackend
-│   ├── sandbox-snapshot/         # snapshot, fork, restore
 │   ├── sandbox-vmm/              # QEMU driver
 │   ├── sandbox-guest/            # in-VM agent (static musl binary)
 │   ├── sandbox-promote/          # Tier 1 to Tier 2 handoff
@@ -204,7 +203,12 @@ pub struct ExecHandle {
 - `VmBackend` proxies to the guest agent over a forwarded loopback port (or a Unix socket on vsock-backed guests).
 - `Auto` tier: start in Isolate; on `NeedsVm`, call `sandbox-promote`.
 
-### 4.9 `sandbox-snapshot`
+### 4.9 Snapshots (server-owned)
+
+The earlier in-memory `sandbox-snapshot` crate was removed: its `SnapshotManager` was
+scaffolding that nothing consumed, and ADR 0049 places snapshot ownership in the server
+(its snapshot table), mirroring how templates wrap snapshots. Snapshot records persist as
+CAS objects when persistence lands.
 
 - `Snapshot { id, parent, vfs_root, env, cwd, tier, runtime_blob: Option<Hash>, created_at, labels }`, stored as a CAS object.
 - `take(session)`: commit VFS, serialize shell state (env, cwd, functions, aliases), optionally V8 heap snapshot for warm isolate state.
@@ -362,7 +366,7 @@ Rule: justify every new dependency in the PR description; prefer well-maintained
 
 ### M3: Server, policy, snapshots (weeks 10-13)
 
-- `sandbox-policy`, `sandbox-snapshot` (snapshot, restore, fork), `sandbox-worker` with seccomp/cgroups, `sandbox-server` API + OpenAPI, API keys, `sandbox-scheduler` (single-node), idle sleep/wake, metering.
+- `sandbox-policy`, server-owned snapshots (snapshot, restore, fork), `sandbox-worker` with seccomp/cgroups, `sandbox-server` API + OpenAPI, API keys, `sandbox-scheduler` (single-node), idle sleep/wake, metering.
 - **Accept:** snapshot/fork under 5 ms; 1,000 concurrent sessions on one node in the load test; sleeping sessions use no memory; escape test suite passes; TS SDK generated.
 
 ### M4: Tier 2 (weeks 14-19)

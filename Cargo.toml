@@ -9,7 +9,6 @@ members = [
     "crates/sandbox-runtime",
     "crates/sandbox-wasm",
     "crates/sandbox-session",
-    "crates/sandbox-snapshot",
     "crates/sandbox-vmm",
     "crates/sandbox-guest",
     "crates/sandbox-promote",
