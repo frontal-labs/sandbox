@@ -49,7 +49,7 @@
         "metrics_addr": {
           "type": "string",
           "default": "0.0.0.0:9090",
-          "description": "Prometheus metrics listen address"
+          "description": "Accepted but not yet consumed by the server. /metrics is served on the main HTTP port (see server.addr); this field is reserved for a future separate metrics listener."
         },
         "otlp_endpoint": {
           "type": "string",

@@ -25,6 +25,6 @@ bun install --frozen-lockfile --ignore-scripts
 bun run ts:build
 
 echo "build: Docker image (smoke test of the compose path)"
-docker build -f deploy/Dockerfile -t frontal-sandbox:build .
+docker build -f docker/Dockerfile -t frontal-sandbox:build .
 
 echo "build: done"

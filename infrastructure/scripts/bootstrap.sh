@@ -68,16 +68,15 @@ if [[ "$NO_KVM" -eq 0 ]] && [[ -c /dev/kvm ]]; then
   chown sandbox:sandbox /var/run/sandbox/vmm
 fi
 
-# Firewall: SSH, API, metrics (VPC-only where possible).
+# Firewall: SSH + API (8080). /metrics is served on the same 8080 listener,
+# so no separate metrics port is opened.
 if command -v ufw >/dev/null 2>&1; then
   ufw allow 22/tcp || true
   ufw allow 8080/tcp || true
-  ufw allow from any to any port 9090 proto tcp || true
   ufw --force enable || true
 elif command -v firewall-cmd >/dev/null 2>&1; then
   firewall-cmd --permanent --add-service=ssh || true
   firewall-cmd --permanent --add-port=8080/tcp || true
-  firewall-cmd --permanent --add-port=9090/tcp || true
   firewall-cmd --reload || true
 fi
 

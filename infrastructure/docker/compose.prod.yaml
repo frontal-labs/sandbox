@@ -1,7 +1,8 @@
 # Production compose overlay.
 #
-# Extends docker/compose.yaml with TLS, rate limiting, metrics, and a
-# reverse proxy. Deploy with:
+# Extends docker/compose.yaml with TLS, rate limiting, and a reverse proxy.
+# /metrics is served on the main 8080 port (no separate metrics port).
+# Deploy with:
 #
 #   docker compose -f docker/compose.yaml -f infrastructure/docker/compose.prod.yaml up -d
 #
@@ -13,6 +14,9 @@ name: frontal-sandbox-prod
 services:
   sandbox:
     build:
+      # Resolved relative to the first Compose file (docker/compose.yaml),
+      # i.e. the repository root, so this works with the base-plus-overlay
+      # invocation used by deploy-prod.sh.
       context: ..
       dockerfile: docker/Dockerfile
       args:
@@ -23,8 +27,8 @@ services:
     stop_grace_period: 30s
 
     ports:
+      # Single port: /metrics is on the same 8080 listener, not a separate 9090.
       - "${SANDBOX_HOST_BIND:-0.0.0.0}:${SANDBOX_PORT:-8080}:8080"
-      - "${METRICS_HOST_BIND:-127.0.0.1}:${METRICS_PORT:-9090}:9090"
 
     environment:
       SANDBOX_CONFIG: /etc/sandbox/config.toml
@@ -39,10 +43,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # Hardening (security_opt/cap_drop) is inherited from the base file;
+    # Compose v2 rejects duplicate array items on merge.
     pids_limit: ${SANDBOX_PIDS_LIMIT:-512}
     mem_limit: ${SANDBOX_MEM_LIMIT:-8g}
     ulimits:

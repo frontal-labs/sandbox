@@ -13,7 +13,7 @@ set -euo pipefail
 REGISTRY="${PROD_REGISTRY:-ghcr.io}"
 NAMESPACE="${PROD_NAMESPACE:-${BUILDKITE_ORGANIZATION_SLUG:-frontal-labs}}"
 IMAGE="${REGISTRY}/${NAMESPACE}/sandbox:latest"
-COMPOSE_FILE="deploy/compose.prod.yaml"
+COMPOSE_FILE="infrastructure/docker/compose.prod.yaml"
 
 export RUSTY_V8_MIRROR="https://github.com/denoland/rusty_v8/releases/download"
 export RUSTY_V8_MIRROR_FALLBACK="1"
@@ -23,17 +23,20 @@ echo "deploy-prod: building release binary"
 cargo build --release -p cli --bin sandbox --bin frontal-sandbox
 
 echo "deploy-prod: building and pushing image"
-docker build -f deploy/Dockerfile -t "${IMAGE}" .
+docker build -f docker/Dockerfile -t "${IMAGE}" .
 docker push "${IMAGE}"
 
 if [[ -f "$COMPOSE_FILE" ]]; then
   echo "deploy-prod: rolling out via $COMPOSE_FILE"
-  docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+  # Compose resolves paths in later files relative to the first file's
+  # directory (docker/), so include the base file first; the overlay's
+  # build context then resolves to the repository root.
+  docker compose -f docker/compose.yaml -f "$COMPOSE_FILE" up -d --force-recreate
 fi
 
 echo "deploy-prod: smoke test"
 SANDBOX_BASE_URL="${PROD_BASE_URL:-http://127.0.0.1:8080}" \
   SANDBOX_API_KEY="${PROD_API_KEY:-}" \
-  ./deploy/scripts/smoke.sh "$SANDBOX_BASE_URL"
+  bash ./infrastructure/scripts/smoke.sh "$SANDBOX_BASE_URL"
 
 echo "deploy-prod: done"

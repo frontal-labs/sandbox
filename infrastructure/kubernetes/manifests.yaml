@@ -1,3 +1,21 @@
+# Frontal Sandbox — Kubernetes deployment (EKS reference target).
+#
+# The server, scheduler, and worker all live in ONE `sandbox serve` process
+# (the codebase ships a single binary; there is no standalone scheduler or
+# worker subcommand today). This manifests one Deployment of that process,
+# with a Postgres sidecar-free dependency for shared metadata and the CAS
+# tier pointed at S3.
+#
+# Version is rendered by the CI pipeline (see infrastructure/ci/tf-plan.yml)
+# which replaces {{VERSION}} with the git tag or short SHA. Do not hand-edit
+# the placeholder when you mean a release — the pipeline owns it.
+#
+# Secrets (database DSN password, S3 credentials) are injected from a
+# Kubernetes Secret `sandbox-secrets`, not baked into this manifest. The API
+# key is generated on first start and persisted in the data dir; it is NOT a
+# boot-time secret (the server prints it once to stderr and stores its digest).
+
+---
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -5,8 +23,13 @@ metadata:
   labels:
     app.kubernetes.io/name: sandbox
     app.kubernetes.io/part-of: frontal-sandbox
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/version: "{{VERSION}}"
 
 ---
+# Configuration rendered into the container. Sensitive values are substituted
+# from the Secret by the entrypoint at start (the config loader reads env
+# overrides), not stored here in plaintext.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,6 +37,8 @@ metadata:
   namespace: sandbox
   labels:
     app.kubernetes.io/name: sandbox
+    app.kubernetes.io/component: server
+    app.kubernetes.io/managed-by: kustomize
 data:
   config.toml: |
     [server]
@@ -28,30 +53,18 @@ data:
     enabled = false
 
     [server.telemetry]
-    metrics_addr = "0.0.0.0:9090"
+    # Note: metrics_addr is accepted by the config schema but not consumed by
+    # the server today — /metrics is served on the main HTTP port.
     otlp_endpoint = "http://otel-collector.monitoring.svc:4317"
     service_name = "sandbox-server"
 
-    [server.scheduler]
-    address = "sandbox-scheduler.sandbox.svc.cluster.local:50051"
-
-    [scheduler]
-    addr = "0.0.0.0:50051"
-    metadata = { backend = "postgres", dsn = "postgres://sandbox:$(SANDBOX_DB_PASSWORD)@postgres.sandbox.svc:5432/sandbox?sslmode=require" }
-    cas = { backend = "object", path = "", bucket = "sandbox-cas", cache_path = "/var/lib/sandbox/cas-cache" }
-    pools = { isolate_warm_pool_size = 64, vm_warm_pool_size = 16 }
-    idle = { sleep_after_seconds = 300 }
-    metering = { enabled = true, export_interval_seconds = 300 }
-
-    [worker]
-    addr = "0.0.0.0:50052"
-    tenant_id = ""
-    scheduler_addr = "sandbox-scheduler.sandbox.svc.cluster.local:50051"
-    isolation = { seccomp = true, cgroups_v2 = true, namespaces = true }
-    resources = { memory_limit_bytes = 17179869184, cpu_limit_ms = 20000, pids_limit = 512 }
-    tier2 = { enabled = true, kvm_device = "/dev/kvm", firecracker_binary = "/usr/local/bin/qemu-system-x86_64", socket_dir = "/var/run/sandbox/vmm" }
-
 ---
+# S3 credentials for the CAS tier. The object_store crate reads the standard
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars (see
+# object_store::aws::AmazonS3Builder::from_env). In prod prefer IRSA / workload
+# identity so no static keys are needed — leave these empty and the pod relies
+# on the node/IRSA role. Populate via your secrets manager (External Secrets /
+# SealedSecrets) only when static keys are unavoidable.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -59,207 +72,156 @@ metadata:
   namespace: sandbox
   labels:
     app.kubernetes.io/name: sandbox
+    app.kubernetes.io/component: server
 type: Opaque
 stringData:
-  db_password: "<REPLACE>"
-  api_key_hash: "<REPLACE_WITH_BLAKE3_HEX_DIGEST>"
+  AWS_ACCESS_KEY_ID: ""
+  AWS_SECRET_ACCESS_KEY: ""
 
 ---
+# Database DSN. The password must match the Postgres instance; build this in
+# CI from the secret manager rather than committing a real value.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sandbox-db
+  namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox
+    app.kubernetes.io/component: database
+type: Opaque
+stringData:
+  URL: "postgres://sandbox:REPLACE_WITH_DB_PASSWORD@postgres.sandbox.svc:5432/sandbox?sslmode=require"
+
+---
+# The sandbox server: one process serving the API, running the in-process
+# scheduler, and executing sessions (including QEMU Tier 2 when the node has
+# /dev/kvm).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sandbox-server
   namespace: sandbox
   labels:
-    app.kubernetes.io/name: sandbox-server
-    app.kubernetes.io/part-of: frontal-sandbox
+    app.kubernetes.io/name: sandbox
+    app.kubernetes.io/component: server
+    app.kubernetes.io/version: "{{VERSION}}"
 spec:
   replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox
+      app.kubernetes.io/component: server
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: sandbox-server
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: sandbox-server
+        app.kubernetes.io/name: sandbox
+        app.kubernetes.io/component: server
+      annotations:
+        # /metrics is served on the main HTTP port (8080), not a separate
+        # listener. Scrape the api port with the /metrics path.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
     spec:
+      # QEMU (Tier 2) needs /dev/kvm. This nodeSelector only places the Pod on a
+      # KVM-capable node (bare-metal or KVM-capable instance types); it does NOT
+      # expose /dev/kvm to the container. Tier 2 (KVM) is therefore unavailable in
+      # this reference Pod unless the cluster's established device mechanism is
+      # configured (e.g. a hostPath /dev/kvm mount or the cluster's device plugin).
+      # Remove for Tier 1 only.
+      nodeSelector:
+        sandbox.kubernetes.io/kvm: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-        - name: server
-          image: ghcr.io/frontal-labs/frontal-sandbox:{{VERSION}}
+        - name: sandbox
+          image: ghcr.io/frontal-labs/sandbox:{{VERSION}}
           imagePullPolicy: IfNotPresent
-          args: ["serve", "--config", "/etc/sandbox/config.toml"]
-          envFrom:
-            - secretRef:
-                name: sandbox-secrets
-          env:
-            - name: SANDBOX_CONFIG
-              value: /etc/sandbox/config.toml
+          command: ["sandbox", "serve", "--config", "/etc/sandbox/config.toml"]
           ports:
-            - containerPort: 8080
-              name: http
-            - containerPort: 9090
-              name: metrics
+            # A single port. /health, the /v1 API, and /metrics are all served
+            # on this one listener — the server has no separate metrics
+            # listener (see crates/sandbox-server/src/api.rs).
+            - name: api
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Postgres DSN for the shared metadata backend.
+            - name: SANDBOX_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-db
+                  key: URL
+            # CAS tier: the S3 bucket that stores blobs durably across nodes.
+            # The server reads SANDBOX_OBJECT_STORE_BUCKET / ENDPOINT (see
+            # crates/sandbox-server/src/config.rs apply_env).
+            - name: SANDBOX_OBJECT_STORE_BUCKET
+              value: "sandbox-cas"
+            # S3 credentials for the CAS tier. The object_store crate reads the
+            # standard AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars.
+            # Prefer IRSA / workload identity (leave the Secret values empty and
+            # these refs optional) so no static keys are baked in.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-secrets
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
           volumeMounts:
             - name: config
-              mountPath: /etc/sandbox/config.toml
-              subPath: config.toml
+              mountPath: /etc/sandbox
               readOnly: true
-            - name: state
+            - name: data
               mountPath: /var/lib/sandbox
-            - name: tls
-              mountPath: /etc/sandbox/tls
-              readOnly: true
           resources:
             requests:
-              cpu: 500m
-              memory: 1Gi
+              cpu: "500m"
+              memory: "1Gi"
             limits:
-              cpu: 2
-              memory: 4Gi
-          livenessProbe:
-            httpGet:
-              path: /v1/openapi.json
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 15
+              cpu: "4"
+              memory: "8Gi"
           readinessProbe:
             httpGet:
-              path: /v1/openapi.json
-              port: 8080
+              path: /health
+              port: api
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
       volumes:
         - name: config
           configMap:
             name: sandbox-config
-        - name: state
+        - name: data
+          # In prod use an EBS/PD PVC (or the S3 CAS tier as the source of
+          # truth with this as a local cache). EmptyDir is a placeholder that
+          # loses state on pod restart.
           emptyDir: {}
-        - name: tls
-          secret:
-            secretName: sandbox-tls
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
-        fsGroup: 10001
-
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: sandbox-scheduler
-  namespace: sandbox
-  labels:
-    app.kubernetes.io/name: sandbox-scheduler
-    app.kubernetes.io/part-of: frontal-sandbox
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: sandbox-scheduler
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: sandbox-scheduler
-    spec:
-      containers:
-        - name: scheduler
-          image: ghcr.io/frontal-labs/frontal-sandbox:{{VERSION}}
-          args: ["scheduler", "--config", "/etc/sandbox/config.toml"]
-          env:
-            - name: SANDBOX_CONFIG
-              value: /etc/sandbox/config.toml
-          ports:
-            - containerPort: 50051
-          volumeMounts:
-            - name: config
-              mountPath: /etc/sandbox/config.toml
-              subPath: config.toml
-              readOnly: true
-      volumes:
-        - name: config
-          configMap:
-            name: sandbox-config
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
-
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: sandbox-worker
-  namespace: sandbox
-  labels:
-    app.kubernetes.io/name: sandbox-worker
-    app.kubernetes.io/part-of: frontal-sandbox
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: sandbox-worker
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: sandbox-worker
-    spec:
-      # Runs on KVM-capable nodes only. Add a nodeSelector / taint for /dev/kvm hosts.
-      nodeSelector:
-        kubernetes.io/arch: amd64
-        sandbox.tier2: "true"
-      containers:
-        - name: worker
-          image: ghcr.io/frontal-labs/frontal-sandbox:{{VERSION}}
-          args: ["worker", "--config", "/etc/sandbox/config.toml", "--tenant-id", "$(POD_NAME)"]
-          env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: SANDBOX_CONFIG
-              value: /etc/sandbox/config.toml
-          ports:
-            - containerPort: 50052
-          volumeMounts:
-            - name: config
-              mountPath: /etc/sandbox/config.toml
-              subPath: config.toml
-              readOnly: true
-            - name: kvm
-              mountPath: /dev/kvm
-            - name: vmm-sockets
-              mountPath: /var/run/sandbox/vmm
-          resources:
-            requests:
-              cpu: 1
-              memory: 2Gi
-            limits:
-              cpu: 4
-              memory: 8Gi
-          securityContext:
-            privileged: false
-            capabilities:
-              drop: ["ALL"]
-              add: ["NET_ADMIN", "SYS_ADMIN"] # QEMU tap device (when used)
-      volumes:
-        - name: config
-          configMap:
-            name: sandbox-config
-        - name: kvm
-          hostPath:
-            path: /dev/kvm
-        - name: vmm-sockets
-          hostPath:
-            path: /var/run/sandbox/vmm
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
+      terminationGracePeriodSeconds: 30
 
 ---
 apiVersion: v1
@@ -268,52 +230,44 @@ metadata:
   name: sandbox-server
   namespace: sandbox
   labels:
-    app.kubernetes.io/name: sandbox-server
+    app.kubernetes.io/name: sandbox
+    app.kubernetes.io/component: server
 spec:
-  selector:
-    app.kubernetes.io/name: sandbox-server
-  ports:
-    - port: 80
-      targetPort: 8080
-      name: http
-    - port: 9090
-      targetPort: 9090
-      name: metrics
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sandbox
+    app.kubernetes.io/component: server
+  ports:
+    # Single port. /metrics is served on the same listener (8080); there is no
+    # separate metrics port.
+    - name: api
+      port: 8080
+      targetPort: api
+      protocol: TCP
 
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: sandbox-scheduler
-  namespace: sandbox
-  labels:
-    app.kubernetes.io/name: sandbox-scheduler
-spec:
-  selector:
-    app.kubernetes.io/name: sandbox-scheduler
-  ports:
-    - port: 50051
-      targetPort: 50051
-  type: ClusterIP
-
----
+# External exposure. The server has no TLS; terminate TLS here (or at an
+# ALB/Ingress with a certificate) and route to the API port. Metrics must NOT
+# be exposed externally — keep it on the ClusterIP service only.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: sandbox
   namespace: sandbox
+  labels:
+    app.kubernetes.io/name: sandbox
+    app.kubernetes.io/component: server
   annotations:
-    kubernetes.io/ingress.class: nginx
-    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - api.sandbox.example.com
+        - sandbox.example.com
       secretName: sandbox-tls
   rules:
-    - host: api.sandbox.example.com
+    - host: sandbox.example.com
       http:
         paths:
           - path: /
@@ -322,37 +276,4 @@ spec:
               service:
                 name: sandbox-server
                 port:
-                  number: 80
-
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: sandbox-server
-  namespace: sandbox
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: sandbox-server
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: sandbox-server
-  namespace: sandbox
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: sandbox-server
+                  name: api

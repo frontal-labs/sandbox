@@ -91,7 +91,7 @@ sandbox/
 ├── benchmarks/                # criterion benches + load tests
 ├── tools/                     # build scripts: tools to WASM, rootfs images (planned)
 ├── images/                    # Tier 2 rootfs recipes (planned)
-├── deploy/                    # Dockerfile, Terraform, systemd units (planned)
+├── infrastructure/            # Terraform, K8s manifests, systemd units, config schema, monitoring
 ├── tests/                     # cross-crate integration + conformance (planned)
 ├── examples/                  # coding-agent, data-agent, browser-agent (planned)
 └── docs/                      # architecture, security, API, limits

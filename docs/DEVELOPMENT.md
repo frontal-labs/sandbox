@@ -277,8 +277,9 @@ Whether the CLI or tests actually install a subscriber has not been verified.
 ## Known gaps
 
 - `docs/` and `.github/` may still reference tools not in this repo (for
-  example `sandbox-admin`, `tools/`, `images/`, `deploy/`, `bench/`,
-  `tests/`). They do not exist yet.
+  example `sandbox-admin`, `tools/`, `images/`, `bench/`, `tests/`). They do
+  not exist yet. Deployment lives in `infrastructure/` + `docker/` (the old
+  `deploy/` directory was consolidated into these).
 - The release process (`release.yml`, `.changeset/`) was not reviewed in this
   update.
 
