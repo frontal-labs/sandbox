@@ -181,7 +181,12 @@ async fn create_hash_produces_correct_digests() {
         console.log(sha256.digest("hex"));
         "#)
     .await;
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     // sha256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
@@ -196,7 +201,12 @@ async fn create_hash_supports_sha1() {
         console.log(crypto.createHash("sha1").update("hello").digest("hex"));
         "#)
     .await;
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     // sha1("hello") = aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
@@ -211,7 +221,12 @@ async fn create_hash_supports_sha512() {
         console.log(crypto.createHash("sha512").update("hello").digest("hex"));
         "#)
     .await;
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     // sha512("hello") = 9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
@@ -229,7 +244,12 @@ async fn create_hash_accumulates_across_updates() {
         console.log(h.digest("hex"));
         "#)
     .await;
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     // sha256("hello") — same as single update
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
@@ -245,7 +265,12 @@ async fn create_hash_default_encoding_is_buffer() {
         console.log(digest.length, digest instanceof Uint8Array);
         "#)
     .await;
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&out.stdout), "32 true\n");
 }
 
@@ -256,7 +281,12 @@ async fn create_hash_rejects_unsupported_algorithm() {
         try { crypto.createHash("md5"); } catch (e) { console.log(e.message); }
         "#)
     .await;
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(String::from_utf8_lossy(&out.stdout).contains("unsupported algorithm"));
 }
 
@@ -269,6 +299,11 @@ async fn create_hash_accepts_dash_and_underscore_variants() {
         console.log(a === b);
         "#)
     .await;
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&out.stdout), "true\n");
 }
