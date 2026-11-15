@@ -295,6 +295,17 @@ pub mod hash {
     /// SHA-1 is intentionally supported for `node:crypto` API parity (Node
     /// exposes `sha1` in `createHash`); it is not for security-sensitive
     /// use — prefer sha256/sha512.
+    ///
+    /// # Safety
+    ///
+    /// SHA-1 (alg == 0) is cryptographically broken (chosen-prefix
+    /// collisions). It is exposed only for `node:crypto` compatibility;
+    /// callers must not use it for integrity or security checks.
+    ///
+    /// @SecurityComment SHA-1 usage here is intentional and limited to
+    /// `node:crypto` API parity — Node.js exposes `createHash('sha1')`
+    /// and sandboxed scripts may call it. It is not used for any
+    /// security-sensitive purpose in this codebase.
     #[op2]
     #[buffer]
     pub fn op_sandbox_hash(
@@ -307,6 +318,7 @@ pub mod hash {
             0 => {
                 // SHA-1: Node `crypto.createHash("sha1")` parity. Not for
                 // security use — use sha256/sha512 for integrity checks.
+                // (SonarCloud S4790: intentional for node:crypto API parity.)
                 let mut h = Sha1::new();
                 h.update(bytes);
                 h.finalize().to_vec()
