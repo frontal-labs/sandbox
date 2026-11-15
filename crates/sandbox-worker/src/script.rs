@@ -170,7 +170,11 @@ async fn run_contained(
         let _ = stdin.shutdown().await;
     }
 
-    let mut stdout = child.stdout.take().expect("piped stdout");
+    // Stdout is always piped above, so this only fails if the spawn path changes.
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| SandboxError::internal("script child spawned without a piped stdout"))?;
     let mut collected = Collected::default();
     let deadline = limits.timeout + HOST_GRACE;
     let read = tokio::time::timeout(
