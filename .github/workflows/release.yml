@@ -181,11 +181,21 @@ jobs:
           fi
           version=$(node -p "require('./sdks/typescript/package.json').version")
           tag="sdk-v${version}"
+          cli_tag="v${version}"
           # actions/checkout does not fetch tags, so ask the remote.
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "$tag already exists; nothing to release"
+          tag_exists() { git ls-remote --exit-code --tags origin "refs/tags/$1" >/dev/null 2>&1; }
+          if tag_exists "$tag" && tag_exists "$cli_tag"; then
+            echo "$tag and $cli_tag already exist; nothing to release"
             exit 0
           fi
-          git tag "$tag"
-          git push origin "$tag"
-          gh release create "$tag" --title "SDKs $version" --generate-notes
+          # The sdk-v* tag marks the SDK publication; the v* tag triggers
+          # release-binaries.yml to build and publish the CLI binaries.
+          if ! tag_exists "$tag"; then
+            git tag "$tag"
+            git push origin "$tag"
+          fi
+          if ! tag_exists "$cli_tag"; then
+            git tag "$cli_tag"
+            git push origin "$cli_tag"
+          fi
+          gh release create "$tag" --title "Release $version" --generate-notes

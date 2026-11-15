@@ -734,9 +734,12 @@ impl IntoResponse for ApiError {
             message: self.inner.message,
         };
         let mut response = (status, Json(body)).into_response();
-        if let Some(retry_after) = self.retry_after {
-            let headers = response.headers_mut();
-            headers.insert(header::RETRY_AFTER, retry_after.parse().unwrap());
+        // The header is advisory: a malformed value is dropped rather than panicking the
+        // response path.
+        if let Some(retry_after) = self.retry_after.as_deref().and_then(|v| v.parse().ok()) {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, retry_after);
         }
         response
     }
