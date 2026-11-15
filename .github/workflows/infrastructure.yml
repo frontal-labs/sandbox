@@ -56,15 +56,15 @@ jobs:
             kubeconform infrastructure/kubernetes/manifests.yaml
           else
             echo "kubeconform not installed; falling back to YAML parse"
-            python3 - <<'EOF'
-            import yaml
-            docs = [d for d in yaml.safe_load_all(open("infrastructure/kubernetes/manifests.yaml")) if d]
-            assert docs, "manifests.yaml is empty"
-            for d in docs:
-                print(f"  {d['kind']}/{d['metadata']['name']}")
-            print(f"OK {len(docs)} K8s documents parsed")
-            EOF
           fi
+          python3 - <<'EOF'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("infrastructure/kubernetes/manifests.yaml")) if d]
+          assert docs, "manifests.yaml is empty"
+          for d in docs:
+              print(f"  {d['kind']}/{d['metadata']['name']}")
+          print(f"OK {len(docs)} K8s documents parsed")
+          EOF
 
       - name: Compose overlay lint
         run: |
