@@ -128,6 +128,14 @@ resource "aws_security_group" "sandbox_lb" {
   description = "NLB fronting the sandbox hosts"
   vpc_id      = aws_vpc.sandbox.id
 
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = [var.ssh_cidr]
+    description = "Sandbox API (operator CIDR)"
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
