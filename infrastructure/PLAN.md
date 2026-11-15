@@ -70,7 +70,7 @@ infrastructure/
 │   ├── compute.tf       # instances with /dev/kvm + cgroups v2
 │   ├── networking.tf    # VPC, subnets, security groups
 │   ├── storage.tf       # object-store bucket (CAS tier) + block volumes
-│   └── firewall.tf      # ingress rules (8080, 9090 metrics, 22 SSH)
+│   └── firewall.tf      # ingress rules (8080 API+metrics, 22 SSH)
 ├── docker/              # production overlay for the local stack
 │   └── compose.prod.yaml   # extends docker/compose.yaml (TLS, rate limit, metrics)
 ├── kubernetes/          # clustered deployment (M5)
@@ -174,10 +174,10 @@ in `sandbox-scheduler` and `sandbox-worker`.
 ### 5.2 Cloud host (M4+)
 
 - OpenTofu provisions one or more KVM-capable instances (`compute.tf`),
-  security groups allowing `8080` (API), `9090` (metrics), and SSH (`firewall.tf`),
-  an object-store bucket for the CAS tier (`storage.tf`), and block volumes
-  for per-VM overlay images.
-- The instance runs `sandbox-server` + `sandbox-worker` under systemd.
+  security groups allowing `8080` (API + /metrics on the same listener) and SSH
+  (`firewall.tf`), an object-store bucket for the CAS tier (`storage.tf`), and
+  block volumes for per-VM overlay images.
+- The instance runs a single `sandbox serve` process under systemd.
 
 ### 5.3 Clustered (M5)
 

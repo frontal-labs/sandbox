@@ -13,23 +13,13 @@ rule_files:
   - "recording-rules.yaml"
 
 scrape_configs:
+  # Single serve process: server, scheduler, and worker all live in one
+  # `sandbox serve` binary. /metrics is served on the main 8080 listener
+  # (not a separate 9090 port).
   - job_name: "sandbox-server"
     static_configs:
       - targets:
-        # - sandbox-server.sandbox.svc:9090
-    metrics_path: /metrics
-    scrape_interval: 10s
-
-  - job_name: "sandbox-scheduler"
-    static_configs:
-      - targets:
-        # - sandbox-scheduler.sandbox.svc:9090
-    metrics_path: /metrics
-    scrape_interval: 10s
-
-  - job_name: "sandbox-worker"
-    static_configs:
-      - targets:
-        # - sandbox-worker.<node>:9090
+        # K8s: sandbox-server.sandbox.svc:8080
+        # Bare-metal (node_exporter-style): <host>:8080
     metrics_path: /metrics
     scrape_interval: 10s

@@ -1,7 +1,10 @@
 [Unit]
-Description=Frontal Sandbox target (server + scheduler + all workers)
-Wants=sandbox-server.service sandbox-scheduler.service
-After=sandbox-server.service sandbox-scheduler.service
+Description=Frontal Sandbox target (single serve process)
+# The scheduler and session execution run in-process inside `sandbox serve`,
+# so there is exactly one unit to start. If the project later splits these
+# into standalone binaries, add units here.
+Wants=sandbox-server.service
+After=sandbox-server.service
 
 [Install]
 WantedBy=multi-user.target

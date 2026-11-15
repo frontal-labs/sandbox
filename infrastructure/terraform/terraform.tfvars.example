@@ -1,9 +1,30 @@
 # Example terraform.tfvars — copy and edit per environment.
-# Never commit real secrets here.
+# Never commit real secrets here. Sensitive values (RDS password, API key
+# digest) belong in a secrets manager; reference them or paste them locally.
 
+# Region and placement.
 aws_region     = "us-east-1"
-instance_type  = "m6i.large"
+# availability_zones = null   # null auto-discovers AZs in the region.
+
+# Instances. Tier 2 (QEMU /dev/kvm) requires a KVM-capable (metal) type; the
+# default picks m6i.metal-medium automatically when enable_tier2 is true.
+instance_type  = null           # override, e.g. "m6i.metal-medium"
 instance_count = 1
 ssh_key_name   = "<YOUR_SSH_KEY_NAME>"
+ssh_cidr       = "<VPN_OR_OFFICE_CIDR>"   # never 0.0.0.0/0 in prod
 enable_tier2   = true
-cas_bucket     = "sandbox-cas-production"
+
+# Load balancer in front of the hosts (opens the API port only to the LB).
+enable_lb = false
+
+# Managed Postgres for shared metadata (RDS).
+enable_rds        = false
+rds_instance_class = "db.t4g.small"
+rds_master_username = "sandbox"
+# rds_password = "<generated-or-stable-password>"   # null generates one
+
+# CAS bucket (globally unique S3 namespace).
+cas_bucket = "sandbox-cas-production"
+
+# Environment label used in names and tags.
+env = "prod"

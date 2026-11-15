@@ -1,5 +1,5 @@
 [Unit]
-Description=Frontal Sandbox HTTP API server
+Description=Frontal Sandbox HTTP API server (serves the API, runs the in-process scheduler, and executes sessions including QEMU Tier 2)
 Documentation=file:/etc/sandbox/config.toml
 After=network-online.target
 Wants=network-online.target
@@ -9,10 +9,13 @@ Type=notify
 # Run as an unprivileged user; the binary drops no privileges itself.
 User=sandbox
 Group=sandbox
+# Tier 2 (QEMU) needs /dev/kvm. Grant the sandbox user kvm group membership
+# on the host (usermod -aG kvm sandbox); the unit itself reads the device.
+SupplementaryGroups=kvm
 # Hardening mirrors docker/compose.yaml.
 NoNewPrivileges=true
 ProtectSystem=full
-ReadWritePaths=/var/lib/sandbox /tmp /var/run/sandbox
+ReadWritePaths=/var/lib/sandbox /tmp /var/run/sandbox /dev/kvm
 PrivateTmp=true
 CapabilityBoundingSet=
 AmbientCapabilities=

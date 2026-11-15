@@ -15,6 +15,9 @@ target/
 # Bazel output symlinks
 bazel-*
 
+# Terraform provider cache (the .terraform.lock.hcl lock file IS tracked)
+.terraform/
+
 # Python caches
 __pycache__/
 .pytest_cache/

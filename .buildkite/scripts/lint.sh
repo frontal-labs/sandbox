@@ -26,6 +26,6 @@ python3.12 -m pip install --quiet --require-hashes -r sdks/python/requirements_l
 ruff check sdks/python/sandbox_sdk
 
 echo "lint: shell scripts"
-shellcheck .buildkite/scripts/*.sh deploy/scripts/*.sh infrastructure/scripts/*.sh || true
+shellcheck .buildkite/scripts/*.sh infrastructure/scripts/*.sh || true
 
 echo "lint: done"

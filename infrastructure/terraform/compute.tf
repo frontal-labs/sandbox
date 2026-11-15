@@ -1,20 +1,95 @@
 provider "aws" {
   region = var.aws_region
+
+  default_tags {
+    tags = {
+      ManagedBy = "terraform"
+      Project   = "frontal-sandbox"
+      Env       = var.env
+    }
+  }
 }
 
 provider "tls" {}
 
+# IAM role scoped to read/write only the CAS bucket. The instance assumes it,
+# so the worker never needs static S3 credentials in the environment.
+resource "aws_iam_role" "sandbox" {
+  name = "sandbox-host-${var.env}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "sandbox_cas" {
+  name = "sandbox-cas-access-${var.env}"
+  role = aws_iam_role.sandbox.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+          "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts",
+          "s3:ListBucketMultipartUploads",
+        ]
+        Resource = [
+          aws_s3_bucket.cas.arn,
+          "${aws_s3_bucket.cas.arn}/*",
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "sandbox" {
+  name = "sandbox-host-${var.env}"
+  role = aws_iam_role.sandbox.name
+}
+
 resource "aws_instance" "sandbox" {
-  count         = var.instance_count
+  count = var.instance_count
+
   ami           = data.aws_ami.ubuntu.id
-  instance_type = var.instance_type
+  instance_type = local.effective_instance_type
 
-  # KVM-capable: x86_64 Nitro or aarch64 metal instances expose /dev/kvm.
+  # KVM-capable: a bare-metal / metal or KVM-capable instance exposes /dev/kvm.
   # cgroups v2 is default on modern Ubuntu.
-  key_name = var.ssh_key_name
+  key_name                    = var.ssh_key_name
+  subnet_id                   = aws_subnet.sandbox[count.index % length(aws_subnet.sandbox)].id
+  vpc_security_group_ids      = [aws_security_group.sandbox.id]
+  iam_instance_profile        = aws_iam_instance_profile.sandbox.name
+  associate_public_ip_address = var.enable_lb ? false : true
 
-  vpc_security_group_ids = [aws_security_group.sandbox.id]
+  root_block_device {
+    volume_size = var.root_volume_size_gb
+    volume_type = "gp3"
+    iops        = 3000
+    throughput  = 125
+    encrypted   = true
+  }
 
+  # Idempotent bootstrap: install the release binary and start the server.
+  # Re-running is safe (systemctl enable --now is idempotent; curl -fsSL fails
+  # cleanly and the unit stays on the previous binary). Secrets are NOT in
+  # here; they are injected via /etc/sandbox/config.toml by deploy.sh.
   user_data = <<-EOF
               #cloud-config
               packages:
@@ -23,23 +98,19 @@ resource "aws_instance" "sandbox" {
                 - tini
               runcmd:
                 - usermod -aG kvm sandbox || true
-                - systemctl enable --now sandbox-server sandbox-scheduler || true
+                - mkdir -p /var/lib/sandbox /var/log/sandbox
+                - chown -R sandbox:sandbox /var/lib/sandbox /var/log/sandbox
+                - systemctl daemon-reload
+                - systemctl enable --now sandbox-server
               EOF
 
-  root_block_device {
-    volume_size = 100
-    volume_type = "gp3"
-    encrypted   = true
-  }
-
-  ephemeral_block_device {
-    device_name = "/dev/nvme1n1"
-  }
-
   tags = {
-    Name        = "sandbox-${count.index}"
-    ManagedBy   = "terraform"
-    Tier2       = var.enable_tier2
+    Name        = "sandbox-${var.env}-${count.index}"
+    Tier2       = var.enable_tier2 ? "true" : "false"
+  }
+
+  lifecycle {
+    ignore_changes = [user_data]
   }
 }
 
@@ -53,40 +124,15 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# The single security group for all sandbox hosts. All ingress/egress rules
+# live in firewall.tf as explicit aws_security_group_rule resources (not inline
+# blocks), so they are individually named, diffable, and easy to lock down.
 resource "aws_security_group" "sandbox" {
-  name_prefix = "sandbox"
+  name_prefix = "sandbox-${var.env}"
   description = "Frontal Sandbox host"
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # narrow this per your network policy
-  }
-
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # fronted by TLS + auth gateway in prod
-  }
-
-  ingress {
-    from_port   = 9090
-    to_port     = 9090
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/8"] # metrics only from within the VPC
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  vpc_id      = aws_vpc.sandbox.id
 
   tags = {
-    Name        = "sandbox"
-    ManagedBy   = "terraform"
+    Name = "sandbox-${var.env}"
   }
 }

@@ -1,12 +1,13 @@
 # Terraform / OpenTofu deployment for Frontal Sandbox.
 
 Provisions one or more KVM-capable cloud hosts (AWS by default) with:
-- security groups for SSH (22), API (8080), metrics (9090, VPC-only)
+- security groups for SSH (22) and API + metrics (8080)
 - an S3 bucket for the CAS tier (tiered/object backends)
 - user-data that enables kvm group access
 
-The host then runs `sandbox-server` and `sandbox-worker` under systemd
-(see `../systemd/`), installed by `../scripts/deploy.sh`.
+The host then runs a single `sandbox serve` process under systemd
+(see `../systemd/`), installed by `../scripts/deploy.sh`. /metrics is served
+on the same 8080 listener as the API (no separate metrics port).
 
 ## Usage
 

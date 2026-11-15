@@ -42,7 +42,7 @@ infrastructure/scripts/smoke.sh http://127.0.0.1:8080
 
 ## Milestone alignment
 
-- M3: config schema + defaults, systemd units, deploy/smoke scripts, compose overlay
+- M3: config schema + defaults, systemd units, deploy/smoke scripts, compose overlay (deploy/ consolidated here)
 - M4: Terraform for KVM hosts, worker isolation flags
 - M5: Kubernetes manifests, Prometheus/Grafana, backup/restore
 

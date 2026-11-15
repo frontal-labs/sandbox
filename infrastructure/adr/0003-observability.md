@@ -12,7 +12,9 @@ in code. Infrastructure needs a concrete, minimal observability surface that
 the service crates will implement against.
 
 ## Decision
-- Metrics: Prometheus scrape at `/metrics` on each service (9090 for server).
+- Metrics: Prometheus scrape at `/metrics` on the main 8080 listener (single
+  serve process; server/scheduler/worker all in one binary, no separate
+  metrics port).
   Metric names: `sandbox_session_starts_total`, `sandbox_session_start_latency_seconds`,
   `sandbox_exec_duration_seconds`, `sandbox_promotion_total`, `sandbox_policy_denials_total`,
   `sandbox_oom_kills_total`, `sandbox_cas_hit_rate`, `sandbox_pool_depth`,

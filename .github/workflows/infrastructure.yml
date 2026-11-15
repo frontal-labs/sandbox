@@ -26,23 +26,18 @@ jobs:
           tofu_version: "1.8"
 
       - name: Install schema validation dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-jsonschema
+        run: sudo apt-get update && sudo apt-get install -y python3-jsonschema python3-yaml
 
       - name: Validate TOML examples against JSON schemas
         run: |
           python3 - <<'EOF'
           import json, tomllib, glob
           import jsonschema
-          # Each example is one environment with a table per component. Validate
-          # each table against that component's schema (the file names differ).
-          COMPONENTS = ["server", "scheduler", "worker"]
+          # Single-serve topology: only the [server] table is present.
           for path in sorted(glob.glob("infrastructure/config/examples/*.toml")):
               data = tomllib.load(open(path, "rb"))
-              for component in COMPONENTS:
-                  if component not in data:
-                      continue
-                  schema = json.load(open(f"infrastructure/config/schema/{component}.schema.json"))
-                  jsonschema.validate(data[component], schema)
+              schema = json.load(open("infrastructure/config/schema/server.schema.json"))
+              jsonschema.validate(data["server"], schema)
               print(f"OK {path}")
           EOF
 
@@ -60,5 +55,25 @@ jobs:
           if command -v kubeconform >/dev/null 2>&1; then
             kubeconform infrastructure/kubernetes/manifests.yaml
           else
-            echo "kubeconform not installed; skipping manifest lint"
+            echo "kubeconform not installed; falling back to YAML parse"
+            python3 - <<'EOF'
+            import yaml
+            docs = [d for d in yaml.safe_load_all(open("infrastructure/kubernetes/manifests.yaml")) if d]
+            assert docs, "manifests.yaml is empty"
+            for d in docs:
+                print(f"  {d['kind']}/{d['metadata']['name']}")
+            print(f"OK {len(docs)} K8s documents parsed")
+            EOF
           fi
+
+      - name: Compose overlay lint
+        run: |
+          python3 - <<'EOF'
+          import yaml, glob
+          for path in sorted(glob.glob("infrastructure/docker/compose.*.yaml")):
+              data = yaml.safe_load(open(path))
+              assert data, f"{path} is empty"
+              name = data.get("name", "unnamed")
+              services = list(data.get("services", {}).keys())
+              print(f"OK {path} -> {name} ({', '.join(services)})")
+          EOF
