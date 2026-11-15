@@ -3,10 +3,7 @@
 
 use deno_core::{op2, OpState};
 use deno_error::JsErrorBox;
-use digest::Digest;
 use sandbox_vfs::{OpenFlags, SessionFs, Vfs, VfsError};
-use sha1::Sha1;
-use sha2::{Sha256, Sha512};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -286,10 +283,18 @@ pub mod time {
 /// the host side; the JS shim normalizes names ("sha1"/"sha256"/"sha512" with
 /// or without "-" separators) before calling.
 pub mod hash {
-    use super::*;
     use deno_core::JsBuffer;
+    use deno_core::{op2, OpState};
+    use deno_error::JsErrorBox;
+    use digest::Digest;
+    use sha1::Sha1;
+    use sha2::{Sha256, Sha512};
 
     /// Hashes `data` with the requested algorithm and returns the raw digest.
+    ///
+    /// SHA-1 is intentionally supported for `node:crypto` API parity (Node
+    /// exposes `sha1` in `createHash`); it is not for security-sensitive
+    /// use — prefer sha256/sha512.
     #[op2]
     #[buffer]
     pub fn op_sandbox_hash(
@@ -300,6 +305,8 @@ pub mod hash {
         let bytes = data.as_ref();
         let digest: Vec<u8> = match alg {
             0 => {
+                // SHA-1: Node `crypto.createHash("sha1")` parity. Not for
+                // security use — use sha256/sha512 for integrity checks.
                 let mut h = Sha1::new();
                 h.update(bytes);
                 h.finalize().to_vec()
