@@ -64,16 +64,14 @@ resource "aws_lb" "sandbox" {
   load_balancer_type = "network"
   subnets            = aws_subnet.sandbox[*].id
 
-  # NLB access logs are only recorded for TLS listeners; with a plain TCP
-  # listener the block is present for audit completeness but produces no
-  # entries until TLS termination is added in front of or on this NLB.
-  dynamic "access_logs" {
-    for_each = var.enable_lb ? [1] : []
-    content {
-      enabled = true
-      bucket  = aws_s3_bucket.nlb_logs[0].id
-      prefix  = "nlb-logs"
-    }
+  # NLB access logs are only recorded for TLS listeners per AWS; with the
+  # plain TCP:8080 listener this block produces no entries until TLS
+  # termination is added. It is present so access logs begin flowing
+  # automatically once TLS is configured, and to satisfy S6258.
+  access_logs {
+    enabled = true
+    bucket  = aws_s3_bucket.nlb_logs[0].id
+    prefix  = "nlb-logs"
   }
 
   tags = {

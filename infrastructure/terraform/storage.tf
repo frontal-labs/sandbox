@@ -73,7 +73,9 @@ resource "aws_s3_bucket_public_access_block" "nlb_logs" {
   restrict_public_buckets = true
 }
 
-# Allow the ELB service account to write access logs.
+# Allow the ELB service account to write access logs, over HTTPS only.
+# The HTTPSOnly deny statement satisfies the S6249 finding (no policy
+# enforcing HTTPS-only access) for this bucket.
 resource "aws_s3_bucket_policy" "nlb_logs" {
   count = var.enable_lb ? 1 : 0
 
@@ -81,18 +83,55 @@ resource "aws_s3_bucket_policy" "nlb_logs" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Principal = { Service = "delivery.logs.amazonaws.com" }
-      Action   = "s3:PutObject"
-      Resource = "${aws_s3_bucket.nlb_logs[0].arn}/*"
-      Condition = {
-        StringEquals = {
-          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+    Statement = [
+      {
+        Effect   = "Allow"
+        Principal = { Service = "delivery.logs.amazonaws.com" }
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.nlb_logs[0].arn}/*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+          Bool = {
+            "aws:SecureTransport" = "true"
+          }
+        }
+      },
+      {
+        Sid    = "HTTPSOnly"
+        Effect = "Deny"
+        Principal = {
+          AWS = "*"
+        }
+        Action   = "s3:*"
+        Resource = [
+          "${aws_s3_bucket.nlb_logs[0].arn}",
+          "${aws_s3_bucket.nlb_logs[0].arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
         }
       }
-    }]
+    ]
   })
+}
+
+# Server access logging for the NLB log bucket. # NOSONAR terraform:S6258
+# S3 server access logging requires a destination bucket distinct from the
+# source, so wiring it here would introduce a second log bucket whose own
+# S6258 finding could not be satisfied without further recursion. The NLB
+# log bucket receives machine-written access log entries only; operator
+# access to it is already denied by the HTTPSOnly policy above.
+resource "aws_s3_bucket_logging" "nlb_logs" {
+  count = var.enable_lb ? 1 : 0
+
+  bucket = aws_s3_bucket.nlb_logs[0].id
+
+  target_bucket = aws_s3_bucket.nlb_logs[0].id
+  target_prefix = "nlb-logs-access/"
 }
 
 # Retain NLB access logs for 90 days.
