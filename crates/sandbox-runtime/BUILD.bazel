@@ -22,6 +22,9 @@ rust_library(
         "@crates//:swc_core",
         "@crates//:serde_json",
         "@crates//:deno_error",
+        "@crates//:digest",
+        "@crates//:sha1",
+        "@crates//:sha2",
     ],
     proc_macro_deps = [
         "@crates//:async-trait",
