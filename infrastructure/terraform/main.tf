@@ -160,3 +160,5 @@ variable "root_volume_size_gb" {
 data "aws_availability_zones" "available" {
   state = "available"
 }
+
+data "aws_caller_identity" "current" {}
