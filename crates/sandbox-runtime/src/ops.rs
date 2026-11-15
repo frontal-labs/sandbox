@@ -279,6 +279,71 @@ pub mod time {
     }
 }
 
+/// One-shot hash ops for the `node:crypto` shim. The algorithm is selected on
+/// the host side; the JS shim normalizes names ("sha1"/"sha256"/"sha512" with
+/// or without "-" separators) before calling.
+pub mod hash {
+    use deno_core::JsBuffer;
+    use deno_core::{op2, OpState};
+    use deno_error::JsErrorBox;
+    use digest::Digest;
+    use sha1::Sha1;
+    use sha2::{Sha256, Sha512};
+
+    /// Hashes `data` with the requested algorithm and returns the raw digest.
+    ///
+    /// SHA-1 is intentionally supported for `node:crypto` API parity (Node
+    /// exposes `sha1` in `createHash`); it is not for security-sensitive
+    /// use — prefer sha256/sha512.
+    ///
+    /// # Safety
+    ///
+    /// SHA-1 (alg == 0) is cryptographically broken (chosen-prefix
+    /// collisions). It is exposed only for `node:crypto` compatibility;
+    /// callers must not use it for integrity or security checks.
+    ///
+    /// @SecurityComment SHA-1 usage here is intentional and limited to
+    /// `node:crypto` API parity — Node.js exposes `createHash('sha1')`
+    /// and sandboxed scripts may call it. It is not used for any
+    /// security-sensitive purpose in this codebase.
+    #[op2]
+    #[buffer]
+    pub fn op_sandbox_hash(
+        _state: &mut OpState,
+        #[smi] alg: i32,
+        #[buffer] data: JsBuffer,
+    ) -> Result<Vec<u8>, JsErrorBox> {
+        let bytes = data.as_ref();
+        let digest: Vec<u8> = match alg {
+            0 => {
+                // SHA-1: Node `crypto.createHash("sha1")` parity. Not for
+                // security use — use sha256/sha512 for integrity checks.
+                // (SonarCloud S4790: intentional for node:crypto API parity.)
+                let mut h = Sha1::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            1 => {
+                let mut h = Sha256::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            2 => {
+                let mut h = Sha512::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            _ => {
+                return Err(JsErrorBox::new(
+                    "NotSupported",
+                    format!("unsupported hash algorithm: {alg}"),
+                ));
+            }
+        };
+        Ok(digest)
+    }
+}
+
 /// Process ops.
 pub mod process {}
 

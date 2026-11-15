@@ -71,7 +71,7 @@ Last reviewed against the source tree on 2026-11-14.
 - [x] Cold start < 5 ms from warm pool in `bench/`: a new Tier 1 session takes a p50 of 833 ns, and a `node` run takes a p50 of 0.41 ms from a warm isolate (5.10 ms cold). The back-to-back tail is the cold cost (ADR 0025)
 - [x] 200+ shell conformance cases pass (219 of 219 against GNU bash 5.3.8, ADR 0019)
 
-### Status: **Partial (scaffolding only)**
+### Status: **Partial**
 
 ---
 
@@ -93,7 +93,7 @@ Last reviewed against the source tree on 2026-11-14.
 - [x] Trace shows every file change: commands record their file changes (ADR 0011), and writes and deletes through the filesystem API are runs of their own (ADR 0012). Renames and chmod are not separate operations, so a rename shows as a delete and a create
 - [ ] 70% pass rate on first agent-transcript corpus
 
-### Status: **Not started**
+### Status: **Partial**
 
 ---
 
@@ -164,7 +164,7 @@ Last reviewed against the source tree on 2026-11-14.
 - [ ] Documented SLOs
 - [ ] Security review findings resolved
 
-### Status: **Not started**
+### Status: **Partial**
 
 ---
 
@@ -175,12 +175,15 @@ Last reviewed against the source tree on 2026-11-14.
 ### Deliverables
 - [ ] Interactive PTY shell
 - [x] `sandbox replay` CLI, with recording through `run --trace` and `shell --trace`
+- [x] Snapshot templates: named, key-scoped templates over saved snapshots
+      (`POST/GET /v1/templates`, `initial_template` on session creation,
+      persisted across restarts). ADR 0049. Preset images such as `node-20`
+      and `python-3.12` are not built in yet
 - [ ] VS Code / MCP server
 - [ ] Docs site
 - [ ] Examples: coding agent, data agent, browser agent
-- [ ] Snapshot templates (node-20, python-3.12, etc.)
 
-### Status: **Not started**
+### Status: **Partial**
 
 ---
 
@@ -199,13 +202,13 @@ Last reviewed against the source tree on 2026-11-14.
 
 | Milestone | Target Week | Status | Blockers |
 |-----------|-------------|--------|----------|
-| M0 | 1 | Done | CI green on all PRs and main pushes (confirmed 2026-11-14); KVM VM workflow runs `--ignored` suites |
+| M0 | 1 | Done | CI green on all PRs and main pushes (confirmed 2026-11-14); KVM VM workflow runs `--ignored` suites. The push-only Release workflow is outside that confirmation: it first ran 2026-11-15 and failed to parse on a YAML syntax error in `release.yml` (an unquoted `:all:`), fixed on 2026-11-15 |
 | M1 | 2-5 | Partial | Shell and isolate `exec` work over the VFS; 219 conformance cases pass against GNU bash (acceptance: 200+ cases). `node -e`, `.ts` against VFS, and the cold-start benchmark are still open |
 | M2 | 6-9 | Partial | WASI command modules run over a VFS preopen, with a tool registry; no persistent AOT cache, no preview2 |
 | M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory behind API-key auth with OpenAPI and 429 + Retry-After; worker runs one child process per session |
 | M4 | 14-19 | Partial | QEMU VMM with warm pool, guest agent, promote_to_vm, import_from_dir/export_ext4 all working; auto-promotion, performance targets, and rootfs images not done |
 | M5 | 20-24 | Partial | Postgres state store (one node at a time, conditional writes, tested on Postgres 18). Clustered scheduler, placement, and object-store blobs are not built |
-| M6 | Ongoing | Not started | - |
+| M6 | Ongoing | Partial | `sandbox replay` and snapshot templates (ADR 0049) are done; PTY shell, VS Code/MCP server, docs site, and examples are not started |
 
 ---
 
