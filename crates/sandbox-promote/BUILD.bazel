@@ -12,7 +12,6 @@ rust_library(
         "//crates/sandbox-vfs:sandbox_vfs",
         "//crates/sandbox-session:sandbox_session",
         "//crates/sandbox-vmm:sandbox_vmm",
-        "//crates/sandbox-snapshot:sandbox_snapshot",
         "@crates//:tokio",
         "@crates//:bytes",
         "@crates//:tracing",

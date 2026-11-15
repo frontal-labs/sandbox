@@ -14,8 +14,8 @@ was performed as part of writing this document.
 
 Crates and packages with **no test files**: `sandbox-types`, `sandbox-vfs`,
 `sandbox-shell`, `sandbox-runtime`, `sandbox-wasm`, `sandbox-session`,
-`sandbox-snapshot`, `sandbox-vmm`, `sandbox-guest`, `sandbox-promote`,
-`sandbox-policy`, `sandbox-trace`, `sandbox-worker`, `sandbox-scheduler`,
+`sandbox-vmm`, `sandbox-guest`, `sandbox-promote`,
+`sandbox-trace`, `sandbox-worker`,
 `sandbox-server`, `sdks/rust`, and `cli`.
 
 Declared but unused: `proptest` is a workspace dependency (root `Cargo.toml`),

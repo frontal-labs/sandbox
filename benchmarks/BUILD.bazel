@@ -14,7 +14,6 @@ rust_library(
         "//crates/sandbox-runtime:sandbox_runtime",
         "//crates/sandbox-wasm:sandbox_wasm",
         "//crates/sandbox-session:sandbox_session",
-        "//crates/sandbox-snapshot:sandbox_snapshot",
         "//crates/sandbox-promote:sandbox_promote",
         "//crates/sandbox-policy:sandbox_policy",
         "@crates//:tokio",

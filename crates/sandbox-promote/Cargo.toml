@@ -12,7 +12,6 @@ sandbox-types = { path = "../sandbox-types" }
 sandbox-vfs = { path = "../sandbox-vfs" }
 sandbox-session = { path = "../sandbox-session" }
 sandbox-vmm = { path = "../sandbox-vmm" }
-sandbox-snapshot = { path = "../sandbox-snapshot" }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
