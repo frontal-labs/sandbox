@@ -12,6 +12,7 @@ use crate::ops::{
         op_fs_mkdir, op_fs_read, op_fs_readdir, op_fs_readlink, op_fs_rename, op_fs_rm, op_fs_stat,
         op_fs_symlink, op_fs_truncate, op_fs_write,
     },
+    hash::op_sandbox_hash,
     op_sandbox_print,
     stdio::{op_stderr_write, op_stdout_write},
     time::op_sandbox_now,
@@ -42,6 +43,7 @@ extension!(
         op_fs_truncate,
         op_stdout_write,
         op_stderr_write,
+        op_sandbox_hash,
     ]
 );
 
@@ -103,6 +105,42 @@ const stdioOps = {
   stdoutWrite: Deno.core.ops.op_stdout_write,
   stderrWrite: Deno.core.ops.op_stderr_write,
 };
+
+const hashOps = {
+  hash: Deno.core.ops.op_sandbox_hash,
+};
+
+// Converts a string to a Uint8Array of UTF-8 bytes using only ECMAScript builtins.
+// TextEncoder is not available in the sandbox, so each code point is encoded manually.
+function strToBytes(s) {
+  const bytes = [];
+  for (let i = 0; i < s.length; i++) {
+    let code = s.charCodeAt(i);
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code >= 0xd800 && code < 0xdc00 && i + 1 < s.length) {
+      // UTF-16 surrogate pair
+      const next = s.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next < 0xe000) {
+        const cp = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+        bytes.push(
+          0xf0 | (cp >> 18),
+          0x80 | ((cp >> 12) & 0x3f),
+          0x80 | ((cp >> 6) & 0x3f),
+          0x80 | (cp & 0x3f),
+        );
+        i++;
+      } else {
+        bytes.push(0xef, 0xbf, 0xbd);
+      }
+    } else {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return new Uint8Array(bytes);
+}
 
 // Install node: modules
 globalThis.nodeModules = Object.freeze({
@@ -199,10 +237,34 @@ globalThis.nodeModules = Object.freeze({
     },
     randomUUID: () => crypto.randomUUID(),
     createHash: (algorithm) => {
-      return {
-        update: (data) => { /* no-op for now */ },
-        digest: () => new Uint8Array(32),
+      const key = String(algorithm).toLowerCase().replace(/[-_]/g, "");
+      const alg = key === "sha1" ? 0 : key === "sha256" ? 1 : key === "sha512" ? 2 : null;
+      if (alg === null) {
+        throw new Error("crypto.createHash: unsupported algorithm: " + algorithm);
+      }
+      const chunks = [];
+      const hash = {
+        update: function (data) {
+          const bytes = typeof data === "string" ? strToBytes(data) : new Uint8Array(data);
+          chunks.push(bytes);
+          return hash;
+        },
+        digest: function (encoding) {
+          let total = 0;
+          for (const c of chunks) total += c.length;
+          const buf = new Uint8Array(total);
+          let off = 0;
+          for (const c of chunks) { buf.set(c, off); off += c.length; }
+          const raw = hashOps.hash(alg, buf);
+          if (encoding === "hex") {
+            let hex = "";
+            for (const b of raw) hex += b.toString(16).padStart(2, "0");
+            return hex;
+          }
+          return raw;
+        },
       };
+      return hash;
     },
   }),
   os: Object.freeze({

@@ -15,7 +15,10 @@
 //! - **ESM / dynamic `import()`** — only CommonJS `require()` is supported.
 //! - **`child_process`** — present as a stub; every method throws.
 //! - **`zlib`** — present as a stub; every method throws.
-//! - **`crypto.createHash`** — returns a no-op stub (empty digest).
+//!
+//! `crypto.createHash` supports `sha1`, `sha256`, and `sha512`; other
+//! algorithms throw. `crypto.randomBytes` and `crypto.randomUUID` are backed
+//! by the V8 built-in `crypto.getRandomValues`.
 
 pub mod contain;
 pub mod ops;

@@ -8,6 +8,15 @@ Frontal Sandbox provides instant, low-cost execution environments for AI agents.
 Sessions begin in V8-fast isolates and promote to real Linux microVMs only when a
 command requires them.
 
+## Security status
+
+**Pre-alpha: nothing in this repository is a security boundary yet.** The V8
+tier runs in the host process, and the isolation layers that do exist
+(namespaces, seccomp, cgroups — Linux only) are untested against hostile
+workloads. Do not run untrusted code on it, and do not expose the server to
+untrusted clients. See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) and
+[docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
+
 ## Product direction
 
 - Tier 1 isolate sessions with warm-pool startup under 5 ms.
@@ -35,6 +44,7 @@ tier is active; tier is exposed as read-only session state.
 ```text
 crates/                     Rust workspace members (crate names are sandbox-*)
 ├── sandbox-types           Shared IDs, errors, events, and configuration
+├── sandbox-proto           Protobuf and gRPC bindings, conversions to sandbox-types
 ├── sandbox-vfs             Copy-on-write virtual filesystem
 ├── sandbox-cas             Content-addressed blob storage
 ├── sandbox-shell           POSIX-ish shell and builtins
@@ -50,7 +60,7 @@ crates/                     Rust workspace members (crate names are sandbox-*)
 ├── sandbox-worker          Per-tenant worker process
 ├── sandbox-scheduler       Placement, pools, sleep, and metering
 └── sandbox-server          HTTP and WebSocket API
-cli/                        Command-line client (crate `cli`, binary `sandbox`; `frontal-sandbox` is a legacy alias)
+cli/                        Command-line client (crate `cli`, binary `sandbox`)
 sdks/
 ├── rust/                   Rust client SDK (crate `sandbox-sdk`)
 ├── typescript/             TypeScript SDK (npm `@frontal-labs/sandbox-sdk`, built with Bazel)
@@ -59,7 +69,7 @@ benchmarks/                 Criterion benches and load tests
 docs/                       Architecture, security model, API, and limits
 ```
 
-Most crates are early scaffolds or stubs. The server runs session, exec, filesystem, snapshot, and fork routes against in-memory sessions; snapshot and fork also run against in-memory sessions. `sandbox run` and `sandbox shell` are not yet implemented (frontal-sandbox is a legacy alias). See [MILESTONES.md](docs/MILESTONES.md) for the milestone status, the complete design specification, and target behavior.
+Most crates are early scaffolds or stubs. The server runs session, exec, filesystem, snapshot, fork, and template routes against in-memory sessions. `sandbox run` and `sandbox shell` execute in isolate sessions. See [MILESTONES.md](docs/MILESTONES.md) for the milestone status, the complete design specification, and target behavior.
 
 ## Development
 

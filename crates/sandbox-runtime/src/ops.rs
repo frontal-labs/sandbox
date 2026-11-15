@@ -3,7 +3,10 @@
 
 use deno_core::{op2, OpState};
 use deno_error::JsErrorBox;
+use digest::Digest;
 use sandbox_vfs::{OpenFlags, SessionFs, Vfs, VfsError};
+use sha1::Sha1;
+use sha2::{Sha256, Sha512};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -276,6 +279,49 @@ pub mod time {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64
+    }
+}
+
+/// One-shot hash ops for the `node:crypto` shim. The algorithm is selected on
+/// the host side; the JS shim normalizes names ("sha1"/"sha256"/"sha512" with
+/// or without "-" separators) before calling.
+pub mod hash {
+    use super::*;
+    use deno_core::JsBuffer;
+
+    /// Hashes `data` with the requested algorithm and returns the raw digest.
+    #[op2]
+    #[buffer]
+    pub fn op_sandbox_hash(
+        _state: &mut OpState,
+        #[smi] alg: i32,
+        #[buffer] data: JsBuffer,
+    ) -> Result<Vec<u8>, JsErrorBox> {
+        let bytes = data.as_ref();
+        let digest: Vec<u8> = match alg {
+            0 => {
+                let mut h = Sha1::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            1 => {
+                let mut h = Sha256::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            2 => {
+                let mut h = Sha512::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            _ => {
+                return Err(JsErrorBox::new(
+                    "NotSupported",
+                    format!("unsupported hash algorithm: {alg}"),
+                ));
+            }
+        };
+        Ok(digest)
     }
 }
 
