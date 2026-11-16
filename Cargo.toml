@@ -87,7 +87,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 redb = "4"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-base64 = "0.22"
+base64 = "0.23"
 flate2 = "1"
 # Default features are off: they add the MySQL driver (pulls in the `rsa` crate,
 # RUSTSEC-2023-0071, with no fix), which the clustered scheduler does not use.
