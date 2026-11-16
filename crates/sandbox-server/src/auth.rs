@@ -121,22 +121,27 @@ impl AuthManager {
     }
 }
 
-/// Fills `buf` with bytes derived from a counter and the current time.
-/// This is not cryptographically secure; it is a placeholder so the auth
-/// module compiles without the `getrandom` crate, which the Bazel crate
-/// universe does not expose. Production deployments should replace this
-/// with a proper RNG.
+/// Fills `buf` from the operating system's random source.
+///
+/// The bytes come from version 4 UUIDs, whose generator reads the OS CSPRNG. The
+/// `uuid` crate is already a dependency and is available to the Bazel build,
+/// unlike `getrandom`. If the OS source is unavailable, `Uuid::new_v4` panics,
+/// so no key is ever minted from a weak source.
 fn fill_random(buf: &mut [u8]) {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let mut state = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    for b in buf.iter_mut() {
-        state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        *b = (state >> 33) as u8;
+    // Bytes 6 and 8 of a v4 UUID hold the version and variant bits, so they are
+    // not random and are skipped. The other 14 bytes are.
+    const RANDOM_BYTES: [usize; 14] = [0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 15];
+    let mut filled = 0;
+    while filled < buf.len() {
+        let uuid = uuid::Uuid::new_v4();
+        let bytes = uuid.as_bytes();
+        for &i in &RANDOM_BYTES {
+            if filled == buf.len() {
+                break;
+            }
+            buf[filled] = bytes[i];
+            filled += 1;
+        }
     }
 }
 

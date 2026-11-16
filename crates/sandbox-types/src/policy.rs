@@ -72,21 +72,25 @@ impl NetworkPolicy {
     }
 
     pub fn check_http(&self, host: &str) -> bool {
-        if !self.default_deny {
-            return true;
-        }
-        self.rules
-            .iter()
-            .any(|r| r.matches_http(host) && r.action == PolicyAction::Allow)
+        self.decide(|r| r.matches_http(host))
     }
 
     pub fn check_tcp(&self, host: &str, port: u16) -> bool {
-        if !self.default_deny {
-            return true;
+        self.decide(|r| r.matches_tcp(host, port))
+    }
+
+    /// A matching deny rule always wins, whatever the order of the rules and
+    /// whether `default_deny` is set. Otherwise the request is allowed when
+    /// `default_deny` is off or an allow rule matches.
+    fn decide(&self, matches: impl Fn(&NetworkPolicyRule) -> bool) -> bool {
+        let mut allowed = !self.default_deny;
+        for rule in self.rules.iter().filter(|r| matches(r)) {
+            match rule.action {
+                PolicyAction::Deny => return false,
+                PolicyAction::Allow => allowed = true,
+            }
         }
-        self.rules
-            .iter()
-            .any(|r| r.matches_tcp(host, port) && r.action == PolicyAction::Allow)
+        allowed
     }
 }
 
@@ -139,15 +143,34 @@ impl NetworkPolicyRule {
         self.matches_host(host) && self.ports.as_ref().is_none_or(|p| p.contains(&port))
     }
 
+    /// Host names compare case-insensitively and ignore a trailing dot.
+    /// `*` matches any host. `*.example.com` matches subdomains of
+    /// `example.com` on a label boundary: `a.example.com` matches, but
+    /// `example.com` and `evilexample.com` do not. The apex needs its own rule.
     fn matches_host(&self, host: &str) -> bool {
-        if self.host_pattern == "*" {
+        let host = normalize_host(host);
+        if host.is_empty() {
+            return false;
+        }
+        // The wildcard forms are recognised on the raw pattern. Trimming dots first
+        // would turn `*.` into `*`, which matches every host.
+        let raw = self.host_pattern.to_ascii_lowercase();
+        if raw == "*" {
             return true;
         }
-        if let Some(suffix) = self.host_pattern.strip_prefix("*.") {
-            return host.ends_with(suffix) || host == &suffix[1..];
+        if let Some(suffix) = raw.strip_prefix("*.") {
+            let suffix = suffix.trim_end_matches('.');
+            return !suffix.is_empty()
+                && host.len() > suffix.len()
+                && host.ends_with(suffix)
+                && host.as_bytes()[host.len() - suffix.len() - 1] == b'.';
         }
-        host == self.host_pattern
+        host == normalize_host(&raw)
     }
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -191,4 +214,97 @@ pub struct SecretsConfig {
 pub struct SecretEntry {
     pub value: String,
     pub hosts: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn allow(pattern: &str) -> NetworkPolicy {
+        let mut policy = NetworkPolicy::default();
+        policy.add_rule(NetworkPolicyRule::allow_http(pattern));
+        policy
+    }
+
+    #[test]
+    fn test_wildcard_matches_subdomains_on_a_label_boundary() {
+        let policy = allow("*.example.com");
+        assert!(policy.check_http("a.example.com"));
+        assert!(policy.check_http("a.b.example.com"));
+        assert!(!policy.check_http("evilexample.com"));
+        assert!(!policy.check_http("example.com"));
+        assert!(!policy.check_http("example.com.evil.org"));
+    }
+
+    #[test]
+    fn test_empty_wildcard_suffix_matches_nothing() {
+        let policy = allow("*.");
+        assert!(!policy.check_http("example.com"));
+        assert!(!policy.check_http("a."));
+    }
+
+    #[test]
+    fn test_odd_patterns_do_not_panic() {
+        // A pattern whose suffix starts with a multibyte character used to
+        // slice inside it.
+        for pattern in ["*.é.com", "*.日本.jp", "*.", "*", ""] {
+            let policy = allow(pattern);
+            let _ = policy.check_http("example.com");
+            let _ = policy.check_http("");
+            let _ = policy.check_tcp("é", 80);
+        }
+    }
+
+    #[test]
+    fn test_hosts_compare_case_insensitively_and_ignore_a_trailing_dot() {
+        let policy = allow("Example.COM");
+        assert!(policy.check_http("example.com"));
+        assert!(policy.check_http("EXAMPLE.com."));
+        assert!(!policy.check_http("example.org"));
+        assert!(allow("*.Example.com").check_http("A.EXAMPLE.COM."));
+    }
+
+    #[test]
+    fn test_empty_host_never_matches() {
+        assert!(!allow("*").check_http(""));
+        assert!(!allow("").check_http(""));
+    }
+
+    #[test]
+    fn test_default_policy_denies_everything() {
+        let policy = NetworkPolicy::default();
+        assert!(!policy.check_http("example.com"));
+        assert!(!policy.check_tcp("example.com", 443));
+    }
+
+    #[test]
+    fn test_deny_rule_wins_over_allow_in_any_order() {
+        let mut deny_last = NetworkPolicy::default();
+        deny_last.add_rule(NetworkPolicyRule::allow_http("*"));
+        deny_last.add_rule(NetworkPolicyRule::deny_http("evil.com"));
+        assert!(!deny_last.check_http("evil.com"));
+        assert!(deny_last.check_http("good.com"));
+
+        let mut deny_first = NetworkPolicy::default();
+        deny_first.add_rule(NetworkPolicyRule::deny_http("evil.com"));
+        deny_first.add_rule(NetworkPolicyRule::allow_http("*"));
+        assert!(!deny_first.check_http("evil.com"));
+    }
+
+    #[test]
+    fn test_deny_rule_applies_when_default_deny_is_off() {
+        let mut policy = NetworkPolicy::allow_all();
+        policy.add_rule(NetworkPolicyRule::deny_http("evil.com"));
+        assert!(!policy.check_http("evil.com"));
+        assert!(policy.check_http("good.com"));
+        assert!(NetworkPolicy::allow_all().check_tcp("any.host", 1));
+    }
+
+    #[test]
+    fn test_tcp_rule_limits_ports() {
+        let mut policy = NetworkPolicy::default();
+        policy.add_rule(NetworkPolicyRule::allow_tcp("db.example.com", vec![5432]));
+        assert!(policy.check_tcp("db.example.com", 5432));
+        assert!(!policy.check_tcp("db.example.com", 22));
+    }
 }

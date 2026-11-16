@@ -79,6 +79,14 @@ impl BlobStore for TieredStore {
                     BlobStoreError::Storage(format!("Failed to read remote object: {}", e))
                 })?;
 
+                // The bucket is not trusted. Bytes that do not hash to the requested
+                // value are never returned or cached, as in `DiskStore`.
+                if ContentHash::new(&data) != *hash {
+                    return Err(BlobStoreError::Storage(format!(
+                        "remote blob {hash} does not match its hash; the remote store is corrupt or tampered with"
+                    )));
+                }
+
                 if matches!(
                     self.cache_policy,
                     CachePolicy::ReadThrough | CachePolicy::WriteThrough

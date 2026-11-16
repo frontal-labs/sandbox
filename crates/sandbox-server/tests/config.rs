@@ -1,6 +1,8 @@
 //! Unit tests moved out of src/config.rs.
 
-use sandbox_server::config::{load, ConfigError};
+use sandbox_server::config::{
+    ignored_security_settings, load, ConfigError, ResolvedServeConfig, ServerConfigFile,
+};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -88,6 +90,37 @@ fn env_overrides_file() {
     assert_eq!(resolved.addr, "127.0.0.1:9999");
     assert_eq!(resolved.idle_sleep_secs, 42);
     assert_eq!(resolved.otel_endpoint.as_deref(), Some("http://otel:4318"));
+}
+
+#[test]
+fn debug_output_hides_the_database_password() {
+    let config = ResolvedServeConfig {
+        database_url: Some("postgres://sandbox:hunter2@db.internal/sandbox".to_string()),
+        ..ResolvedServeConfig::default()
+    };
+    let shown = format!("{config:?}");
+    assert!(!shown.contains("hunter2"), "password leaked: {shown}");
+    assert!(shown.contains("<redacted>"));
+}
+
+#[test]
+fn unimplemented_tls_and_auth_settings_are_reported() {
+    let file: ServerConfigFile = toml::from_str(
+        "[server.tls]\nenabled = true\ncert_file = \"/c\"\n\
+         [server.auth]\nrate_limit_rps = 100\n",
+    )
+    .expect("parses");
+    let warnings = ignored_security_settings(&file);
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings[0].contains("plaintext"));
+    assert!(warnings[1].contains("[server.auth]"));
+}
+
+#[test]
+fn disabled_tls_and_empty_auth_report_nothing() {
+    let file: ServerConfigFile = toml::from_str("[server.tls]\nenabled = false\n").expect("parses");
+    assert!(ignored_security_settings(&file).is_empty());
+    assert!(ignored_security_settings(&ServerConfigFile::default()).is_empty());
 }
 
 #[test]

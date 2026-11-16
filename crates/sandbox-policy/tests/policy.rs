@@ -16,11 +16,14 @@ use sandbox_types::{ErrorCode, SandboxError};
 // ---------------------------------------------------------------------------
 
 #[test]
-fn capability_exec_env_clock_are_unconditional() {
-    let policy = NetworkPolicy::default(); // default_deny, no rules
-    assert!(check_capability(&policy, &Capability::exec("python")));
-    assert!(check_capability(&policy, &Capability::env("PATH")));
-    assert!(check_capability(&policy, &Capability::clock()));
+fn capability_exec_env_clock_fail_closed() {
+    // The policy has no model for these capabilities yet, so they are denied,
+    // even under an allow-all network policy.
+    for policy in [NetworkPolicy::default(), NetworkPolicy::allow_all()] {
+        assert!(!check_capability(&policy, &Capability::exec("python")));
+        assert!(!check_capability(&policy, &Capability::env("PATH")));
+        assert!(!check_capability(&policy, &Capability::clock()));
+    }
 }
 
 #[test]
@@ -75,14 +78,15 @@ fn capability_net_tcp_parses_host_port() {
 }
 
 #[test]
-fn capability_fs_checks_delegate_to_http_rule_matching() {
-    // check_fs_read / check_fs_write both route through check_http, so a host
-    // pattern that matches the path string governs the result.
+fn capability_fs_checks_ignore_network_rules() {
+    // A network host rule says nothing about filesystem paths. There is no path
+    // policy yet, so filesystem checks are denied whatever host rules exist.
     let mut policy = NetworkPolicy::default();
     policy.add_rule(NetworkPolicyRule::allow_http("/workspace"));
-    assert!(check_fs_read(&policy, "/workspace"));
-    assert!(check_fs_write(&policy, "/workspace"));
+    assert!(!check_fs_read(&policy, "/workspace"));
+    assert!(!check_fs_write(&policy, "/workspace"));
     assert!(!check_fs_read(&policy, "/etc"));
+    assert!(!check_fs_read(&NetworkPolicy::allow_all(), "/workspace"));
 }
 
 // ---------------------------------------------------------------------------

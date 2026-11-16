@@ -32,6 +32,30 @@ async fn test_tiered_store_read_through() {
 }
 
 #[tokio::test]
+async fn a_remote_blob_with_the_wrong_content_is_rejected_and_not_cached() {
+    let local = Arc::new(MemStore::new());
+    let remote = Arc::new(InMemory::new());
+    let store = TieredStore::new(local.clone(), remote.clone(), CachePolicy::ReadThrough);
+
+    // The remote serves other bytes under this hash.
+    let wanted = ContentHash::new(b"the content that was asked for");
+    remote
+        .put(
+            &TieredStore::object_path(&wanted),
+            Bytes::from_static(b"tampered content").into(),
+        )
+        .await
+        .unwrap();
+
+    let err = store.get(&wanted).await.unwrap_err();
+    assert!(
+        err.to_string().contains("does not match its hash"),
+        "unexpected error: {err}"
+    );
+    assert!(!local.has(&wanted).await.unwrap(), "bad bytes were cached");
+}
+
+#[tokio::test]
 async fn a_blob_the_local_store_has_still_reaches_the_remote() {
     let local = Arc::new(MemStore::new());
     let remote = Arc::new(InMemory::new());

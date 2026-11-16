@@ -40,6 +40,10 @@ const SCRIPT_OVERHEAD_BYTES: u64 = 128 * 1024 * 1024;
 #[cfg(target_os = "linux")]
 /// How long past the script's own timeout the host waits before killing the child.
 const HOST_GRACE: Duration = Duration::from_secs(2);
+#[cfg(target_os = "linux")]
+/// How much of a script child's own stderr (not the script's, which arrives in `E`
+/// frames) the host keeps for its log. The rest is read and dropped.
+const CHILD_STDERR_LOG_BYTES: usize = 8 * 1024;
 /// The largest frame the host accepts, so a broken child cannot make it allocate freely.
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 const TAG_STDOUT: u8 = b'O';
@@ -139,19 +143,43 @@ async fn run_contained(
         .arg(SCRIPT_RUN_SUBCOMMAND)
         .arg("--namespaces")
         .arg("--seccomp")
+        // The child starts with an empty environment. The host's environment holds
+        // database URLs and cloud credentials that a script must never inherit.
+        .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        // Not inherited: the child's stderr must not reach the host's own stderr
+        // unbounded. It is drained below, capped, and logged.
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
     let mut child = command
         .spawn()
         .map_err(|e| SandboxError::unavailable(format!("failed to start script process: {e}")))?;
+    // The child blocks reading its request from stdin, and that request is written
+    // below only after it is in the cgroup. So no script code runs before the
+    // memory limit applies.
     if let Some(pid) = child.id() {
         if let Err(e) = cgroup.add(pid) {
             let _ = child.kill().await;
             return Err(e);
         }
     }
+    let stderr_drain = child.stderr.take().map(|mut stderr| {
+        tokio::spawn(async move {
+            let mut kept = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                match stderr.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let room = CHILD_STDERR_LOG_BYTES.saturating_sub(kept.len());
+                        kept.extend_from_slice(&buf[..n.min(room)]);
+                    }
+                }
+            }
+            kept
+        })
+    });
 
     let request = ScriptRequest {
         code: code.to_string(),
@@ -188,6 +216,16 @@ async fn run_contained(
         let _ = child.kill().await;
     }
     let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    if let Some(drain) = stderr_drain {
+        if let Ok(Ok(kept)) = tokio::time::timeout(Duration::from_secs(1), drain).await {
+            if !kept.is_empty() {
+                tracing::warn!(
+                    stderr = %String::from_utf8_lossy(&kept).escape_debug(),
+                    "script process wrote to its own stderr"
+                );
+            }
+        }
+    }
     let oom_kills = cgroup.oom_kills();
     drop(cgroup);
 

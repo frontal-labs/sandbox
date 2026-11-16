@@ -29,6 +29,20 @@ fn unknown_or_malformed_keys_are_rejected() {
 }
 
 #[test]
+fn keys_have_full_length_and_do_not_repeat() {
+    let auth = AuthManager::new();
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..500 {
+        let key = auth.create_key();
+        let body = key.strip_prefix("sbx_").unwrap();
+        let (id, secret) = body.split_once('_').unwrap();
+        assert_eq!(id.len(), 16, "8-byte id as hex");
+        assert_eq!(secret.len(), 64, "32-byte secret as hex");
+        assert!(seen.insert(key), "a key was generated twice");
+    }
+}
+
+#[test]
 fn revoked_key_is_rejected() {
     let auth = AuthManager::new();
     let key = auth.create_key();
