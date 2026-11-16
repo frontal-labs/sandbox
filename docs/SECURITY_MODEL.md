@@ -76,12 +76,14 @@ Exec(tool)       Env(name)        Clock
 
 These are defects or gaps found while writing this page. Each one should be fixed or tracked before the operation is used.
 
-- **Ambient environment access.** Removed. The earlier `op_env_get`/`op_env_set` ops read and wrote the host process environment, which violated the project specification invariant 3. They were deleted rather than wired up. Any future host capability needs a policy check.
-- **Filesystem capabilities use the network check.** `check_fs_read` and `check_fs_write` in `crates/sandbox-policy/src/capability.rs` call `policy.check_http`. Filesystem access is not governed by the network policy.
-- **`Exec`, `Env`, and `Clock` always allow.** `check_capability` returns `true` for these.
-- **Wildcard host matching is loose.** In `crates/sandbox-types/src/policy.rs`, a pattern `*.example.com` matches any host ending in `example.com`, including `evilexample.com`, because there is no dot boundary. The second comparison, `host == &suffix[1..]`, compares against `xample.com`, which is wrong. Use a dot-anchored suffix match and test both cases.
-- **DNS is resolved but not pinned.** `resolve_and_check_host` in `crates/sandbox-policy/src/capability.rs` checks resolved addresses for private ranges, but its result is not used for the connection, so DNS rebinding is not prevented. No caller exists in the repository.
-- **Private-address check is incomplete.** `is_private_ip` covers IPv4 loopback, RFC 1918, link-local (which includes the `169.254.169.254` metadata address), broadcast, and documentation ranges, and IPv6 loopback, link-local, and unique-local. It does not cover `0.0.0.0/8`, the carrier-grade NAT range `100.64.0.0/10`, or IPv4-mapped IPv6 addresses. It is called only from `resolve_and_check_host`, which has no caller.
+- **Ambient environment access.** Closed. The earlier `op_env_get`/`op_env_set` ops were deleted. A later op, `op_sandbox_env`, still returned the whole host process environment to guest code through the `node:` shim. It now returns an empty list, and `crates/sandbox-worker/src/script.rs` starts the contained script child with an empty environment (`env_clear`). A session's own environment is not wired into the runtime yet. Any future host capability needs a policy check.
+- **Filesystem capabilities.** There is no filesystem path policy. `check_fs_read` and `check_fs_write` in `crates/sandbox-policy/src/capability.rs` used to call `policy.check_http`, which judged paths by network host rules. They now deny every request, so nothing can rely on them by mistake. The VFS and its quotas are what bound filesystem access today.
+- **`Exec`, `Env`, and `Clock`.** `check_capability` used to return `true` for these. The policy has no model for them, so they are now denied until one exists. Nothing in the repository calls `check_capability`.
+- **Wildcard host matching.** Fixed. A pattern `*.example.com` matched `evilexample.com` because there was no dot boundary, and a `*.` pattern with a multibyte suffix could panic. Matching now compares on a label boundary, ignores case and a trailing dot, and treats `*.example.com` as subdomains only. The apex `example.com` needs its own rule. This is stricter than before.
+- **Deny rules.** Fixed. They were ignored: `allow *` plus `deny evil.com` allowed `evil.com`. A matching deny rule now always wins, including when `default_deny` is off.
+- **DNS is resolved but not pinned.** `resolve_and_check_host` returns the address it resolved, and the caller must connect to that address and not resolve the name again, or DNS rebinding is not prevented. No caller exists in the repository. The policy is now checked before any lookup, so a denied host causes no DNS query.
+- **Private-address check.** `is_private_ip` now also covers `0.0.0.0/8`, `100.64.0.0/10`, `192.0.0.0/24`, `198.18.0.0/15`, multicast, `240.0.0.0/4`, IPv4-mapped and IPv4-compatible IPv6, NAT64 (`64:ff9b::/96`), 6to4 (`2002::/16`), site-local, and IPv6 multicast and documentation ranges.
+- **An `allow_http` rule also permits raw TCP.** Rules carry no protocol, so `check_tcp` accepts an HTTP rule that has no port list, on any port. Not changed, because it alters the rule semantics; it needs an ADR.
 
 ### Network egress
 
@@ -103,11 +105,12 @@ Planned (project specification section 4.7): an in-process HTTP client that is t
 
 ## Authentication and authorization
 
-- `crates/sandbox-server/src/auth.rs`: keys are `sbx_<id>_<secret>` with 256-bit secrets from the OS RNG. Only a BLAKE3 digest of the secret is stored, and comparison uses `blake3::Hash` equality. Keys can be revoked by id.
+- `crates/sandbox-server/src/auth.rs`: keys are `sbx_<id>_<secret>` with 256-bit secrets and 64-bit ids drawn from the OS random source (through the `uuid` v4 generator, whose fixed version bits are skipped). Until this refresh they came from a clock-seeded counter, which was predictable, so keys minted by an earlier build should be treated as compromised and replaced. If the OS source is unavailable, key creation panics instead of using a weak source. Only a BLAKE3 digest of the secret is stored, and comparison uses `blake3::Hash` equality. `AuthManager::revoke` exists, but no route exposes it, so a leaked key cannot be revoked without wiping the stored key state.
 - `crates/sandbox-server/src/api.rs`: `require_api_key` is a `route_layer` on every `/v1` route. It returns 401 unless the bearer key validates.
 - Still planned (project specification section 4.15): per-key scopes, quotas, key provisioning, and OIDC.
 - `crates/sandbox-server/src/middleware.rs` adds a request ID and logs requests. It does not authenticate them.
-- Settings the backend does not enforce are refused, not ignored. The crate has no server binary yet.
+- The server listens in plaintext. `[server.tls]` and `[server.auth]` in the TOML config (ADR 0036) are accepted but not implemented, and loading a file that sets `tls.enabled = true` or any `[server.auth]` value logs a warning. The default bind address is `0.0.0.0:8080`. Put the server behind a TLS-terminating proxy and do not expose it directly.
+- `/v1/gc` and `/metrics` need only some valid key. Any tenant can trigger the global collection, which takes every session's gate, at most once a minute. There is no admin role yet.
 
 ## Trace and audit
 
