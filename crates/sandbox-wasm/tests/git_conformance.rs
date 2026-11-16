@@ -120,3 +120,264 @@ async fn the_wasm_tool_matches_host_git_on_hashes_index_and_status() {
     let subjects = git(&vfs, &["log", "--format=%s"]).await;
     assert_eq!(text(&subjects.stdout), "first\n");
 }
+
+/// `git diff` (worktree) on a modified tracked file must match host git's
+/// unified-diff output byte-for-byte.
+#[tokio::test]
+async fn git_diff_worktree_modify_matches_host_git() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+    git(&vfs, &["init", "-q"]).await;
+    put(&vfs, "/work/f.txt", b"one\ntwo\nthree\n", false).await;
+    git(&vfs, &["add", "f.txt"]).await;
+    git(
+        &vfs,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "commit",
+            "-m",
+            "init",
+        ],
+    )
+    .await;
+    // Modify: change "two" to "TWO"
+    put(&vfs, "/work/f.txt", b"one\nTWO\nthree\n", false).await;
+
+    let out = git(&vfs, &["diff"]).await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    let expected = "\
+diff --git a/f.txt b/f.txt
+index 4cb29ea..ddc897f 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,3 +1,3 @@
+ one
+-two
++TWO
+ three
+";
+    assert_eq!(text(&out.stdout), expected);
+}
+
+/// `git diff` (worktree) on a deleted tracked file.
+#[tokio::test]
+async fn git_diff_worktree_delete_matches_host_git() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+    git(&vfs, &["init", "-q"]).await;
+    put(&vfs, "/work/f.txt", b"alpha\nbeta\n", false).await;
+    put(&vfs, "/work/g.txt", b"gamma\ndelta\n", false).await;
+    git(&vfs, &["add", "f.txt", "g.txt"]).await;
+    git(
+        &vfs,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "commit",
+            "-m",
+            "init",
+        ],
+    )
+    .await;
+    // Delete f.txt from the worktree
+    vfs.rm(Path::new("/work/f.txt"), false).await.unwrap();
+
+    let out = git(&vfs, &["diff"]).await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    let expected = "\
+diff --git a/f.txt b/f.txt
+deleted file mode 100644
+index fbbee86..0000000
+--- a/f.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-alpha
+-beta
+";
+    assert_eq!(text(&out.stdout), expected);
+}
+
+/// `git diff --cached` on a staged modification.
+#[tokio::test]
+async fn git_diff_cached_modify_matches_host_git() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+    git(&vfs, &["init", "-q"]).await;
+    put(&vfs, "/work/f.txt", b"1\n2\n3\n", false).await;
+    git(&vfs, &["add", "f.txt"]).await;
+    git(
+        &vfs,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "commit",
+            "-m",
+            "init",
+        ],
+    )
+    .await;
+    // Modify and stage
+    put(&vfs, "/work/f.txt", b"1\nX\n3\n", false).await;
+    git(&vfs, &["add", "f.txt"]).await;
+
+    let out = git(&vfs, &["diff", "--cached"]).await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    let expected = "\
+diff --git a/f.txt b/f.txt
+index 01e79c3..f081db6 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,3 +1,3 @@
+ 1
+-2
++X
+ 3
+";
+    assert_eq!(text(&out.stdout), expected);
+}
+
+/// `git diff` on a multi-hunk change (two separated modifications).
+#[tokio::test]
+async fn git_diff_multi_hunk_matches_host_git() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+    git(&vfs, &["init", "-q"]).await;
+    let content: Vec<String> = (1..=9).map(|i| format!("{i}\n")).collect();
+    put(&vfs, "/work/f.txt", content.concat().as_bytes(), false).await;
+    git(&vfs, &["add", "f.txt"]).await;
+    git(
+        &vfs,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "commit",
+            "-m",
+            "init",
+        ],
+    )
+    .await;
+    // Change line 2 and line 8
+    let mut new_content: Vec<String> = (1..=9).map(|i| format!("{i}\n")).collect();
+    new_content[1] = "2X\n".to_string();
+    new_content[7] = "8X\n".to_string();
+    put(&vfs, "/work/f.txt", new_content.concat().as_bytes(), false).await;
+
+    let out = git(&vfs, &["diff"]).await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    let expected = "\
+diff --git a/f.txt b/f.txt
+index 0719398..abbba22 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,9 +1,9 @@
+ 1
+-2
++2X
+ 3
+ 4
+ 5
+ 6
+ 7
+-8
++8X
+ 9
+";
+    assert_eq!(text(&out.stdout), expected);
+}
+
+/// `git diff` on a new (untracked) file shows nothing; on a staged new file
+/// `git diff --cached` shows the full addition.
+#[tokio::test]
+async fn git_diff_new_file_cached_matches_host_git() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+    git(&vfs, &["init", "-q"]).await;
+    put(&vfs, "/work/seed.txt", b"seed\n", false).await;
+    git(&vfs, &["add", "seed.txt"]).await;
+    git(
+        &vfs,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "commit",
+            "-m",
+            "init",
+        ],
+    )
+    .await;
+    // Create and stage a new file
+    put(&vfs, "/work/n.txt", b"hello\nworld\n", false).await;
+    git(&vfs, &["add", "n.txt"]).await;
+
+    // Plain `git diff` (worktree) should show nothing (no worktree changes)
+    let out = git(&vfs, &["diff"]).await;
+    assert_eq!(out.exit_code, 0);
+    assert_eq!(text(&out.stdout), "");
+
+    // `git diff --cached` should show the new file
+    let out = git(&vfs, &["diff", "--cached"]).await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    let expected = "\
+diff --git a/n.txt b/n.txt
+new file mode 100644
+index 0000000..94954ab
+--- /dev/null
++++ b/n.txt
+@@ -0,0 +1,2 @@
++hello
++world
+";
+    assert_eq!(text(&out.stdout), expected);
+}
+
+/// `git diff` with a duplicated line: the new file appends a copy of an
+/// existing line. The LCS must pair the original with the *earliest* copy so
+/// the diff shows a pure append, matching host git's hunk alignment.
+#[tokio::test]
+async fn git_diff_duplicate_line_append_matches_host_git() {
+    let vfs = vfs();
+    vfs.mkdir(Path::new("/work"), 0o755).await.unwrap();
+    git(&vfs, &["init", "-q"]).await;
+    put(&vfs, "/work/f.txt", b"3\nmore\n", false).await;
+    git(&vfs, &["add", "f.txt"]).await;
+    git(
+        &vfs,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e",
+            "commit",
+            "-m",
+            "init",
+        ],
+    )
+    .await;
+    // Append a duplicate of "more"
+    put(&vfs, "/work/f.txt", b"3\nmore\nmore\n", false).await;
+
+    let out = git(&vfs, &["diff"]).await;
+    assert_eq!(out.exit_code, 0, "{}", text(&out.stderr));
+    let expected = "\
+diff --git a/f.txt b/f.txt
+index 7a7b8aa..af0c6c8 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,3 @@
+ 3
+ more
++more
+";
+    assert_eq!(text(&out.stdout), expected);
+}

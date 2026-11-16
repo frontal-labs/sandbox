@@ -13,6 +13,7 @@ repositories: loose objects, the v2 index, and refs under `.git`. Host git reads
 | `commit [-q] -m <msg> [-m <para>]... [--author="Name <email>"]` | Needs `-c user.name=` and `-c user.email=`, or uses the default identity below. |
 | `status [--porcelain] [-b]` | Porcelain v1 matches host git. The long form matches for the cases in the conformance script. |
 | `log [--oneline] [--format=%H\|%h\|%s] [-n N]` | Walks the first parent. |
+| `diff [--cached]` | Unified diff, byte-identical to host git 2.50. Worktree or index vs HEAD. |
 | `write-tree`, `ls-files --stage`, `hash-object [-w] <file>` | Plumbing, used for conformance. |
 
 `clone`, `fetch`, `pull`, `push`, and `remote` refuse with a message, because the sandbox
