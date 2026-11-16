@@ -46,7 +46,7 @@ ulid = { version = "3", features = ["serde"] }
 blake3 = "1"
 digest = "0.10"
 sha1 = "0.10"
-sha2 = "0.10"
+sha2 = "0.11"
 object_store = { version = "0.14", features = ["aws"] }
 zstd = "0.14"
 # Wasmtime's default features minus `profiling`: that feature links ittapi
