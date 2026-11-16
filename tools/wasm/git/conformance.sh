@@ -33,6 +33,10 @@ scenario() {
   echo "== write-tree"; "$G" write-tree
   echo "== hash-object"; "$G" hash-object root.txt
   echo "== delete and stage"; rm a/top.txt; "$G" add a/top.txt; "$G" status --porcelain
+  echo "== diff (worktree)"; printf 'more\n' >> root.txt; "$G" -c core.pager=cat diff
+  echo "== diff --cached"; "$G" -c core.pager=cat diff --cached
+  echo "== diff after staging root"; "$G" add root.txt; "$G" -c core.pager=cat diff
+  echo "== diff --cached after staging root"; "$G" -c core.pager=cat diff --cached
   echo "== errors"; "$G" add nope.txt || echo "exit=$?"
   echo "== log subjects"; "$G" -c user.name=Tester -c user.email=t@example.com commit -m "Subject" -m "Para two" >/dev/null; "$G" log --format=%s
   echo "== log oneline"; "$G" log --oneline | sed 's/^[0-9a-f]\{7\} /<sha> /'

@@ -71,23 +71,34 @@ fn main() {
     }
 }
 
-fn run(args: &[String]) -> Result<()> {
-    let mut globals = Globals::default();
-    let mut rest = args;
-    while let Some((first, tail)) = rest.split_first() {
-        if first == "-c" {
-            let (pair, after) = tail
+/// Consume leading `-c key=value` / `-ckey=value` config flags from the front
+/// of `args`, folding them into `globals`, and return the remainder — the
+/// command and its operands. A bare `-c` flag spans two tokens (itself plus
+/// the key=value token); `-ckey=value` is one token. The first argument that
+/// is not a `-c` flag ends the flag run and becomes the command.
+fn take_config<'a>(globals: &mut Globals, args: &'a [String]) -> Result<&'a [String]> {
+    match args.split_first() {
+        None => Ok(args),
+        Some((arg, rest)) if arg == "-c" => {
+            let (pair, after) = rest
                 .split_first()
                 .ok_or_else(|| Fatal::new("-c needs a key=value argument"))?;
-            add_config(&mut globals, pair)?;
-            rest = after;
-        } else if let Some(pair) = first.strip_prefix("-c") {
-            add_config(&mut globals, pair)?;
-            rest = tail;
-        } else {
-            break;
+            add_config(globals, pair)?;
+            take_config(globals, after)
         }
+        Some((arg, rest)) if arg.starts_with("-c") && arg != "-c" => {
+            // `arg` is `-ckey=value` (joined form); the pair follows `-c`.
+            add_config(globals, arg.split_at(2).1)?;
+            take_config(globals, rest)
+        }
+        // First non-config flag: the command and its operands begin here.
+        _ => Ok(args),
     }
+}
+
+fn run(args: &[String]) -> Result<()> {
+    let mut globals = Globals::default();
+    let rest = take_config(&mut globals, args)?;
     let Some((command, operands)) = rest.split_first() else {
         return Err(Fatal::silent(1));
     };
@@ -100,6 +111,7 @@ fn run(args: &[String]) -> Result<()> {
         "write-tree" => cmd_write_tree(),
         "ls-files" => cmd_ls_files(operands),
         "hash-object" => cmd_hash_object(operands),
+        "diff" => cmd_diff(operands),
         "clone" | "fetch" | "pull" | "push" | "remote" => Err(Fatal::new(format!(
             "{command} needs network access, which this sandbox does not provide"
         ))),
@@ -815,6 +827,466 @@ fn cmd_hash_object(operands: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// `arg` as a 40-character hex tree object id, or `None` if it is not one.
+fn parse_hex_arg(arg: &str) -> Option<Oid> {
+    if arg.len() == 40 && arg.bytes().all(|b| b.is_ascii_hexdigit()) {
+        object::parse_hex(arg)
+    } else {
+        None
+    }
+}
+
+/// `git diff [path]...`: the unified diff of the worktree against the index, or of a
+/// committed tree against the worktree. Like host git, it diffs by content, so a file
+/// whose content matches is absent from the output.
+fn cmd_diff(operands: &[String]) -> Result<()> {
+    // `--cached` (and `--staged`) diff the index against HEAD. A 40-character hex operand
+    // is a tree object id, diffed against the worktree. `--stat` and other options are
+    // refused, because the subset has no equivalent output.
+    let mut cached = false;
+    let mut tree: Option<Oid> = None;
+    let mut paths: Vec<String> = Vec::new();
+    for arg in operands {
+        if arg == "--cached" || arg == "--staged" {
+            cached = true;
+        } else if let Some(oid) = parse_hex_arg(arg) {
+            tree = Some(oid);
+        } else if arg.starts_with('-') && arg.len() > 1 {
+            return Err(Fatal::new(format!("unsupported diff option '{arg}'")));
+        } else {
+            paths.push(normalize(arg));
+        }
+    }
+
+    let repo = Repo::open()?;
+    // The "old" side is the index, or the HEAD tree when `--cached`. An unborn
+    // branch has no HEAD, so `--cached` diffs against the empty tree.
+    let old_files: Files = if cached {
+        match repo.head_commit()? {
+            Some(oid) => side_tree(&repo, &repo.read_commit(&oid)?.tree, "")?,
+            None => Files::new(),
+        }
+    } else {
+        side_index(&repo)?
+    };
+    // The "new" side: a tree object, the index (for `--cached`), or the worktree.
+    let new_files: Files = match tree {
+        Some(oid) => side_tree(&repo, &oid, "")?,
+        None if cached => side_index(&repo)?,
+        None => side_worktree()?,
+    };
+
+    // The paths to show, sorted, restricted to the pathspecs.
+    let mut all: BTreeSet<&String> = BTreeSet::new();
+    all.extend(old_files.keys());
+    all.extend(new_files.keys());
+
+    // A path is shown when it matches the pathspecs (an empty pathspec set
+    // means every path), is not an untracked worktree file, and differs
+    // between the two sides.
+    let is_untracked = tree.is_none() && !cached;
+    let out: String = all
+        .iter()
+        .copied()
+        .filter(|path| paths.is_empty() || paths.iter().any(|spec| matches(spec, path)))
+        .filter_map(|path| {
+            let old = old_files.get(path);
+            let new = new_files.get(path);
+            // Untracked files (present in the worktree but not the index) are
+            // not shown by `git diff`, matching host git.
+            if is_untracked && new.is_some() && old.is_none() {
+                return None;
+            }
+            // Identical content (including both present) produces no diff.
+            if old == new {
+                return None;
+            }
+            Some(file_diff(path, old, new))
+        })
+        .collect();
+    print!("{out}");
+    io::stdout().flush().map_err(|e| Fatal::new(e.to_string()))
+}
+
+/// The file content of one side, by path.
+type Files = BTreeMap<String, Vec<u8>>;
+
+fn side_index(repo: &Repo) -> Result<Files> {
+    let mut files = BTreeMap::new();
+    for (path, entry) in &repo.load_index()?.entries {
+        files.insert(path.clone(), read_blob(repo, &entry.oid)?);
+    }
+    Ok(files)
+}
+
+fn side_worktree() -> Result<Files> {
+    let mut files = BTreeMap::new();
+    for path in list_worktree()? {
+        let bytes = fs::read(&path).map_err(|e| Fatal::new(format!("cannot read {path}: {e}")))?;
+        files.insert(path, bytes);
+    }
+    Ok(files)
+}
+
+/// The files of a tree object, by path, with `prefix` prepended.
+fn side_tree(repo: &Repo, tree: &Oid, prefix: &str) -> Result<Files> {
+    let mut files = BTreeMap::new();
+    let (kind, body) = repo.objects.read(tree)?;
+    if kind != Kind::Tree {
+        return Err(Fatal::new("expected a tree object"));
+    }
+    for entry in parse_tree(&body)? {
+        let name = utf8(&entry.name)?;
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if entry.is_tree() {
+            files.extend(side_tree(repo, &entry.oid, &path)?);
+        } else {
+            files.insert(path, read_blob(repo, &entry.oid)?);
+        }
+    }
+    Ok(files)
+}
+
+fn read_blob(repo: &Repo, oid: &Oid) -> Result<Vec<u8>> {
+    let (kind, body) = repo.objects.read(oid)?;
+    if kind != Kind::Blob {
+        return Err(Fatal::new("expected a blob object"));
+    }
+    Ok(body)
+}
+
+/// The unified diff for one file, matching host git's output.
+fn file_diff(path: &str, old: Option<&Vec<u8>>, new: Option<&Vec<u8>>) -> String {
+    let mut out = format!("diff --git a/{path} b/{path}\n");
+    // Host git appends the file mode to the `index` line only for a modify —
+    // when both the old and new sides are real blobs. New and deleted files
+    // (one side is `/dev/null`) omit it, in both worktree and `--cached` diffs.
+    match (old, new) {
+        (None, Some(new)) => {
+            let new_oid = abbrev(new);
+            out.push_str("new file mode 100644\n");
+            out.push_str(&format!("index 0000000..{new_oid}\n"));
+            out.push_str("--- /dev/null\n");
+            out.push_str(&format!("+++ b/{path}\n"));
+        }
+        (Some(old), None) => {
+            let old_oid = abbrev(old);
+            out.push_str("deleted file mode 100644\n");
+            out.push_str(&format!("index {old_oid}..0000000\n"));
+            out.push_str(&format!("--- a/{path}\n"));
+            out.push_str("+++ /dev/null\n");
+        }
+        (Some(old), Some(new)) => {
+            let old_oid = abbrev(old);
+            let new_oid = abbrev(new);
+            out.push_str(&format!("index {old_oid}..{new_oid} 100644\n"));
+            out.push_str(&format!("--- a/{path}\n"));
+            out.push_str(&format!("+++ b/{path}\n"));
+        }
+        (None, None) => {}
+    }
+
+    let old_lines = old.map(|b| split_lines(b)).unwrap_or_default();
+    let new_lines = new.map(|b| split_lines(b)).unwrap_or_default();
+    for hunk in hunks(&old_lines, &new_lines) {
+        out.push_str(&hunk);
+    }
+    out
+}
+
+/// The 7-character abbreviated object id, as host git prints it in diff headers.
+fn abbrev(bytes: &[u8]) -> String {
+    let oid = hash_object(Kind::Blob, bytes);
+    hex(&oid)[..7].to_string()
+}
+
+/// Splits bytes into lines. Each line keeps its trailing newline as part of the slice,
+/// so a diff line is just the marker (`+`, `-`, or space) plus the slice, verbatim.
+fn split_lines(bytes: &[u8]) -> Vec<&[u8]> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for (i, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            lines.push(&bytes[start..=i]);
+            start = i + 1;
+        }
+    }
+    // A final line without a trailing newline. A trailing newline does not
+    // produce an extra empty line.
+    if start < bytes.len() {
+        lines.push(&bytes[start..]);
+    }
+    lines
+}
+
+/// One or more unified diff hunks, in git's format, for the two line lists.
+fn hunks(old: &[&[u8]], new: &[&[u8]]) -> Vec<String> {
+    // The longest common subsequence of the two line lists, as indices into `old` and `new`.
+    let lcs = lcs_indices(old, new);
+    // The diff as a sequence of operations: `Equal` (n old == n new), `Delete` (n old, no new),
+    // `Add` (no old, n new). Indices are into `old` / `new`.
+    let mut ops: Vec<Op> = Vec::new();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    for &(oi, ni) in &lcs {
+        if oi > i || ni > j {
+            // Between the previous match and this one: the old remainder is deleted and the
+            // new remainder added.
+            if oi > i {
+                ops.push(Op::Delete {
+                    start: i,
+                    len: oi - i,
+                });
+            }
+            if ni > j {
+                ops.push(Op::Add {
+                    start: j,
+                    len: ni - j,
+                });
+            }
+        }
+        i = oi;
+        j = ni;
+        ops.push(Op::Equal { start: i, len: 1 });
+        i += 1;
+        j += 1;
+    }
+    if i < old.len() {
+        ops.push(Op::Delete {
+            start: i,
+            len: old.len() - i,
+        });
+    }
+    if j < new.len() {
+        ops.push(Op::Add {
+            start: j,
+            len: new.len() - j,
+        });
+    }
+    render_hunks(old, new, &ops)
+}
+
+enum Op {
+    /// `len` equal lines at `start` in both `old` and `new`.
+    Equal { start: usize, len: usize },
+    /// `len` old-only lines at `start` in `old`.
+    Delete { start: usize, len: usize },
+    /// `len` new-only lines at `start` in `new`.
+    Add { start: usize, len: usize },
+}
+
+/// Splits the change into hunks with three lines of context on each side.
+fn render_hunks(old: &[&[u8]], new: &[&[u8]], ops: &[Op]) -> Vec<String> {
+    // Build an interleaved list of (marker, content) pairs in file order.
+    // Markers: ' ' = context, '-' = old-only, '+' = new-only.
+    let mut body: Vec<(char, &[u8])> = Vec::new();
+    for op in ops {
+        match op {
+            Op::Equal { start, len } => {
+                for line in &old[*start..*start + *len] {
+                    body.push((' ', *line));
+                }
+            }
+            Op::Delete { start, len } => {
+                for line in &old[*start..*start + *len] {
+                    body.push(('-', *line));
+                }
+            }
+            Op::Add { start, len } => {
+                for line in &new[*start..*start + *len] {
+                    body.push(('+', *line));
+                }
+            }
+        }
+    }
+
+    // Find the indices of all changed ('-'/'+') lines.
+    let changed: Vec<usize> = body
+        .iter()
+        .enumerate()
+        .filter(|&(_, (m, _))| *m != ' ')
+        .map(|(i, _)| i)
+        .collect();
+    if changed.is_empty() {
+        return Vec::new();
+    }
+
+    // Split into groups: changed lines separated by more than 2*ctx context lines
+    // become separate hunks; otherwise they merge.
+    let ctx = 3usize;
+    let mut groups: Vec<(usize, usize)> = Vec::new(); // (first, last) changed indices, inclusive
+    let mut gs = changed[0];
+    let mut ge = changed[0];
+    for idx in &changed[1..] {
+        if *idx - ge > 2 * ctx {
+            groups.push((gs, ge));
+            gs = *idx;
+        }
+        ge = *idx;
+    }
+    groups.push((gs, ge));
+
+    // Render each group as a hunk with ctx lines of context on each side.
+    let mut out: Vec<String> = Vec::new();
+    for (gs, ge) in groups {
+        let mut lo = gs.saturating_sub(ctx);
+        let mut hi = (ge + ctx + 1).min(body.len());
+        // Extend the range if it still starts or ends on a changed line, so the
+        // context is always fully on the outside of the change.
+        while lo < gs && body[lo].0 != ' ' {
+            lo = lo.saturating_sub(1);
+        }
+        while hi > ge + 1 && body[hi - 1].0 != ' ' {
+            hi += 1;
+        }
+
+        // Count old-side and new-side lines up to and within [lo..hi) for the
+        // hunk header. A body line is old-side when its marker is not '+', and
+        // new-side when its marker is not '-'.
+        let mut old_before = 0usize;
+        let mut new_before = 0usize;
+        for (m, _) in &body[..lo] {
+            if *m != '+' {
+                old_before += 1;
+            }
+            if *m != '-' {
+                new_before += 1;
+            }
+        }
+        let mut old_n = 0usize;
+        let mut new_n = 0usize;
+        for (m, _) in &body[lo..hi] {
+            if *m != '+' {
+                old_n += 1;
+            }
+            if *m != '-' {
+                new_n += 1;
+            }
+        }
+        // Git's header: "start,count", 1-based, where start is the number of
+        // lines of that side before the hunk plus one. An empty side is "0,0".
+        // The count is omitted only when it is 1 and the start is 1.
+        let old_start1 = old_before + 1;
+        let new_start1 = new_before + 1;
+        let old_side = if old_n == 0 {
+            "-0,0".to_string()
+        } else if old_n == 1 && old_start1 == 1 {
+            "-1".to_string()
+        } else {
+            format!("-{old_start1},{old_n}")
+        };
+        let new_side = if new_n == 0 {
+            "+0,0".to_string()
+        } else if new_n == 1 && new_start1 == 1 {
+            "+1".to_string()
+        } else {
+            format!("+{new_start1},{new_n}")
+        };
+
+        let mut hunk = format!("@@ {old_side} {new_side} @@\n");
+        for (m, line) in &body[lo..hi] {
+            let has_nl = line.ends_with(b"\n");
+            let content = if has_nl {
+                &line[..line.len() - 1]
+            } else {
+                line
+            };
+            hunk.push(*m);
+            hunk.push_str(&utf8_lossy(content));
+            hunk.push('\n');
+            // The no-newline marker goes on its own line after the diff line.
+            if !has_nl {
+                hunk.push_str("\\ No newline at end of file\n");
+            }
+        }
+        out.push(hunk);
+    }
+    out
+}
+
+/// The longest common subsequence of `a` and `b`, as (index into a, index into b) pairs,
+/// in ascending order. Computed with a classic DP-LCS forward backtrack, augmented so a
+/// duplicated line pairs with the *earliest* equally-good copy in `b` — which is how
+/// host git aligns hunks.
+fn lcs_indices(a: &[&[u8]], b: &[&[u8]]) -> Vec<(usize, usize)> {
+    let (n, m) = (a.len(), b.len());
+    if n == 0 || m == 0 {
+        return Vec::new();
+    }
+    // dp[i][j] = LCS length of a[i..] and b[j..], flattened row-major (row length m + 1).
+    let mut dp = vec![0usize; (n + 1) * (m + 1)];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            let v = if a[i] == b[j] {
+                dp[(i + 1) * (m + 1) + (j + 1)] + 1
+            } else {
+                dp[(i + 1) * (m + 1) + j].max(dp[i * (m + 1) + (j + 1)])
+            };
+            dp[i * (m + 1) + j] = v;
+        }
+    }
+    // Forward backtrack: walk (i, j) from (0, 0) to (n, m), pushing match pairs.
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if a[i] == b[j] {
+            // If the diagonal move is optimal, take it.
+            if dp[i * (m + 1) + j] == 1 + dp[(i + 1) * (m + 1) + (j + 1)] {
+                out.push((i, j));
+                i += 1;
+                j += 1;
+            } else if let Some(jj) = leftmost_optimal_match(a, b, &dp, m, i, j + 1) {
+                // a[i] == b[j] but the diagonal at j is not the optimal move. Pair a[i]
+                // with the leftmost later copy in b whose diagonal IS optimal — the
+                // duplicate-line case where matching at j would block a better match.
+                out.push((i, jj));
+                i += 1;
+                j = jj + 1;
+            } else {
+                // No equally-good match for a[i] in b[j..]; skip a[i].
+                i += 1;
+            }
+        } else {
+            // Non-match: prefer moving down (i+1, j) over right (i, j+1) on a tie,
+            // which biases matches toward the earlier region of `b`.
+            let down = dp[(i + 1) * (m + 1) + j];
+            let right = dp[i * (m + 1) + (j + 1)];
+            if down >= right {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+    }
+    out
+}
+
+/// The leftmost `jj` in `b[from..]` such that `a[i] == b[jj]` and the diagonal
+/// through `jj` is an optimal move (`dp[i][jj] == 1 + dp[i+1][jj+1]`), or `None`.
+fn leftmost_optimal_match(
+    a: &[&[u8]],
+    b: &[&[u8]],
+    dp: &[usize],
+    m: usize,
+    i: usize,
+    from: usize,
+) -> Option<usize> {
+    for jj in from..m {
+        if a[i] == b[jj] && dp[i * (m + 1) + jj] == 1 + dp[(i + 1) * (m + 1) + (jj + 1)] {
+            return Some(jj);
+        }
+    }
+    None
+}
+
+fn utf8_lossy(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 /// Every regular file under the current directory, as sorted relative paths. `.git` is skipped.
 fn list_worktree() -> Result<Vec<String>> {
     let mut files = Vec::new();
@@ -826,15 +1298,22 @@ fn list_worktree() -> Result<Vec<String>> {
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<()> {
     let entries =
         fs::read_dir(dir).map_err(|e| Fatal::new(format!("cannot read {}: {e}", dir.display())))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| Fatal::new(e.to_string()))?;
-        let name = entry
-            .file_name()
-            .into_string()
-            .map_err(|_| Fatal::new("file name is not valid UTF-8"))?;
-        if prefix.is_empty() && name == ".git" {
-            continue;
-        }
+    let entries = entries
+        .map(|entry| -> Result<(String, std::fs::DirEntry)> {
+            let entry = entry.map_err(|e| Fatal::new(e.to_string()))?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| Fatal::new("file name is not valid UTF-8"))?;
+            Ok((name, entry))
+        })
+        // The repository's `.git` directory is never walked.
+        .filter(|pair| {
+            matches!(pair, Ok((name, _)) if !(prefix.is_empty() && name == ".git"))
+                || pair.is_err()
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for (name, entry) in entries {
         let path = if prefix.is_empty() {
             name
         } else {
