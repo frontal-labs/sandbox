@@ -23,4 +23,10 @@ ignore = [
     # compiles libsqlite3-sys (`cargo tree --all-features` shows no path).
     # Remove this ignore once sqlx pulls a patched libsqlite3-sys.
     "RUSTSEC-2026-0459",
+    # chrono and humantime were declared unmaintained (chronotope/chrono#1768);
+    # no fixed version exists. Both are transitive of object_store 0.14 (and
+    # sqlx via the chrono feature). Tracked with the object_store upgrade;
+    # explained in deny.toml.
+    "RUSTSEC-2026-0542", # humantime wraps chrono; via object_store 0.14
+    "RUSTSEC-2026-0543", # chrono unmaintained; via object_store 0.14 and sqlx
 ]
