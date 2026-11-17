@@ -178,14 +178,18 @@ Implemented:
 - Warm pool of pre-booted guests (`crates/sandbox-vmm/src/pool.rs`).
 - Promotion from Tier 1 (`crates/sandbox-promote/src/promote.rs`), wired into
   the server for sessions created with the `vm` tier preference.
+- Automatic re-promotion: when an exec on a session eligible for the VM tier
+  fails with `NEEDS_VM`, the server moves the session to a VM from the warm
+  pool and re-runs the command (`run_with_promotion` in
+  `crates/sandbox-server/src/api.rs`). The session must have been created with
+  a non-isolate tier preference (`allow_vm: true`) and the server must have a
+  VM pool; otherwise the `NEEDS_VM` refusal is returned to the caller.
 - Snapshot/restore through the QEMU monitor (`savevm` / `loadvm`).
 
 Not present yet:
 
 - Base and browser rootfs images built by scripts in `tools/` and `images/`
   (the emulated test image in `docker/emulated-vm/` exists).
-- Automatic re-promotion of an existing isolate session when a command fails
-  with `NeedsVm`.
 
 ## Operations
 
