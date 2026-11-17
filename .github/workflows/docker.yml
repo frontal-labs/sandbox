@@ -134,8 +134,11 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            # `type=sha` tags the image with its short sha, and adds `latest`
+            # when the sha is at the tip of the default branch -- which every
+            # tag cut from main is. A separate raw `latest` tag would be a
+            # duplicate of that.
             type=sha
-            type=raw,value=latest
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
