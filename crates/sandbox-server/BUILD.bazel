@@ -74,6 +74,7 @@ _SERVER_TEST_DEPS = [
     "@crates//:serde_json",
     "@crates//:tokio",
     "@crates//:tokio-tungstenite",
+    "@crates//:toml-1.2.1+spec-1.1.0",
     "@crates//:tower",
     "@crates//:utoipa",
 ]
