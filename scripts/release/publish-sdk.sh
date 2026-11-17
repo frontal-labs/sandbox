@@ -35,9 +35,11 @@ case "$sdk" in
     ;;
   py)
     python3 -m build --outdir "$out" sdks/python >/dev/null
+    # Wheel/sdist filenames derive from the package name, which hatchling
+    # normalizes to underscores (frontal-sandbox-sdk -> frontal_sandbox_sdk).
     artifacts=(
-      "$out/sandbox_sdk-${version}-py3-none-any.whl:application/vnd.python.wheel"
-      "$out/sandbox_sdk-${version}.tar.gz:application/gzip"
+      "$out/frontal_sandbox_sdk-${version}-py3-none-any.whl:application/vnd.python.wheel"
+      "$out/frontal_sandbox_sdk-${version}.tar.gz:application/gzip"
     )
     ;;
   rs)
