@@ -1,6 +1,6 @@
-# Frontal Sandbox (experimental)
+# Frontal Sandbox
 
-![Frontal Banner](./banner.jpg)
+![Frontal Banner](banner.jpg)
 
 **Millisecond sandboxes for AI agents**
 
