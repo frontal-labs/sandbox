@@ -125,6 +125,16 @@ jobs:
       # access token with the `write:packages` scope is preferred when the
       # GHCR_TOKEN secret exists. `GITHUB_TOKEN` is kept as the fallback so a
       # future org policy change makes the secret optional again.
+      # Diagnostic (temporary): proves whether the GHCR_TOKEN secret is
+      # present in this workflow's secret store. The value itself is masked.
+      - name: Check GHCR_TOKEN secret presence
+        run: |
+          if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
+            echo "GHCR_TOKEN secret: PRESENT"
+          else
+            echo "GHCR_TOKEN secret: ABSENT"
+          fi
+
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
