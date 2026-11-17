@@ -32,6 +32,15 @@ ignore = [
     # libsqlite3-sys via sqlx-sqlite 0.9.0, which caps it below the fixed 0.39.0.
     # Not compiled by any build (`cargo tree --all-features` shows no path).
     { id = "RUSTSEC-2026-0459", reason = "lockfile only via sqlx-sqlite 0.9.0; no build compiles libsqlite3-sys" },
+    # chrono was declared unmaintained (chronotope/chrono#1768). It is a
+    # transitive of object_store 0.14 (date handling) and sqlx (chrono feature);
+    # no fixed chrono version exists. Replacing it means migrating date handling
+    # to jiff or time, which is an upstream change to object_store/sqlx, not a
+    # bump we can make. Tracked with the object_store upgrade.
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; transitive via object_store 0.14 and sqlx; no fixed version, tracked with the object_store upgrade" },
+    # humantime wraps chrono, so it is unmaintained for the same reason. It is
+    # only used by object_store for human-readable duration output.
+    { id = "RUSTSEC-2026-0542", reason = "humantime is unmaintained (wraps chrono); transitive via object_store 0.14; tracked with the object_store upgrade" },
 ]
 
 [licenses]
