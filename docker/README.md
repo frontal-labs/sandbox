@@ -148,3 +148,9 @@ persists sessions on create (see the note in `smoke-test.sh`).
   between builds, so only changed crates recompile.
 - **Dev container.** `.devcontainer/Dockerfile` is a development image. It is
   unrelated to this deployment image.
+- **Apple Silicon (amd64 emulated).** Build and run with
+  `docker buildx build --platform linux/amd64` to target x86_64. On Docker
+  Desktop for Mac, amd64 containers are emulated via QEMU (Rosetta is not used
+  for containers by default). Expect slower exec on the emulated image; the
+  isolate tier is the only one that runs without `/dev/kvm`, and QEMU TCG
+  emulation has a measurable wall-clock cost for CPU-bound commands.
