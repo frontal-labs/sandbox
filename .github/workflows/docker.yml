@@ -120,11 +120,16 @@ jobs:
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      # The default GITHUB_TOKEN is denied write access to this GHCR package
+      # (pushes fail with `permission_denied: read_package`), so a personal
+      # access token with the `write:packages` scope is preferred when the
+      # GHCR_TOKEN secret exists. `GITHUB_TOKEN` is kept as the fallback so a
+      # future org policy change makes the secret optional again.
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Image tags
         id: meta
