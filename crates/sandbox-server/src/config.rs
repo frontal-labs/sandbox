@@ -101,7 +101,10 @@ pub struct WorkerSection {
 pub type Table = toml::Table;
 
 /// Resolved serve settings. CLI flags are applied by the caller after [`load`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` is written by hand so the database password in `database_url` never
+/// reaches a log line or a panic message.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ResolvedServeConfig {
     pub addr: String,
     pub data_dir: Option<PathBuf>,
@@ -113,6 +116,47 @@ pub struct ResolvedServeConfig {
     pub object_store_endpoint: Option<String>,
     /// Not loaded from the TOML schema; set by CLI `--python-artifacts` when provided.
     pub python_artifacts: Option<PathBuf>,
+}
+
+impl std::fmt::Debug for ResolvedServeConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedServeConfig")
+            .field("addr", &self.addr)
+            .field("data_dir", &self.data_dir)
+            .field("gc_interval_secs", &self.gc_interval_secs)
+            .field("idle_sleep_secs", &self.idle_sleep_secs)
+            .field(
+                "database_url",
+                &self.database_url.as_ref().map(|_| "<redacted>"),
+            )
+            .field("otel_endpoint", &self.otel_endpoint)
+            .field("object_store_bucket", &self.object_store_bucket)
+            .field("object_store_endpoint", &self.object_store_endpoint)
+            .field("python_artifacts", &self.python_artifacts)
+            .finish()
+    }
+}
+
+/// Security settings the file asks for that the server does not implement. An
+/// operator who sets `tls.enabled = true` would otherwise believe the server
+/// speaks TLS while it serves plaintext.
+pub fn ignored_security_settings(file: &ServerConfigFile) -> Vec<String> {
+    let mut out = Vec::new();
+    if file.server.tls.get("enabled").and_then(|v| v.as_bool()) == Some(true) {
+        out.push(
+            "[server.tls] enabled = true is not implemented: the server listens in plaintext. \
+             Terminate TLS in a reverse proxy or load balancer."
+                .to_string(),
+        );
+    }
+    if !file.server.auth.is_empty() {
+        out.push(
+            "[server.auth] settings (such as api_key_hash and rate_limit_rps) are not \
+             implemented and are ignored."
+                .to_string(),
+        );
+    }
+    out
 }
 
 impl Default for ResolvedServeConfig {
@@ -146,6 +190,9 @@ pub fn load(path: Option<&Path>) -> Result<ResolvedServeConfig, ConfigError> {
         })?;
         let file: ServerConfigFile =
             toml::from_str(&text).map_err(|source| ConfigError::Parse { path, source })?;
+        for warning in ignored_security_settings(&file) {
+            tracing::warn!("{warning}");
+        }
         apply_file(&mut resolved, &file);
     } else if explicit {
         return Err(ConfigError::Read {
