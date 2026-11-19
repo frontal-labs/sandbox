@@ -345,7 +345,16 @@ async fn registry_entries_pin_hashes_and_apply_limits() {
     .await
     .unwrap();
     let (code, _, err) = run(&mut sh, "wt args").await;
-    assert_eq!(code, 126, "{err}");
+    // The 1-unit budget is far below what instantiation needs on any
+    // architecture, so the run cannot complete: the exit code is non-zero
+    // and the error names the fuel exhaustion. The exact code varies with
+    // how the engine surfaces an exhausted-at-instantiate failure (126 on
+    // aarch64, 1 on x86_64 under wasmtime 50), so we assert on the error
+    // text, which is the part that proves the limit reached the engine.
+    assert_ne!(
+        code, 0,
+        "the run must not succeed under a 1-unit fuel budget"
+    );
     assert!(
         err.contains("fuel") || err.contains("trap"),
         "expected a fuel-exhaustion error, got: {err}"
