@@ -1088,6 +1088,7 @@ fn router_with_options(
 /// Opens a durable server whose state lives in `dir` (ADR 0008). Keys, snapshots,
 /// and sleeping sessions from an earlier run are loaded. On the first run one key
 /// is created, and it is returned so the caller can show it once.
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
@@ -1098,6 +1099,7 @@ pub async fn open_durable(
 
 /// Like [`open_durable`], and also returns the server state (see
 /// [`create_router_with_state`]).
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable_with_state(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
@@ -1107,6 +1109,7 @@ pub async fn open_durable_with_state(
 
 /// Like [`open_durable_with_state`], and sessions may move to the Tier 2 guest `vm`
 /// describes when a command needs one.
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable_with_vm(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
@@ -1124,6 +1127,7 @@ pub async fn open_durable_with_vm(
 }
 
 /// Like [`open_durable_with_state`], with the given options.
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable_with_options(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
