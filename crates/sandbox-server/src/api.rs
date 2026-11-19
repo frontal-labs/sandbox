@@ -250,7 +250,7 @@ pub struct VmConfig {
 }
 
 /// Live sessions the server holds across all keys.
-pub const MAX_SESSIONS_TOTAL: usize = 4096;
+pub const MAX_SESSIONS_TOTAL: usize = 20_000;
 /// Largest file one read returns. A read holds the whole file in memory, and a
 /// session may hold files up to the VFS quota of 100 MiB, so reads are capped.
 pub const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
@@ -260,7 +260,7 @@ pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 /// the process-wide snapshot registry is capped separately.
 pub const MAX_SNAPSHOTS_PER_KEY: usize = 32;
 /// Snapshots the server holds across all keys.
-pub const MAX_SNAPSHOTS_TOTAL: usize = 4096;
+pub const MAX_SNAPSHOTS_TOTAL: usize = 20_000;
 
 /// Stores a new session if the caller and the server are under their limits.
 /// The check and the insert happen under one lock, so concurrent creates
