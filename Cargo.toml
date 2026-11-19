@@ -17,6 +17,7 @@ members = [
     "crates/sandbox-worker",
     "crates/sandbox-scheduler",
     "crates/sandbox-server",
+    "crates/sandbox-testutil",
     "sdks/rust",
     "cli",
     "benchmarks",

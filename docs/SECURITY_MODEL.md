@@ -6,7 +6,7 @@
 - **Partial**: code exists, but it is not enforced or not reachable from the public API.
 - **Planned**: no code, or only a placeholder.
 
-Do not run untrusted code on this codebase, and do not expose the server to untrusted clients. Session, exec, and filesystem handlers run against in-memory sessions. Snapshot and fork are not implemented. Requests need a valid API key, but key provisioning, TLS, and rate limiting are not implemented (see Authentication).
+Do not run untrusted code on this codebase, and do not expose the server to untrusted clients. Session, exec, and filesystem handlers run against in-memory sessions. Requests need a valid API key, but key provisioning, TLS, and rate limiting are not implemented (see Authentication).
 
 ## Assumptions
 

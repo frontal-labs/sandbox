@@ -300,6 +300,8 @@ fn list_scenarios() {
     println!("Available scenarios:");
     println!("  concurrent_sessions  - Test concurrent idle sessions (memory)");
     println!("  exec_throughput      - Maximum exec/sec throughput");
+    println!("  held_sessions        - Hold --concurrency live sessions at once, exec on each (capacity)");
+    println!("  http_sessions        - Like held_sessions, over HTTP to --server-url (keys in SANDBOX_API_KEYS)");
     println!("  snapshot_fork        - Snapshot and fork under load");
     println!("  mixed_workload       - Realistic agent workload (git, npm, test)");
 }

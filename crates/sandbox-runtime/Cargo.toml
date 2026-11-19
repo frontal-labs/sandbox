@@ -29,5 +29,9 @@ deno_console = { workspace = true }
 deno_webidl = { workspace = true }
 swc_core = { workspace = true }
 
+[dev-dependencies]
+sandbox-cas = { path = "../sandbox-cas" }
+sandbox-testutil = { path = "../sandbox-testutil" }
+
 [features]
 default = []

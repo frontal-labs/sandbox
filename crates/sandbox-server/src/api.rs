@@ -250,7 +250,7 @@ pub struct VmConfig {
 }
 
 /// Live sessions the server holds across all keys.
-pub const MAX_SESSIONS_TOTAL: usize = 4096;
+pub const MAX_SESSIONS_TOTAL: usize = 20_000;
 /// Largest file one read returns. A read holds the whole file in memory, and a
 /// session may hold files up to the VFS quota of 100 MiB, so reads are capped.
 pub const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
@@ -260,7 +260,7 @@ pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 /// the process-wide snapshot registry is capped separately.
 pub const MAX_SNAPSHOTS_PER_KEY: usize = 32;
 /// Snapshots the server holds across all keys.
-pub const MAX_SNAPSHOTS_TOTAL: usize = 4096;
+pub const MAX_SNAPSHOTS_TOTAL: usize = 20_000;
 
 /// Stores a new session if the caller and the server are under their limits.
 /// The check and the insert happen under one lock, so concurrent creates
@@ -1040,11 +1040,20 @@ fn pool_for(vm: &Option<Arc<VmConfig>>) -> Option<Arc<sandbox_vmm::VmPool>> {
         accel: config.accel,
         console: config.image.join("console.log"),
     };
-    Some(sandbox_vmm::VmPool::new(
-        spec,
-        config.warm_guests,
-        config.boot_timeout,
-    ))
+    let pool = sandbox_vmm::VmPool::new(spec, config.warm_guests, config.boot_timeout);
+    // Fill the pool now. A promotion only refills what it took, so without this the first one
+    // would wait for a cold boot, and the pool would help from the second on.
+    if config.warm_guests > 0 {
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let warm = pool.clone();
+            runtime.spawn(async move {
+                if let Err(error) = warm.refill().await {
+                    tracing::warn!(error = %error.message, "filling the guest pool failed");
+                }
+            });
+        }
+    }
+    Some(pool)
 }
 
 fn router_with_options(
@@ -1079,6 +1088,7 @@ fn router_with_options(
 /// Opens a durable server whose state lives in `dir` (ADR 0008). Keys, snapshots,
 /// and sleeping sessions from an earlier run are loaded. On the first run one key
 /// is created, and it is returned so the caller can show it once.
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
@@ -1089,6 +1099,7 @@ pub async fn open_durable(
 
 /// Like [`open_durable`], and also returns the server state (see
 /// [`create_router_with_state`]).
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable_with_state(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
@@ -1098,6 +1109,7 @@ pub async fn open_durable_with_state(
 
 /// Like [`open_durable_with_state`], and sessions may move to the Tier 2 guest `vm`
 /// describes when a command needs one.
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable_with_vm(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
@@ -1115,6 +1127,7 @@ pub async fn open_durable_with_vm(
 }
 
 /// Like [`open_durable_with_state`], with the given options.
+#[cfg(not(feature = "clustered"))]
 pub async fn open_durable_with_options(
     scheduler: Arc<Scheduler>,
     dir: &std::path::Path,
