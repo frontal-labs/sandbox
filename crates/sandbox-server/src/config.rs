@@ -116,6 +116,10 @@ pub struct ResolvedServeConfig {
     pub object_store_endpoint: Option<String>,
     /// Not loaded from the TOML schema; set by CLI `--python-artifacts` when provided.
     pub python_artifacts: Option<PathBuf>,
+    /// Maximum live sessions the server holds across all keys.
+    pub max_sessions_total: usize,
+    /// Maximum snapshots the server holds across all keys.
+    pub max_snapshots_total: usize,
 }
 
 impl std::fmt::Debug for ResolvedServeConfig {
@@ -133,6 +137,8 @@ impl std::fmt::Debug for ResolvedServeConfig {
             .field("object_store_bucket", &self.object_store_bucket)
             .field("object_store_endpoint", &self.object_store_endpoint)
             .field("python_artifacts", &self.python_artifacts)
+            .field("max_sessions_total", &self.max_sessions_total)
+            .field("max_snapshots_total", &self.max_snapshots_total)
             .finish()
     }
 }
@@ -171,6 +177,8 @@ impl Default for ResolvedServeConfig {
             object_store_bucket: None,
             object_store_endpoint: None,
             python_artifacts: None,
+            max_sessions_total: 20_000,
+            max_snapshots_total: 20_000,
         }
     }
 }
@@ -239,7 +247,7 @@ fn apply_file(resolved: &mut ResolvedServeConfig, file: &ServerConfigFile) {
     }
 }
 
-fn env_str(key: &str) -> Option<String> {
+pub fn env_str(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
@@ -274,6 +282,16 @@ fn apply_env(resolved: &mut ResolvedServeConfig) {
     }
     if let Some(v) = env_str("SANDBOX_OBJECT_STORE_ENDPOINT") {
         resolved.object_store_endpoint = Some(v);
+    }
+    if let Some(v) = env_str("SANDBOX_MAX_SESSIONS_TOTAL") {
+        if let Ok(n) = v.parse() {
+            resolved.max_sessions_total = n;
+        }
+    }
+    if let Some(v) = env_str("SANDBOX_MAX_SNAPSHOTS_TOTAL") {
+        if let Ok(n) = v.parse() {
+            resolved.max_snapshots_total = n;
+        }
     }
 }
 

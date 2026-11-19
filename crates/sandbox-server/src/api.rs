@@ -130,6 +130,10 @@ pub struct AppState {
     /// Sleeping sessions parked on disk, on a durable server. `None` keeps a sleeping
     /// session in the table, as a memory-only or clustered server does.
     pub(crate) parked: Option<crate::parked::ParkedStore>,
+    /// Maximum live sessions across all keys. Configurable via `SANDBOX_MAX_SESSIONS_TOTAL`.
+    pub(crate) max_sessions_total: usize,
+    /// Maximum snapshots across all keys. Configurable via `SANDBOX_MAX_SNAPSHOTS_TOTAL`.
+    pub(crate) max_snapshots_total: usize,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -249,8 +253,9 @@ pub struct VmConfig {
     pub warm_guests: usize,
 }
 
-/// Live sessions the server holds across all keys.
-pub const MAX_SESSIONS_TOTAL: usize = 20_000;
+/// Default live sessions the server holds across all keys. Override with
+/// `SANDBOX_MAX_SESSIONS_TOTAL`.
+pub const DEFAULT_MAX_SESSIONS_TOTAL: usize = 20_000;
 /// Largest file one read returns. A read holds the whole file in memory, and a
 /// session may hold files up to the VFS quota of 100 MiB, so reads are capped.
 pub const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
@@ -259,8 +264,9 @@ pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 /// Snapshots one key may hold. Snapshots pin blobs in the shared store, and
 /// the process-wide snapshot registry is capped separately.
 pub const MAX_SNAPSHOTS_PER_KEY: usize = 32;
-/// Snapshots the server holds across all keys.
-pub const MAX_SNAPSHOTS_TOTAL: usize = 20_000;
+/// Default snapshots the server holds across all keys. Override with
+/// `SANDBOX_MAX_SNAPSHOTS_TOTAL`.
+pub const DEFAULT_MAX_SNAPSHOTS_TOTAL: usize = 20_000;
 
 /// Stores a new session if the caller and the server are under their limits.
 /// The check and the insert happen under one lock, so concurrent creates
@@ -327,7 +333,7 @@ async fn admit_session(state: &AppState, owner: &KeyId, entry: Entry) -> Result<
     state.meters.open(owner.as_str(), &id.to_string());
     let mut table = state.sessions.0.write().await;
     let parked = parked_counts(state);
-    if table.len() + parked.total() >= MAX_SESSIONS_TOTAL {
+    if table.len() + parked.total() >= state.max_sessions_total {
         return Err(retryable(SandboxError::resource_exhausted(
             "the server is at its session limit",
         )));
@@ -1081,6 +1087,12 @@ fn router_with_options(
         vm,
         python,
         otel,
+        max_sessions_total: crate::config::env_str("SANDBOX_MAX_SESSIONS_TOTAL")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_SESSIONS_TOTAL),
+        max_snapshots_total: crate::config::env_str("SANDBOX_MAX_SNAPSHOTS_TOTAL")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_SNAPSHOTS_TOTAL),
     };
     (build_router(state.clone()), state)
 }
@@ -1287,6 +1299,12 @@ async fn attach_store(
         usage_log,
         parked,
         store: Some(Arc::new(store)),
+        max_sessions_total: crate::config::env_str("SANDBOX_MAX_SESSIONS_TOTAL")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_SESSIONS_TOTAL),
+        max_snapshots_total: crate::config::env_str("SANDBOX_MAX_SNAPSHOTS_TOTAL")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_SNAPSHOTS_TOTAL),
     };
     restore(&state, saved).await?;
     persist(&state).await.map_err(|e| e.into_inner())?;
@@ -3100,7 +3118,7 @@ async fn admit_snapshot<'a>(
             )
         }
     };
-    if total >= MAX_SNAPSHOTS_TOTAL {
+    if total >= state.max_snapshots_total {
         return Err(SandboxError::resource_exhausted("the server is at its snapshot limit").into());
     }
     if held >= MAX_SNAPSHOTS_PER_KEY {
