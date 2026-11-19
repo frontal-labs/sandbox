@@ -2,6 +2,9 @@
 # container runs on. It is the lean counterpart of linux-dev.Dockerfile: no WASI SDK, so it
 # builds on arm64 hosts (Apple Silicon), where the guest then runs under HVF.
 # Use docker/build-guest-image.sh, which builds this image and runs build-image.sh in it.
+#
+# Runs as root: building a guest kernel + initrd requires access to build tools and
+# filesystem operations that need elevated privileges. No untrusted input is processed.
 FROM rust:1.97-bookworm
 
 RUN apt-get update \

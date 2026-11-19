@@ -276,10 +276,14 @@ async fn the_node_shim_reveals_nothing_about_the_host() {
         .to_string_lossy()
         .into_owned();
     let pid = std::process::id();
-    let hostname = std::process::Command::new("hostname")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
+    let hostname = tokio::task::spawn_blocking(|| {
+        std::process::Command::new("hostname")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap();
     std::env::set_var("ESCAPE_V8_ENV_CANARY", CANARY);
 
     let out = run(r#"

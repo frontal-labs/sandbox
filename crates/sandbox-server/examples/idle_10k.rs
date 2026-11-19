@@ -63,7 +63,13 @@ async fn serve(args: &[String]) {
     while minted.len() < keys {
         minted.push(state.auth.create_key());
     }
-    std::fs::write(keys_file, minted.join("\n")).unwrap();
+    tokio::task::spawn_blocking({
+        let keys_file = keys_file.to_string();
+        let data = minted.join("\n");
+        move || std::fs::write(&keys_file, data).unwrap()
+    })
+    .await
+    .unwrap();
     let extra = Router::new()
         .route("/_idle/sweep", post(sweep_route))
         .route("/_idle/schedule", post(schedule_route))
@@ -192,11 +198,16 @@ async fn metric(client: &reqwest::Client, base: &str, key: &str, name: &str) -> 
 
 async fn drive(args: &[String]) {
     let addr = &args[0];
-    let keys: Vec<String> = std::fs::read_to_string(&args[1])
-        .unwrap()
-        .lines()
-        .map(str::to_string)
-        .collect();
+    let keys_path = args[1].clone();
+    let keys: Vec<String> = tokio::task::spawn_blocking(move || {
+        std::fs::read_to_string(&keys_path)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap();
     let pid: u32 = args[2].parse().unwrap();
     let n: usize = args[3].parse().unwrap();
     let payload: usize = args[4].parse().unwrap();

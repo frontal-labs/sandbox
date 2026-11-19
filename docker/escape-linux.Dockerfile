@@ -4,12 +4,15 @@
 # arm64 (Apple Silicon Docker) as well as amd64. The escape suite needs only a Rust toolchain
 # and protoc: it exercises namespaces, seccomp, and cgroup v2, not the VM tier.
 # Build and run it with docker/run-escape-tests.sh.
+#
+# Runs as root: the escape suite needs to create namespaces and configure cgroups, which
+# require elevated privileges. No untrusted input is processed.
 FROM rust:1.97-bookworm
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev clang lld \
+ && apt-get install -y --no-install-recommends \
+    clang libprotobuf-dev lld protobuf-compiler \
+ && rustup component add rustfmt clippy \
  && rm -rf /var/lib/apt/lists/*
-
-RUN rustup component add rustfmt clippy
 
 WORKDIR /src

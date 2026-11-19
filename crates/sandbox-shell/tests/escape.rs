@@ -401,10 +401,14 @@ async fn host_process_ids_are_not_exposed() {
 #[tokio::test]
 async fn no_command_can_signal_a_host_process() {
     // A sacrificial host process. A script that can signal processes would end it.
-    let mut victim = std::process::Command::new("sleep")
-        .arg("600")
-        .spawn()
-        .unwrap();
+    let mut victim = tokio::task::spawn_blocking(|| {
+        std::process::Command::new("sleep")
+            .arg("600")
+            .spawn()
+            .unwrap()
+    })
+    .await
+    .unwrap();
     let pid = victim.id();
     let mut shell = shell_over(new_vfs());
     for script in [
