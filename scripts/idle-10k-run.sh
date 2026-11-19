@@ -1,7 +1,7 @@
 #!/bin/bash
 # usage: run.sh <bin> <n> <payload> <mode> <port> <label>
 BIN=$1; N=$2; PAYLOAD=$3; MODE=$4; PORT=$5; LABEL=$6
-S=$(dirname "$0")
+S=${IDLE_SCRATCH:-$(dirname "$0")}
 D=$S/data-idle-$LABEL; rm -rf "$D"; mkdir -p "$D"
 KEYS=$(( (N + 29) / 30 + 1 ))
 RUST_LOG=warn "$BIN" serve "$D/state" 127.0.0.1:$PORT "$D/keys" $KEYS > "$D/server.log" 2>&1 &
