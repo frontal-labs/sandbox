@@ -13,11 +13,9 @@
 //! `#[ignore = "KNOWN GAP: ..."]` states the property the code should hold and does not;
 //! `cargo test -- --ignored` lists every open gap. See docs/ESCAPE_TESTS.md.
 
-use sandbox_cas::MemStore;
 use sandbox_runtime::{execute_script_streamed, ScriptLimits, ScriptOutcome};
-use sandbox_types::hash::ContentHash;
-use sandbox_vfs::{OpenFlags, SessionFs, Vfs};
-use std::path::Path;
+use sandbox_testutil::HostCanary;
+use sandbox_vfs::Vfs;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -55,58 +53,16 @@ fn stderr(out: &ScriptOutcome) -> String {
 }
 
 fn new_vfs() -> Arc<Vfs> {
-    Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())))
+    sandbox_testutil::new_vfs()
 }
 
 async fn put(vfs: &Vfs, path: &str, data: &[u8]) {
-    let flags = OpenFlags {
-        read: false,
-        write: true,
-        create: true,
-        truncate: true,
-        ..OpenFlags::default()
-    };
-    let handle = vfs.open(Path::new(path), flags).await.unwrap();
-    vfs.write(&handle, 0, data).await.unwrap();
-    vfs.close(&handle);
+    sandbox_testutil::put(vfs, path, data).await
 }
 
-struct HostCanary {
-    dir: std::path::PathBuf,
-    file: std::path::PathBuf,
-}
-
-impl HostCanary {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("escape-v8-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("canary.txt");
-        std::fs::write(&file, CANARY).unwrap();
-        Self { dir, file }
-    }
-
-    fn path(&self) -> &str {
-        self.file.to_str().unwrap()
-    }
-
-    fn assert_untouched(&self) {
-        let names: Vec<_> = std::fs::read_dir(&self.dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            names,
-            vec!["canary.txt".to_string()],
-            "host directory changed"
-        );
-        assert_eq!(std::fs::read_to_string(&self.file).unwrap(), CANARY);
-    }
-}
-
-impl Drop for HostCanary {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+/// A host canary that uses the V8-specific canary string and `escape-v8-{tag}` dirs.
+fn host_canary(tag: &str) -> HostCanary {
+    HostCanary::with_content(tag, CANARY)
 }
 
 /// The text of a JS string literal for `s`, so a host path can be embedded in a script.
@@ -234,7 +190,7 @@ async fn dynamic_import_cannot_load_host_files_urls_or_modules() {
     // Weak while Promise jobs never run (`async_code_and_timers_run`): the import's result cannot be
     // observed, so this proves only that no host data reaches stdout or stderr. The static
     // evidence is that `RuntimeOptions` sets no module loader, so deno_core's noop loader applies.
-    let canary = HostCanary::new("import");
+    let canary = host_canary("import");
     let code = format!(
         r#"
         (async () => {{
@@ -344,9 +300,9 @@ fn the_fs_shim_never_returns_host_data() {
     // Each attempt runs in a child process with a VFS installed. Today the fs shim aborts the
     // process on its first call (see `the_fs_shim_returns_file_contents`), so this is a weak
     // check: it proves no host byte arrives, and it will start to mean more once the shim works.
-    let canary = HostCanary::new("fs");
+    let canary = host_canary("fs");
     let host = canary.path().to_string();
-    let host_dir = canary.dir.to_str().unwrap().to_string();
+    let host_dir = canary.dir().to_str().unwrap().to_string();
     let climbing = format!("{}{}", "../".repeat(40), host.trim_start_matches('/'));
     for expr in [
         format!("fs.readFileSync({})", js(&host)),
@@ -393,7 +349,7 @@ fn the_fs_shim_returns_file_contents() {
 #[tokio::test]
 #[ignore = "KNOWN GAP: an fs op with no VFS installed panics inside a V8 callback, which aborts the process (the contained child always has no VFS)"]
 async fn a_script_with_no_vfs_cannot_reach_a_filesystem_at_all() {
-    let canary = HostCanary::new("novfs");
+    let canary = host_canary("novfs");
     let code = format!(
         "const fs = require('fs'); try {{ console.log(fs.readFileSync({}, 'utf8')); }} catch (e) {{ console.log('ERR'); }}",
         js(canary.path())

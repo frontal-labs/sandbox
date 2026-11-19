@@ -12,9 +12,8 @@
 //! Probes that could abort the host process (and so the test runner) run in a child process:
 //! the test re-executes this binary with `ESCAPE_WASM_CHILD=<probe>` and reports how it ended.
 
-use sandbox_cas::MemStore;
-use sandbox_types::hash::ContentHash;
-use sandbox_vfs::{OpenFlags, SessionFs, Vfs};
+use sandbox_testutil::HostCanary;
+use sandbox_vfs::{SessionFs, Vfs};
 use sandbox_wasm::wasi::errno;
 use sandbox_wasm::{
     run_module, run_module_with_mount, run_module_with_preopens_streamed, Mount, Preopen,
@@ -27,20 +26,11 @@ use std::time::{Duration, Instant};
 // --- Fixtures -----------------------------------------------------------------------------
 
 fn vfs() -> Arc<Vfs> {
-    Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())))
+    sandbox_testutil::new_vfs()
 }
 
 async fn put(vfs: &Vfs, path: &str, data: &[u8]) {
-    let flags = OpenFlags {
-        read: false,
-        write: true,
-        create: true,
-        truncate: true,
-        ..OpenFlags::default()
-    };
-    let handle = vfs.open(Path::new(path), flags).await.unwrap();
-    vfs.write(&handle, 0, data).await.unwrap();
-    vfs.close(&handle);
+    sandbox_testutil::put(vfs, path, data).await
 }
 
 /// A VFS with `/work` (the guest's preopened fd 3) and `/secret/flag`, a file in the same VFS
@@ -58,28 +48,11 @@ async fn work_mount() -> (Arc<Vfs>, Mount) {
     (vfs, mount)
 }
 
-/// A file on the real host filesystem with contents the guest must never see.
-struct HostCanary {
-    dir: std::path::PathBuf,
-    path: std::path::PathBuf,
-}
-
 const CANARY: &str = "HOST-FILESYSTEM-CANARY-7f3a91c2";
 
-impl HostCanary {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("escape-wasm-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("canary.txt");
-        std::fs::write(&path, CANARY).unwrap();
-        Self { dir, path }
-    }
-}
-
-impl Drop for HostCanary {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+/// A host canary that uses the WASM-specific canary string and `escape-wasm-{tag}` dirs.
+fn host_canary(tag: &str) -> HostCanary {
+    HostCanary::with_content(tag, CANARY)
 }
 
 fn contains(haystack: &[u8], needle: &str) -> bool {
@@ -416,13 +389,10 @@ fn child_entry() {
 
 #[tokio::test]
 async fn absolute_and_dotdot_paths_are_refused_with_notcapable() {
-    let canary = HostCanary::new("paths");
+    let canary = host_canary("paths");
     let (_vfs, mount) = work_mount().await;
-    let host_abs = canary.path.to_str().unwrap().to_string();
-    let host_dir_rel = format!(
-        "../../../../../../../../../..{}",
-        canary.path.to_str().unwrap()
-    );
+    let host_abs = canary.path().to_string();
+    let host_dir_rel = format!("../../../../../../../../../..{}", canary.path());
     for path in [
         "/etc/passwd".to_string(),
         "/".to_string(),
@@ -511,9 +481,9 @@ async fn opening_stdio_or_unknown_descriptors_as_directories_fails() {
 
 #[tokio::test]
 async fn symlinks_resolve_inside_the_vfs_never_on_the_host() {
-    let canary = HostCanary::new("symlink");
+    let canary = host_canary("symlink");
     let (vfs, mount) = work_mount().await;
-    let host = canary.path.to_str().unwrap();
+    let host = canary.path();
     // A symlink whose target is the host canary's real path, and one that climbs out with dotdots.
     vfs.symlink(Path::new(host), Path::new("/work/abs"))
         .await

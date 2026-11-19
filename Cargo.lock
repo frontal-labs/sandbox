@@ -4180,6 +4180,7 @@ dependencies = [
  "digest 0.10.7",
  "parking_lot 0.13.0",
  "sandbox-cas",
+ "sandbox-testutil",
  "sandbox-types",
  "sandbox-vfs",
  "serde",
@@ -4286,6 +4287,7 @@ dependencies = [
  "rustix 1.1.6",
  "sandbox-cas",
  "sandbox-runtime",
+ "sandbox-testutil",
  "sandbox-types",
  "sandbox-vfs",
  "sandbox-wasm",
@@ -4294,6 +4296,16 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "sandbox-testutil"
+version = "0.0.0"
+dependencies = [
+ "sandbox-cas",
+ "sandbox-types",
+ "sandbox-vfs",
+ "tokio",
 ]
 
 [[package]]
@@ -4377,6 +4389,7 @@ dependencies = [
  "futures",
  "parking_lot 0.13.0",
  "sandbox-cas",
+ "sandbox-testutil",
  "sandbox-types",
  "sandbox-vfs",
  "serde",

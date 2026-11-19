@@ -1,0 +1,15 @@
+[package]
+name = "sandbox-testutil"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Shared helpers for the sandbox test suites"
+
+[dependencies]
+sandbox-cas = { path = "../sandbox-cas" }
+sandbox-types = { path = "../sandbox-types" }
+sandbox-vfs = { path = "../sandbox-vfs" }
+tokio = { workspace = true }
+
+[dev-dependencies]

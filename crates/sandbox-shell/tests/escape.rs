@@ -16,8 +16,9 @@
 
 use sandbox_cas::MemStore;
 use sandbox_shell::interpreter::{Shell, ShellConfig};
+use sandbox_testutil::HostCanary;
 use sandbox_types::hash::ContentHash;
-use sandbox_vfs::{OpenFlags, Quotas, SessionFs, Vfs};
+use sandbox_vfs::{Quotas, SessionFs, Vfs};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,7 +26,7 @@ use std::time::{Duration, Instant};
 const CANARY: &str = "HOST-CANARY-b61d09e5";
 
 fn new_vfs() -> Arc<Vfs> {
-    Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())))
+    sandbox_testutil::new_vfs()
 }
 
 fn shell_over(vfs: Arc<Vfs>) -> Shell {
@@ -71,56 +72,12 @@ async fn run(script: &str) -> Ran {
 }
 
 async fn put(vfs: &Vfs, path: &str, data: &[u8]) {
-    let flags = OpenFlags {
-        read: false,
-        write: true,
-        create: true,
-        truncate: true,
-        ..OpenFlags::default()
-    };
-    let handle = vfs.open(Path::new(path), flags).await.unwrap();
-    vfs.write(&handle, 0, data).await.unwrap();
-    vfs.close(&handle);
+    sandbox_testutil::put(vfs, path, data).await
 }
 
-/// A directory on the real host holding a canary file.
-struct HostCanary {
-    dir: std::path::PathBuf,
-    file: std::path::PathBuf,
-}
-
-impl HostCanary {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("escape-shell-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("canary.txt");
-        std::fs::write(&file, CANARY).unwrap();
-        Self { dir, file }
-    }
-
-    fn path(&self) -> &str {
-        self.file.to_str().unwrap()
-    }
-
-    /// The host directory has exactly the canary, unchanged.
-    fn assert_untouched(&self) {
-        let names: Vec<_> = std::fs::read_dir(&self.dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            names,
-            vec!["canary.txt".to_string()],
-            "host directory changed"
-        );
-        assert_eq!(std::fs::read_to_string(&self.file).unwrap(), CANARY);
-    }
-}
-
-impl Drop for HostCanary {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+/// A host canary that uses the shell-specific canary string and `escape-shell-{tag}` dirs.
+fn host_canary(tag: &str) -> HostCanary {
+    HostCanary::with_content(tag, CANARY)
 }
 
 /// A TCP listener on host loopback. A hostile script that reaches the network connects to it.
@@ -156,9 +113,9 @@ impl Listener {
 
 #[tokio::test]
 async fn no_path_form_reaches_a_host_file() {
-    let canary = HostCanary::new("read");
+    let canary = host_canary("read");
     let p = canary.path().to_string();
-    let dir = canary.dir.to_str().unwrap().to_string();
+    let dir = canary.dir().to_str().unwrap().to_string();
     let climbing = format!("{}{}", "../".repeat(40), p.trim_start_matches('/'));
     let scripts = vec![
         format!("cat {p}"),
@@ -228,9 +185,9 @@ async fn the_control_script_can_read_a_file_that_is_in_the_vfs() {
 
 #[tokio::test]
 async fn no_host_file_can_be_written_deleted_or_replaced() {
-    let canary = HostCanary::new("write");
+    let canary = host_canary("write");
     let p = canary.path().to_string();
-    let d = canary.dir.to_str().unwrap().to_string();
+    let d = canary.dir().to_str().unwrap().to_string();
     let scripts = vec![
         format!("echo pwn > {d}/pwn.txt"),
         format!("echo pwn >> {p}"),
@@ -435,9 +392,9 @@ async fn no_command_can_signal_a_host_process() {
 
 #[tokio::test]
 async fn a_file_with_a_shebang_does_not_run_on_the_host() {
-    let canary = HostCanary::new("shebang");
+    let canary = host_canary("shebang");
     let vfs = new_vfs();
-    let d = canary.dir.to_str().unwrap();
+    let d = canary.dir().to_str().unwrap();
     put(
         &vfs,
         "/evil.sh",
@@ -466,7 +423,7 @@ async fn a_file_with_a_shebang_does_not_run_on_the_host() {
 
 #[tokio::test]
 async fn symlinks_resolve_inside_the_vfs_and_cycles_terminate() {
-    let canary = HostCanary::new("links");
+    let canary = host_canary("links");
     let vfs = new_vfs();
     let host = canary.path().to_string();
     vfs.symlink(Path::new(&host), Path::new("/abs"))
@@ -533,11 +490,11 @@ async fn symlinks_resolve_inside_the_vfs_and_cycles_terminate() {
 async fn a_symlink_race_never_reaches_the_host() {
     // One task flips /r between a directory holding a file and a symlink to a host path. The
     // others read through it. Whichever interleaving happens, no host content may come back.
-    let canary = HostCanary::new("race");
+    let canary = host_canary("race");
     let vfs = new_vfs();
     vfs.mkdir(Path::new("/r"), 0o755).await.unwrap();
     put(&vfs, "/r/f", b"inside").await;
-    let host_dir = canary.dir.clone();
+    let host_dir = canary.dir().to_path_buf();
     let flipper = {
         let vfs = vfs.clone();
         tokio::spawn(async move {

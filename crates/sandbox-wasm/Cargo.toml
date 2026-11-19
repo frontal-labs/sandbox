@@ -23,6 +23,7 @@ wasmtime = { workspace = true }
 
 [dev-dependencies]
 sandbox-cas = { path = "../sandbox-cas" }
+sandbox-testutil = { path = "../sandbox-testutil" }
 serde_json = { workspace = true }
 
 [features]
