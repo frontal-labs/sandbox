@@ -854,10 +854,9 @@ fn child_entry() {
             "script" | "script_vfs" => {
                 let vfs = (probe == "script_vfs").then(|| {
                     let vfs = new_vfs();
-                    let handle = futures_lite_block_on(async {
+                    futures_lite_block_on(async {
                         put(&vfs, "/inside.txt", b"inside").await;
                     });
-                    let _ = handle;
                     vfs
                 });
                 let timeout = std::env::var("ESCAPE_V8_TIMEOUT_MS")

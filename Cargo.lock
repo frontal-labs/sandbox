@@ -4179,6 +4179,7 @@ dependencies = [
  "deno_webidl",
  "digest 0.10.7",
  "parking_lot 0.13.0",
+ "sandbox-cas",
  "sandbox-types",
  "sandbox-vfs",
  "serde",

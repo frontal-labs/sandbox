@@ -55,7 +55,6 @@ async fn serve(args: &[String]) {
     let addr = &args[1];
     let keys_file = &args[2];
     let keys: usize = args[3].parse().unwrap();
-    let _ = tracing_subscriber_init();
     let (app, state, first) =
         sandbox_server::open_durable_with_state(Arc::new(Scheduler::new()), &dir)
             .await
@@ -75,8 +74,6 @@ async fn serve(args: &[String]) {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn tracing_subscriber_init() {}
-
 async fn sweep_route(
     State(state): State<AppState>,
     Query(q): Query<HashMap<String, u64>>,
@@ -93,7 +90,7 @@ async fn schedule_route(
 ) -> Json<Value> {
     let after = Duration::from_millis(q.get("after_ms").copied().unwrap_or(2000));
     let every = Duration::from_millis(q.get("every_ms").copied().unwrap_or(1000));
-    let _ = idle::schedule(state, after, every);
+    tokio::spawn(idle::schedule(state, after, every));
     Json(json!({"scheduled": true}))
 }
 

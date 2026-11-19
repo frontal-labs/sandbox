@@ -174,10 +174,10 @@ async fn no_path_form_reaches_a_host_file() {
         format!("head -n1 {p}"),
         format!("tail -n1 {p}"),
         format!("grep -r CANARY {dir}"),
-        format!("grep -r HOST-CANARY /"),
-        format!("find / -name canary.txt"),
+        "grep -r HOST-CANARY /".to_string(),
+        "find / -name canary.txt".to_string(),
         format!("find {dir}"),
-        format!("ls -R /"),
+        "ls -R /".to_string(),
         format!("ls {dir}"),
         format!("cp {p} /copy && cat /copy"),
         format!("sed -n p {p}"),
@@ -594,8 +594,10 @@ async fn endless_loops_and_recursion_end() {
         "f() { g; }; g() { f; }; f",
         ":(){ :|:; };:",
     ] {
-        let mut config = ShellConfig::default();
-        config.max_steps = 50_000;
+        let config = ShellConfig {
+            max_steps: 50_000,
+            ..ShellConfig::default()
+        };
         let mut shell = Shell::new(new_vfs(), config);
         let ran = run_on(&mut shell, script).await;
         assert_ne!(ran.code, 0, "`{script}` ended with success");
@@ -606,8 +608,10 @@ async fn endless_loops_and_recursion_end() {
 async fn the_step_limit_stops_a_busy_loop() {
     // About 7 microseconds of CPU per step on a debug build, so the default 1,000,000 steps is
     // seconds of CPU. Wall time is longer on a loaded host, because every step yields.
-    let mut config = ShellConfig::default();
-    config.max_steps = 20_000;
+    let config = ShellConfig {
+        max_steps: 20_000,
+        ..ShellConfig::default()
+    };
     let mut shell = Shell::new(new_vfs(), config);
     let ran = run_on(&mut shell, "while true; do :; done").await;
     assert_ne!(ran.code, 0);
@@ -616,8 +620,10 @@ async fn the_step_limit_stops_a_busy_loop() {
 
 #[tokio::test]
 async fn output_floods_stop_at_the_cap() {
-    let mut config = ShellConfig::default();
-    config.max_output_bytes = 256 * 1024;
+    let config = ShellConfig {
+        max_output_bytes: 256 * 1024,
+        ..ShellConfig::default()
+    };
     let mut shell = Shell::new(new_vfs(), config);
     for script in [
         "while true; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done",
