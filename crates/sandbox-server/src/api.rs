@@ -1040,11 +1040,20 @@ fn pool_for(vm: &Option<Arc<VmConfig>>) -> Option<Arc<sandbox_vmm::VmPool>> {
         accel: config.accel,
         console: config.image.join("console.log"),
     };
-    Some(sandbox_vmm::VmPool::new(
-        spec,
-        config.warm_guests,
-        config.boot_timeout,
-    ))
+    let pool = sandbox_vmm::VmPool::new(spec, config.warm_guests, config.boot_timeout);
+    // Fill the pool now. A promotion only refills what it took, so without this the first one
+    // would wait for a cold boot, and the pool would help from the second on.
+    if config.warm_guests > 0 {
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let warm = pool.clone();
+            runtime.spawn(async move {
+                if let Err(error) = warm.refill().await {
+                    tracing::warn!(error = %error.message, "filling the guest pool failed");
+                }
+            });
+        }
+    }
+    Some(pool)
 }
 
 fn router_with_options(
