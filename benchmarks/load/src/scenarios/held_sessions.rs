@@ -158,15 +158,24 @@ impl HeldSessionsScenario {
             }
         }
         let rss_after = rss_bytes(&mut system);
-        println!("held_sessions: RSS after the drop {:.1} MiB", mib(rss_after));
+        println!(
+            "held_sessions: RSS after the drop {:.1} MiB",
+            mib(rss_after)
+        );
 
         let total_errors = errors + exec_errors;
         let total_iterations = n + exec_ns.len();
         let mut latencies = HashMap::new();
-        latencies.insert("create".to_string(), LatencyHistogram::from_samples(&create_ns));
+        latencies.insert(
+            "create".to_string(),
+            LatencyHistogram::from_samples(&create_ns),
+        );
         latencies.insert("exec".to_string(), LatencyHistogram::from_samples(&exec_ns));
         // The summary prints "overall", so it carries the exec latency under all sessions.
-        latencies.insert("overall".to_string(), LatencyHistogram::from_samples(&exec_ns));
+        latencies.insert(
+            "overall".to_string(),
+            LatencyHistogram::from_samples(&exec_ns),
+        );
         let mut throughput = HashMap::new();
         throughput.insert(
             "overall".to_string(),

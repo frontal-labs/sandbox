@@ -56,9 +56,10 @@ async fn serve(args: &[String]) {
     let keys_file = &args[2];
     let keys: usize = args[3].parse().unwrap();
     let _ = tracing_subscriber_init();
-    let (app, state, first) = sandbox_server::open_durable_with_state(Arc::new(Scheduler::new()), &dir)
-        .await
-        .expect("durable store opens");
+    let (app, state, first) =
+        sandbox_server::open_durable_with_state(Arc::new(Scheduler::new()), &dir)
+            .await
+            .expect("durable store opens");
     let mut minted: Vec<String> = first.into_iter().collect();
     while minted.len() < keys {
         minted.push(state.auth.create_key());
@@ -103,14 +104,19 @@ fn ps_kib(pid: u32) -> (u64, u64) {
         .output()
         .expect("ps runs");
     let text = String::from_utf8_lossy(&out.stdout);
-    let mut parts = text.split_whitespace().map(|v| v.parse::<u64>().unwrap_or(0));
+    let mut parts = text
+        .split_whitespace()
+        .map(|v| v.parse::<u64>().unwrap_or(0));
     (parts.next().unwrap_or(0), parts.next().unwrap_or(0))
 }
 
 /// Physical footprint in KiB from macOS `footprint`, which counts compressed pages that `rss`
 /// leaves out. 0 when the tool is not available.
 fn footprint_kib(pid: u32) -> u64 {
-    let Ok(out) = Command::new("footprint").args(["-p", &pid.to_string()]).output() else {
+    let Ok(out) = Command::new("footprint")
+        .args(["-p", &pid.to_string()])
+        .output()
+    else {
         return 0;
     };
     let text = String::from_utf8_lossy(&out.stdout);
@@ -144,7 +150,9 @@ fn open_fds(pid: u32) -> usize {
 
 fn dir_stats(dir: &Path) -> (u64, u64) {
     fn walk(dir: &Path, files: &mut u64, bytes: &mut u64) {
-        let Ok(read) = std::fs::read_dir(dir) else { return };
+        let Ok(read) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in read.flatten() {
             let Ok(meta) = entry.metadata() else { continue };
             if meta.is_dir() {
@@ -208,7 +216,9 @@ async fn drive(args: &[String]) {
         keys.len(),
         keys.len() * SESSIONS_PER_KEY
     );
-    let tenants: Vec<TenantId> = (0..n.div_ceil(SESSIONS_PER_TENANT)).map(|_| TenantId::new()).collect();
+    let tenants: Vec<TenantId> = (0..n.div_ceil(SESSIONS_PER_TENANT))
+        .map(|_| TenantId::new())
+        .collect();
 
     stage("baseline", pid, &dir, 0, "");
     if mode == "trickle" {
@@ -233,7 +243,8 @@ async fn drive(args: &[String]) {
         .unwrap_or(128);
     let mut workers = Vec::new();
     for _ in 0..worker_count {
-        let (client, base, keys, tenants) = (client.clone(), base.clone(), keys.clone(), tenants.clone());
+        let (client, base, keys, tenants) =
+            (client.clone(), base.clone(), keys.clone(), tenants.clone());
         let (next, failures, first_error) = (next.clone(), failures.clone(), first_error.clone());
         let ids = ids.clone();
         workers.push(tokio::spawn(async move {
@@ -260,10 +271,15 @@ async fn drive(args: &[String]) {
                 let body: Value = resp.json().await.unwrap_or(Value::Null);
                 if !status.is_success() {
                     failures.fetch_add(1, Ordering::Relaxed);
-                    first_error.lock().unwrap().get_or_insert(format!("create {i}: {status} {body}"));
+                    first_error
+                        .lock()
+                        .unwrap()
+                        .get_or_insert(format!("create {i}: {status} {body}"));
                     continue;
                 }
-                ids.lock().unwrap().push((i, body["session_id"].as_str().unwrap().to_string()));
+                ids.lock()
+                    .unwrap()
+                    .push((i, body["session_id"].as_str().unwrap().to_string()));
                 if payload > 0 {
                     let id = body["session_id"].as_str().unwrap();
                     let content = format!("{i:08}").repeat(payload / 8 + 1);
@@ -277,7 +293,10 @@ async fn drive(args: &[String]) {
                     if !resp.status().is_success() {
                         failures.fetch_add(1, Ordering::Relaxed);
                         let s = resp.status();
-                        first_error.lock().unwrap().get_or_insert(format!("write {i}: {s}"));
+                        first_error
+                            .lock()
+                            .unwrap()
+                            .get_or_insert(format!("write {i}: {s}"));
                     }
                 }
             }
@@ -293,7 +312,13 @@ async fn drive(args: &[String]) {
         "created={live} failed={failed} create_ms={created_ms} first_error={:?}",
         first_error.lock().unwrap()
     );
-    stage("after_create", pid, &dir, live, &format!("create_ms={created_ms}"));
+    stage(
+        "after_create",
+        pid,
+        &dir,
+        live,
+        &format!("create_ms={created_ms}"),
+    );
 
     // Put them to sleep.
     match mode {
@@ -313,7 +338,8 @@ async fn drive(args: &[String]) {
         "trickle" => {
             let deadline = Instant::now() + Duration::from_secs(1800);
             while Instant::now() < deadline {
-                let slept = metric(&client, &base, &keys[0], "sandbox_sessions_slept_total").await as usize;
+                let slept =
+                    metric(&client, &base, &keys[0], "sandbox_sessions_slept_total").await as usize;
                 if slept >= live {
                     break;
                 }
@@ -373,8 +399,15 @@ async fn drive(args: &[String]) {
                 started.elapsed().as_millis(),
                 v["exit_code"],
                 String::from_utf8_lossy(
-                    &v["stdout"].as_array().map(|a| a.iter().filter_map(|b| b.as_u64().map(|b| b as u8)).collect::<Vec<u8>>()).unwrap_or_default()
-                ).trim()
+                    &v["stdout"]
+                        .as_array()
+                        .map(|a| a
+                            .iter()
+                            .filter_map(|b| b.as_u64().map(|b| b as u8))
+                            .collect::<Vec<u8>>())
+                        .unwrap_or_default()
+                )
+                .trim()
             );
         }
         stage("after_wake3", pid, &dir, live, "");

@@ -94,7 +94,11 @@ impl HostCanary {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, vec!["canary.txt".to_string()], "host directory changed");
+        assert_eq!(
+            names,
+            vec!["canary.txt".to_string()],
+            "host directory changed"
+        );
         assert_eq!(std::fs::read_to_string(&self.file).unwrap(), CANARY);
     }
 }
@@ -140,10 +144,18 @@ async fn deno_and_host_globals_cannot_be_recovered() {
     let text = stdout(&out);
     eprintln!("{text}");
     for key in [
-        "typeofDeno", "viaSloppyThis", "viaFunctionCtor", "viaIndirectEval", "viaGlobalThisProto",
-        "viaAsyncFn", "viaGenerator",
+        "typeofDeno",
+        "viaSloppyThis",
+        "viaFunctionCtor",
+        "viaIndirectEval",
+        "viaGlobalThisProto",
+        "viaAsyncFn",
+        "viaGenerator",
     ] {
-        let line = text.lines().find(|l| l.starts_with(&format!("{key}="))).unwrap();
+        let line = text
+            .lines()
+            .find(|l| l.starts_with(&format!("{key}=")))
+            .unwrap();
         assert!(
             line.ends_with("=undefined") || line.ends_with("=none"),
             "Deno was recovered: {line}"
@@ -185,15 +197,35 @@ async fn no_raw_host_op_is_reachable_beyond_the_known_set() {
     assert_eq!(out.exit_code, 0, "{}", stderr(&out));
     let text = stdout(&out);
     eprintln!("{text}");
-    let ops = text.lines().find(|l| l.starts_with("OPS=")).unwrap().trim_start_matches("OPS=");
+    let ops = text
+        .lines()
+        .find(|l| l.starts_with("OPS="))
+        .unwrap()
+        .trim_start_matches("OPS=");
     let allowed = [
-        "op_sandbox_print", "op_sandbox_env", "op_sandbox_cwd", "op_sandbox_now", "op_sandbox_hash",
-        "op_stdout_write", "op_stderr_write", "op_fs_read", "op_fs_write", "op_fs_stat",
-        "op_fs_readdir", "op_fs_mkdir", "op_fs_rm", "op_fs_rename", "op_fs_symlink",
-        "op_fs_readlink", "op_fs_truncate",
+        "op_sandbox_print",
+        "op_sandbox_env",
+        "op_sandbox_cwd",
+        "op_sandbox_now",
+        "op_sandbox_hash",
+        "op_stdout_write",
+        "op_stderr_write",
+        "op_fs_read",
+        "op_fs_write",
+        "op_fs_stat",
+        "op_fs_readdir",
+        "op_fs_mkdir",
+        "op_fs_rm",
+        "op_fs_rename",
+        "op_fs_symlink",
+        "op_fs_readlink",
+        "op_fs_truncate",
     ];
     for op in ops.split(',').filter(|s| !s.is_empty()) {
-        assert!(allowed.contains(&op), "unreviewed raw op reachable from the guest: {op}");
+        assert!(
+            allowed.contains(&op),
+            "unreviewed raw op reachable from the guest: {op}"
+        );
     }
 }
 
@@ -221,17 +253,28 @@ async fn dynamic_import_cannot_load_host_files_urls_or_modules() {
     let out = run(&code).await;
     let text = stdout(&out);
     eprintln!("{text}\n{}", stderr(&out));
-    assert!(!text.contains("LOADED"), "a dynamic import succeeded:\n{text}");
+    assert!(
+        !text.contains("LOADED"),
+        "a dynamic import succeeded:\n{text}"
+    );
     assert!(!text.contains(CANARY) && !stderr(&out).contains(CANARY));
     canary.assert_untouched();
 }
 
 #[tokio::test]
 async fn the_node_shim_reveals_nothing_about_the_host() {
-    let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_default();
     let home = std::env::var("HOME").unwrap_or_default();
-    let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
-    let exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+    let cwd = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let exe = std::env::current_exe()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let pid = std::process::id();
     let hostname = std::process::Command::new("hostname")
         .output()
@@ -263,7 +306,10 @@ async fn the_node_shim_reveals_nothing_about_the_host() {
     assert_eq!(out.exit_code, 0, "{}", stderr(&out));
     let blob = stdout(&out);
     eprintln!("{blob}");
-    assert!(!blob.contains(CANARY), "the host environment reached the guest");
+    assert!(
+        !blob.contains(CANARY),
+        "the host environment reached the guest"
+    );
     for (label, value) in [
         ("username", user.as_str()),
         ("home directory", home.as_str()),
@@ -272,11 +318,15 @@ async fn the_node_shim_reveals_nothing_about_the_host() {
         ("hostname", hostname.as_str()),
     ] {
         if value.len() >= 4 && value != "/" {
-            assert!(!blob.contains(value), "the {label} {value:?} reached the guest");
+            assert!(
+                !blob.contains(value),
+                "the {label} {value:?} reached the guest"
+            );
         }
     }
     assert!(
-        !blob.contains(&format!("\"process.pid\":\"{pid}\"")) && !blob.contains(&format!("\"process.ppid\":\"{pid}\"")),
+        !blob.contains(&format!("\"process.pid\":\"{pid}\""))
+            && !blob.contains(&format!("\"process.ppid\":\"{pid}\"")),
         "the host pid reached the guest"
     );
 }
@@ -300,10 +350,16 @@ fn the_fs_shim_never_returns_host_data() {
         format!("fs.readdirSync({})", js(&host_dir)),
         "fs.readFileSync('/etc/passwd')".to_string(),
         "fs.readFileSync('/proc/self/environ')".to_string(),
-        format!("fs.writeFileSync({}, 'pwn')", js(&format!("{host_dir}/pwn.txt"))),
+        format!(
+            "fs.writeFileSync({}, 'pwn')",
+            js(&format!("{host_dir}/pwn.txt"))
+        ),
         format!("fs.rmSync({})", js(&host)),
         format!("fs.renameSync({}, '/moved')", js(&host)),
-        format!("fs.symlinkSync({}, '/link'); fs.readFileSync('/link')", js(&host)),
+        format!(
+            "fs.symlinkSync({}, '/link'); fs.readFileSync('/link')",
+            js(&host)
+        ),
     ] {
         let code = format!("const fs = require('fs'); console.log(String({expr}));");
         let end = child_probe("script_vfs", Some(&code));
@@ -323,7 +379,11 @@ fn the_fs_shim_returns_file_contents() {
         Some("const fs = require('fs'); console.log(String.fromCharCode(...fs.readFileSync('/inside.txt')));"),
     );
     assert!(end.success, "the process died (signal {:?})", end.signal);
-    assert!(end.stdout.contains("stdout=\"inside\\n\""), "{}", end.stdout);
+    assert!(
+        end.stdout.contains("stdout=\"inside\\n\""),
+        "{}",
+        end.stdout
+    );
 }
 
 #[tokio::test]
@@ -342,7 +402,14 @@ async fn a_script_with_no_vfs_cannot_reach_a_filesystem_at_all() {
         end.success,
         "the host process died when a script used fs with no VFS: signal {:?}, stderr tail {:?}",
         end.signal,
-        end.stderr.chars().rev().take(400).collect::<String>().chars().rev().collect::<String>()
+        end.stderr
+            .chars()
+            .rev()
+            .take(400)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>()
     );
     canary.assert_untouched();
 }
@@ -388,7 +455,18 @@ async fn there_is_no_network_api_and_nothing_connects() {
         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
         other => panic!("the guest opened a connection to the host: {other:?}"),
     }
-    for danger in ["fetch REACHED", "xhr REACHED", "websocket REACHED", "eventsource REACHED", "child_process.exec REACHED", "child_process.spawn REACHED", "child_process.execSync REACHED", "require net REACHED", "require http REACHED", "require dgram REACHED"] {
+    for danger in [
+        "fetch REACHED",
+        "xhr REACHED",
+        "websocket REACHED",
+        "eventsource REACHED",
+        "child_process.exec REACHED",
+        "child_process.spawn REACHED",
+        "child_process.execSync REACHED",
+        "require net REACHED",
+        "require http REACHED",
+        "require dgram REACHED",
+    ] {
         assert!(!text.contains(danger), "{danger}\n{text}");
     }
 }
@@ -401,13 +479,22 @@ async fn assert_stopped_by_watchdog(label: &str, code: &str) {
     let started = Instant::now();
     let out = run_with(code, limits(400), None).await;
     let elapsed = started.elapsed();
-    assert_eq!(out.exit_code, 1, "{label}: exit {}: {}", out.exit_code, stderr(&out));
+    assert_eq!(
+        out.exit_code,
+        1,
+        "{label}: exit {}: {}",
+        out.exit_code,
+        stderr(&out)
+    );
     assert!(
         stderr(&out).contains("timed out") || stderr(&out).contains("terminated"),
         "{label}: {}",
         stderr(&out)
     );
-    assert!(elapsed < Duration::from_secs(10), "{label}: stopped after {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "{label}: stopped after {elapsed:?}"
+    );
 }
 
 #[tokio::test]
@@ -451,7 +538,11 @@ async fn a_script_cannot_catch_the_termination_and_carry_on() {
     )
     .await;
     assert_eq!(out.exit_code, 1);
-    assert!(!stdout(&out).contains("RAN AFTER TERMINATION"), "{}", stdout(&out));
+    assert!(
+        !stdout(&out).contains("RAN AFTER TERMINATION"),
+        "{}",
+        stdout(&out)
+    );
 }
 
 #[test]
@@ -461,49 +552,110 @@ fn deep_recursion_and_deep_data_are_script_errors() {
     let mut failures = Vec::new();
     for (label, code) in [
         ("recursion", "function f() { f(); } f();"),
-        ("mutual recursion", "function a() { b(); } function b() { a(); } a();"),
-        ("deep JSON stringify", "let o = []; for (let i = 0; i < 1e6; i++) o = [o]; JSON.stringify(o);"),
-        ("deep array flat", "let o = []; for (let i = 0; i < 1e6; i++) o = [o]; o.flat(Infinity);"),
-        ("deep toString", "let o = []; for (let i = 0; i < 1e6; i++) o = [o]; String(o);"),
-        ("deep regex", "new RegExp('('.repeat(1e5) + ')'.repeat(1e5));"),
-        ("deep parse", "eval('('.repeat(1e6) + '1' + ')'.repeat(1e6));"),
-        ("deep nested function", "eval('(function(){'.repeat(1e5) + '}) '.repeat(1e5));"),
-        ("Function ctor huge", "new Function('return ' + '1+'.repeat(1e6) + '1');"),
+        (
+            "mutual recursion",
+            "function a() { b(); } function b() { a(); } a();",
+        ),
+        (
+            "deep JSON stringify",
+            "let o = []; for (let i = 0; i < 1e6; i++) o = [o]; JSON.stringify(o);",
+        ),
+        (
+            "deep array flat",
+            "let o = []; for (let i = 0; i < 1e6; i++) o = [o]; o.flat(Infinity);",
+        ),
+        (
+            "deep toString",
+            "let o = []; for (let i = 0; i < 1e6; i++) o = [o]; String(o);",
+        ),
+        (
+            "deep regex",
+            "new RegExp('('.repeat(1e5) + ')'.repeat(1e5));",
+        ),
+        (
+            "deep parse",
+            "eval('('.repeat(1e6) + '1' + ')'.repeat(1e6));",
+        ),
+        (
+            "deep nested function",
+            "eval('(function(){'.repeat(1e5) + '}) '.repeat(1e5));",
+        ),
+        (
+            "Function ctor huge",
+            "new Function('return ' + '1+'.repeat(1e6) + '1');",
+        ),
     ] {
         let end = child_probe("script", Some(code));
         if !end.success || !end.stdout.contains("CHILD-RESULT") {
             failures.push(format!("{label}: signal {:?}", end.signal));
         }
     }
-    assert!(failures.is_empty(), "the process died:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "the process died:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
 #[ignore = "KNOWN GAP: a 10 MB nested-array JSON.parse reaches V8's fatal out-of-memory in-process, despite the near-heap-limit callback (documented for execute_script)"]
 fn a_deeply_nested_json_parse_cannot_abort_the_process() {
-    let end = child_probe("script", Some("JSON.parse('['.repeat(5e6) + ']'.repeat(5e6));"));
+    let end = child_probe(
+        "script",
+        Some("JSON.parse('['.repeat(5e6) + ']'.repeat(5e6));"),
+    );
     assert!(
         end.success && end.stdout.contains("CHILD-RESULT"),
         "the process died (signal {:?}): {}",
         end.signal,
-        end.stderr.lines().find(|l| l.contains("Fatal")).unwrap_or("")
+        end.stderr
+            .lines()
+            .find(|l| l.contains("Fatal"))
+            .unwrap_or("")
     );
 }
 
 #[tokio::test]
 async fn output_flood_is_capped_whatever_the_channel() {
     let cap = 4096usize;
-    let l = ScriptLimits { max_output_bytes: cap, timeout: Duration::from_secs(3), ..ScriptLimits::default() };
+    let l = ScriptLimits {
+        max_output_bytes: cap,
+        timeout: Duration::from_secs(3),
+        ..ScriptLimits::default()
+    };
     for (label, code) in [
-        ("console.log loop", "for (;;) console.log('x'.repeat(1000));"),
-        ("one huge write", "console.log('x'.repeat(50 * 1024 * 1024));"),
-        ("process.stdout.write", "for (;;) process.stdout.write('x'.repeat(1000));"),
-        ("process.stderr.write", "for (;;) process.stderr.write('x'.repeat(1000));"),
-        ("console.error loop", "for (;;) console.error('x'.repeat(1000));"),
+        (
+            "console.log loop",
+            "for (;;) console.log('x'.repeat(1000));",
+        ),
+        (
+            "one huge write",
+            "console.log('x'.repeat(50 * 1024 * 1024));",
+        ),
+        (
+            "process.stdout.write",
+            "for (;;) process.stdout.write('x'.repeat(1000));",
+        ),
+        (
+            "process.stderr.write",
+            "for (;;) process.stderr.write('x'.repeat(1000));",
+        ),
+        (
+            "console.error loop",
+            "for (;;) console.error('x'.repeat(1000));",
+        ),
     ] {
         let out = run_with(code, l, None).await;
-        assert!(out.stdout.len() <= cap, "{label}: stdout {} bytes", out.stdout.len());
-        assert!(out.stderr.len() <= cap + 4096, "{label}: stderr {} bytes", out.stderr.len());
+        assert!(
+            out.stdout.len() <= cap,
+            "{label}: stdout {} bytes",
+            out.stdout.len()
+        );
+        assert!(
+            out.stderr.len() <= cap + 4096,
+            "{label}: stderr {} bytes",
+            out.stderr.len()
+        );
     }
 }
 
@@ -526,8 +678,15 @@ async fn webassembly_cannot_take_memory_outside_the_heap_cap() {
     .await;
     let text = stdout(&out);
     eprintln!("{text} {}", stderr(&out));
-    let made: u32 = text.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-    assert_eq!(made, 0, "WebAssembly.Memory reserved {made} GiB under a 64 MiB heap cap");
+    let made: u32 = text
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    assert_eq!(
+        made, 0,
+        "WebAssembly.Memory reserved {made} GiB under a 64 MiB heap cap"
+    );
 }
 
 // ==========================================================================================
@@ -588,7 +747,11 @@ async fn concurrent_runs_do_not_see_each_others_state() {
     }
     for task in tasks {
         let (i, text) = task.await.unwrap();
-        assert_eq!(text.trim(), format!("tenant-{i} tenant-{i}"), "run {i} saw another run's state");
+        assert_eq!(
+            text.trim(),
+            format!("tenant-{i} tenant-{i}"),
+            "run {i} saw another run's state"
+        );
     }
 }
 
@@ -596,7 +759,12 @@ async fn concurrent_runs_do_not_see_each_others_state() {
 #[ignore = "KNOWN GAP: `__bootstrap` (primordials, core, internals) stays on globalThis"]
 async fn bootstrap_internals_are_not_reachable() {
     let out = run("console.log(typeof __bootstrap, typeof globalThis.__bootstrap);").await;
-    assert_eq!(stdout(&out).trim(), "undefined undefined", "{}", stdout(&out));
+    assert_eq!(
+        stdout(&out).trim(),
+        "undefined undefined",
+        "{}",
+        stdout(&out)
+    );
 }
 
 #[test]
@@ -608,7 +776,8 @@ fn a_guest_cannot_write_to_the_host_process_output() {
     );
     eprintln!("{end:?}");
     assert!(
-        !end.stdout.contains("RAW-HOST-STDOUT-MARKER") && !end.stderr.contains("RAW-HOST-STDERR-MARKER"),
+        !end.stdout.contains("RAW-HOST-STDOUT-MARKER")
+            && !end.stderr.contains("RAW-HOST-STDERR-MARKER"),
         "the guest wrote to the host process's own stdout/stderr"
     );
 }
@@ -622,7 +791,9 @@ fn async_code_and_timers_run() {
     );
     assert!(end.success, "signal {:?}", end.signal);
     assert!(
-        end.stdout.contains("after await") && end.stdout.contains("after then") && end.stdout.contains("function"),
+        end.stdout.contains("after await")
+            && end.stdout.contains("after then")
+            && end.stdout.contains("function"),
         "{}",
         end.stdout
     );
@@ -699,7 +870,10 @@ fn child_entry() {
                         "CHILD-RESULT exit={} stdout={:?} stderr={:?}",
                         o.exit_code,
                         String::from_utf8_lossy(&o.stdout),
-                        String::from_utf8_lossy(&o.stderr).chars().take(300).collect::<String>()
+                        String::from_utf8_lossy(&o.stderr)
+                            .chars()
+                            .take(300)
+                            .collect::<String>()
                     ),
                     Err(e) => println!("CHILD-RESULT error={}", e.message),
                 }

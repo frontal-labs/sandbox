@@ -196,7 +196,10 @@ impl HttpSessionsScenario {
         let total_errors = errors.total();
         let total_iterations = n + exec_ns.len() + destroy_ns.len();
         let mut latencies = HashMap::new();
-        latencies.insert("create".to_string(), LatencyHistogram::from_samples(&create_ns));
+        latencies.insert(
+            "create".to_string(),
+            LatencyHistogram::from_samples(&create_ns),
+        );
         latencies.insert(
             "create_failed".to_string(),
             LatencyHistogram::from_samples(&failed_create_ns),
@@ -206,7 +209,10 @@ impl HttpSessionsScenario {
             "destroy".to_string(),
             LatencyHistogram::from_samples(&destroy_ns),
         );
-        latencies.insert("overall".to_string(), LatencyHistogram::from_samples(&exec_ns));
+        latencies.insert(
+            "overall".to_string(),
+            LatencyHistogram::from_samples(&exec_ns),
+        );
         let mut throughput = HashMap::new();
         throughput.insert(
             "overall".to_string(),

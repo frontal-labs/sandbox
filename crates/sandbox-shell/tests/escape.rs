@@ -108,7 +108,11 @@ impl HostCanary {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, vec!["canary.txt".to_string()], "host directory changed");
+        assert_eq!(
+            names,
+            vec!["canary.txt".to_string()],
+            "host directory changed"
+        );
         assert_eq!(std::fs::read_to_string(&self.file).unwrap(), CANARY);
     }
 }
@@ -207,9 +211,18 @@ async fn the_control_script_can_read_a_file_that_is_in_the_vfs() {
     let vfs = new_vfs();
     put(&vfs, "/data.txt", CANARY.as_bytes()).await;
     let mut shell = shell_over(vfs);
-    for script in ["cat /data.txt", "head -n1 /data.txt", "grep HOST-CANARY /data.txt", "sort /data.txt"] {
+    for script in [
+        "cat /data.txt",
+        "head -n1 /data.txt",
+        "grep HOST-CANARY /data.txt",
+        "sort /data.txt",
+    ] {
         let ran = run_on(&mut shell, script).await;
-        assert!(ran.out.contains(CANARY), "`{script}` did not read the VFS file: {}", ran.all());
+        assert!(
+            ran.out.contains(CANARY),
+            "`{script}` did not read the VFS file: {}",
+            ran.all()
+        );
     }
 }
 
@@ -246,7 +259,10 @@ async fn the_vfs_root_starts_empty_and_names_no_host_directory() {
     let mut shell = shell_over(new_vfs());
     let ran = run_on(&mut shell, "ls /").await;
     assert_eq!(ran.out.trim(), "", "a fresh root has entries: {}", ran.out);
-    for host_dir in ["/Users", "/home", "/private", "/var", "/proc", "/sys", "/root", "/etc", "/usr", "/bin", "/Volumes"] {
+    for host_dir in [
+        "/Users", "/home", "/private", "/var", "/proc", "/sys", "/root", "/etc", "/usr", "/bin",
+        "/Volumes",
+    ] {
         let ran = run_on(&mut shell, &format!("test -e {host_dir}")).await;
         assert_ne!(ran.code, 0, "{host_dir} exists in a fresh VFS");
     }
@@ -298,9 +314,9 @@ async fn network_clients_do_not_exist_and_nothing_connects() {
     let port = listener.port();
     let mut shell = shell_over(new_vfs());
     for tool in [
-        "curl", "wget", "nc", "ncat", "netcat", "telnet", "ssh", "scp", "ftp", "ping", "dig", "nslookup",
-        "host", "python3", "python", "perl", "ruby", "php", "bash", "zsh", "busybox", "git", "openssl",
-        "socat", "docker", "kubectl",
+        "curl", "wget", "nc", "ncat", "netcat", "telnet", "ssh", "scp", "ftp", "ping", "dig",
+        "nslookup", "host", "python3", "python", "perl", "ruby", "php", "bash", "zsh", "busybox",
+        "git", "openssl", "socat", "docker", "kubectl",
     ] {
         let script = format!("{tool} http://127.0.0.1:{port}/ 127.0.0.1 {port}");
         let ran = run_on(&mut shell, &script).await;
@@ -366,7 +382,13 @@ async fn host_environment_is_invisible() {
 async fn host_process_ids_are_not_exposed() {
     let host = std::process::id().to_string();
     let mut shell = shell_over(new_vfs());
-    for script in ["echo $$", "echo $PPID", "echo $BASHPID", "echo $UID $EUID", "echo $RANDOM $SECONDS"] {
+    for script in [
+        "echo $$",
+        "echo $PPID",
+        "echo $BASHPID",
+        "echo $UID $EUID",
+        "echo $RANDOM $SECONDS",
+    ] {
         let ran = run_on(&mut shell, script).await;
         assert!(
             !ran.out.split_whitespace().any(|w| w == host),
@@ -379,7 +401,10 @@ async fn host_process_ids_are_not_exposed() {
 #[tokio::test]
 async fn no_command_can_signal_a_host_process() {
     // A sacrificial host process. A script that can signal processes would end it.
-    let mut victim = std::process::Command::new("sleep").arg("600").spawn().unwrap();
+    let mut victim = std::process::Command::new("sleep")
+        .arg("600")
+        .spawn()
+        .unwrap();
     let pid = victim.id();
     let mut shell = shell_over(new_vfs());
     for script in [
@@ -409,10 +434,27 @@ async fn a_file_with_a_shebang_does_not_run_on_the_host() {
     let canary = HostCanary::new("shebang");
     let vfs = new_vfs();
     let d = canary.dir.to_str().unwrap();
-    put(&vfs, "/evil.sh", format!("#!/bin/sh\ntouch {d}/from-script\n").as_bytes()).await;
-    put(&vfs, "/evil", format!("#!/usr/bin/env sh\ntouch {d}/from-env\n").as_bytes()).await;
+    put(
+        &vfs,
+        "/evil.sh",
+        format!("#!/bin/sh\ntouch {d}/from-script\n").as_bytes(),
+    )
+    .await;
+    put(
+        &vfs,
+        "/evil",
+        format!("#!/usr/bin/env sh\ntouch {d}/from-env\n").as_bytes(),
+    )
+    .await;
     let mut shell = shell_over(vfs);
-    for script in ["/evil.sh", "./evil.sh", "sh /evil.sh", "/evil", "exec /evil.sh", "command /evil.sh"] {
+    for script in [
+        "/evil.sh",
+        "./evil.sh",
+        "sh /evil.sh",
+        "/evil",
+        "exec /evil.sh",
+        "command /evil.sh",
+    ] {
         let _ = run_on(&mut shell, script).await;
     }
     canary.assert_untouched();
@@ -423,32 +465,57 @@ async fn symlinks_resolve_inside_the_vfs_and_cycles_terminate() {
     let canary = HostCanary::new("links");
     let vfs = new_vfs();
     let host = canary.path().to_string();
-    vfs.symlink(Path::new(&host), Path::new("/abs")).await.unwrap();
+    vfs.symlink(Path::new(&host), Path::new("/abs"))
+        .await
+        .unwrap();
     let climbing = format!("{}{}", "../".repeat(40), host.trim_start_matches('/'));
-    vfs.symlink(Path::new(&climbing), Path::new("/climb")).await.unwrap();
+    vfs.symlink(Path::new(&climbing), Path::new("/climb"))
+        .await
+        .unwrap();
     vfs.symlink(Path::new("/b"), Path::new("/a")).await.unwrap();
     vfs.symlink(Path::new("/a"), Path::new("/b")).await.unwrap();
     vfs.mkdir(Path::new("/d"), 0o755).await.unwrap();
     put(&vfs, "/d/file", b"x").await;
-    vfs.symlink(Path::new("/d"), Path::new("/d/self")).await.unwrap();
-    vfs.symlink(Path::new("/"), Path::new("/d/root")).await.unwrap();
+    vfs.symlink(Path::new("/d"), Path::new("/d/self"))
+        .await
+        .unwrap();
+    vfs.symlink(Path::new("/"), Path::new("/d/root"))
+        .await
+        .unwrap();
     // A chain of 500 links to a real file.
     put(&vfs, "/end", b"end").await;
     let mut previous = "/end".to_string();
     for i in 0..500 {
         let link = format!("/chain{i}");
-        vfs.symlink(Path::new(&previous), Path::new(&link)).await.unwrap();
+        vfs.symlink(Path::new(&previous), Path::new(&link))
+            .await
+            .unwrap();
         previous = link;
     }
     let mut shell = shell_over(vfs);
     for script in [
-        "cat /abs", "cat /climb", "cat /a", "cat /b", "ls /a", "cat /d/self/self/self/file",
-        "cat /chain499", "ls -R /d", "find /d", "du -a /d", "grep -r x /d", "cp -r /d /copy",
-        "rm -r /d", "find /",
+        "cat /abs",
+        "cat /climb",
+        "cat /a",
+        "cat /b",
+        "ls /a",
+        "cat /d/self/self/self/file",
+        "cat /chain499",
+        "ls -R /d",
+        "find /d",
+        "du -a /d",
+        "grep -r x /d",
+        "cp -r /d /copy",
+        "rm -r /d",
+        "find /",
     ] {
         let started = Instant::now();
         let ran = run_on(&mut shell, script).await;
-        assert!(!ran.all().contains(CANARY), "`{script}` leaked the host file: {}", ran.all());
+        assert!(
+            !ran.all().contains(CANARY),
+            "`{script}` leaked the host file: {}",
+            ran.all()
+        );
         assert!(
             started.elapsed() < Duration::from_secs(20),
             "`{script}` took {:?}",
@@ -504,7 +571,10 @@ async fn a_symlink_race_never_reaches_the_host() {
     flipper.await.expect("the flipper panicked");
     for reader in readers {
         let leaked = reader.await.expect("a reader panicked");
-        assert!(leaked.is_empty(), "host data came back through the race: {leaked}");
+        assert!(
+            leaked.is_empty(),
+            "host data came back through the race: {leaked}"
+        );
     }
 }
 
@@ -568,10 +638,7 @@ async fn output_floods_stop_at_the_cap() {
 #[ignore = "KNOWN GAP: variable size is not bounded; doubling a string 27 times builds 128 MiB (40 doublings would be 1 TiB)"]
 async fn a_string_cannot_be_doubled_without_bound() {
     // 27 doublings is 128 MiB: large enough to show there is no cap, small enough to run safely.
-    let ran = run(
-        "s=x; i=0; while [ $i -lt 27 ]; do s=$s$s; i=$((i+1)); done; echo ${#s}",
-    )
-    .await;
+    let ran = run("s=x; i=0; while [ $i -lt 27 ]; do s=$s$s; i=$((i+1)); done; echo ${#s}").await;
     let length: u64 = ran.out.trim().parse().unwrap_or(0);
     eprintln!("string length reached: {length} bytes; stderr: {}", ran.err);
     assert!(
@@ -586,7 +653,10 @@ async fn a_command_substitution_cannot_hold_unbounded_output() {
     let ran = run("x=$(seq 1 20000000); echo ${#x}").await;
     let length: u64 = ran.out.trim().parse().unwrap_or(0);
     eprintln!("substitution held {length} bytes; stderr: {}", ran.err);
-    assert!(length < 16 * 1024 * 1024, "substitution held {length} bytes");
+    assert!(
+        length < 16 * 1024 * 1024,
+        "substitution held {length} bytes"
+    );
 }
 
 #[tokio::test]
@@ -637,7 +707,11 @@ async fn arithmetic_never_panics_the_host() {
             shell.run(&script).await.map(|r| r.exit_code)
         });
         let joined = handle.await;
-        assert!(joined.is_ok(), "arithmetic `{expr}` panicked the shell task: {:?}", joined.err());
+        assert!(
+            joined.is_ok(),
+            "arithmetic `{expr}` panicked the shell task: {:?}",
+            joined.err()
+        );
     }
 }
 
@@ -649,21 +723,34 @@ async fn vfs_quotas_bound_inodes_file_size_total_bytes_and_depth() {
         max_file_size: 64 * 1024,
         max_path_depth: 16,
     };
-    let vfs = Arc::new(
-        Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())).with_quotas(quotas),
-    );
+    let vfs = Arc::new(Vfs::new(ContentHash::nil(), Arc::new(MemStore::new())).with_quotas(quotas));
     let mut shell = shell_over(vfs.clone());
 
     // Inode exhaustion: 500 files against a limit of 100.
     let _ = run_on(&mut shell, "for i in $(seq 1 500); do touch /f$i; done").await;
     let ran = run_on(&mut shell, "ls / | wc -l").await;
     let files: u64 = ran.out.trim().parse().unwrap();
-    assert!(files <= 100, "{files} files were created against an inode limit of 100");
+    assert!(
+        files <= 100,
+        "{files} files were created against an inode limit of 100"
+    );
 
     // File size: 100,000 bytes against a 64 KiB per-file limit.
-    let ran = run_on(&mut shell, "rm -rf /f*; printf '%100000s' x > /big; echo $?").await;
-    let size = vfs.stat(Path::new("/big")).await.map(|s| s.size).unwrap_or(0);
-    assert!(size <= 64 * 1024, "a file of {size} bytes was written ({})", ran.all());
+    let ran = run_on(
+        &mut shell,
+        "rm -rf /f*; printf '%100000s' x > /big; echo $?",
+    )
+    .await;
+    let size = vfs
+        .stat(Path::new("/big"))
+        .await
+        .map(|s| s.size)
+        .unwrap_or(0);
+    assert!(
+        size <= 64 * 1024,
+        "a file of {size} bytes was written ({})",
+        ran.all()
+    );
 
     // Total bytes: ten 60 KiB files against a 256 KiB total.
     let _ = run_on(&mut shell, "rm -f /big").await;
@@ -674,15 +761,25 @@ async fn vfs_quotas_bound_inodes_file_size_total_bytes_and_depth() {
     .await;
     let mut total = 0u64;
     for i in 1..=10 {
-        total += vfs.stat(Path::new(&format!("/t{i}"))).await.map(|s| s.size).unwrap_or(0);
+        total += vfs
+            .stat(Path::new(&format!("/t{i}")))
+            .await
+            .map(|s| s.size)
+            .unwrap_or(0);
     }
-    assert!(total <= 256 * 1024, "{total} bytes stored against a 256 KiB total");
+    assert!(
+        total <= 256 * 1024,
+        "{total} bytes stored against a 256 KiB total"
+    );
 
     // Path depth: 300 levels against a limit of 16.
     let deep = "d/".repeat(300);
     let _ = run_on(&mut shell, &format!("mkdir -p /{deep}")).await;
     let ran = run_on(&mut shell, &format!("test -d /{deep}")).await;
-    assert_ne!(ran.code, 0, "a path 300 levels deep was created against a limit of 16");
+    assert_ne!(
+        ran.code, 0,
+        "a path 300 levels deep was created against a limit of 16"
+    );
 }
 
 #[tokio::test]
@@ -729,9 +826,19 @@ async fn the_default_wasm_limits_stop_a_guest_that_runs_too_long_or_grows_too_bi
     put(&vfs, "/grow.wasm", GROW_WAT.as_bytes()).await;
     let mut shell = shell_over(vfs);
     let ran = run_on(&mut shell, "wasm /count.wasm").await;
-    assert_eq!(ran.code, 1, "default fuel did not stop the counter: {}", ran.all());
+    assert_eq!(
+        ran.code,
+        1,
+        "default fuel did not stop the counter: {}",
+        ran.all()
+    );
     let ran = run_on(&mut shell, "wasm /grow.wasm").await;
-    assert_eq!(ran.code, 1, "default memory cap did not stop the grower: {}", ran.all());
+    assert_eq!(
+        ran.code,
+        1,
+        "default memory cap did not stop the grower: {}",
+        ran.all()
+    );
 }
 
 #[tokio::test]
@@ -751,9 +858,21 @@ async fn a_guest_cannot_raise_its_own_limits_by_writing_the_tool_manifest() {
     assert_eq!(ran.code, 0, "writing the manifest failed: {}", ran.all());
     let count = run_on(&mut shell, "count").await;
     let grow = run_on(&mut shell, "grow").await;
-    eprintln!("count exit {} ({}), grow exit {} ({})", count.code, count.err.trim(), grow.code, grow.err.trim());
-    assert_eq!(count.code, 1, "the guest ran 15x past the default fuel by editing its manifest");
-    assert_eq!(grow.code, 1, "the guest grew to 512 MiB past the default cap by editing its manifest");
+    eprintln!(
+        "count exit {} ({}), grow exit {} ({})",
+        count.code,
+        count.err.trim(),
+        grow.code,
+        grow.err.trim()
+    );
+    assert_eq!(
+        count.code, 1,
+        "the guest ran 15x past the default fuel by editing its manifest"
+    );
+    assert_eq!(
+        grow.code, 1,
+        "the guest grew to 512 MiB past the default cap by editing its manifest"
+    );
 }
 
 // --- Parser and expansion bombs, in a child process ----------------------------------------------
@@ -802,7 +921,12 @@ fn nested_script(kind: &str, depth: usize) -> String {
         "double_quotes_subst" => format!("echo {}x{}", "\"$(echo ".repeat(n), ")\"".repeat(n)),
         "pipeline" => format!("true{}", " | cat".repeat(n)),
         "and_list" => format!("true{}", " && true".repeat(n)),
-        "function_chain" => (0..n).map(|i| format!("f{i}() {{ f{}; }}; ", i + 1)).collect::<String>() + "f0",
+        "function_chain" => {
+            (0..n)
+                .map(|i| format!("f{i}() {{ f{}; }}; ", i + 1))
+                .collect::<String>()
+                + "f0"
+        }
         other => panic!("unknown kind {other}"),
     }
 }
@@ -845,7 +969,10 @@ fn nesting_failures(kinds: &[&str]) -> Vec<String> {
     for kind in kinds {
         for depth in [100usize, 20_000, 200_000] {
             let end = child_probe(&format!("nest:{kind}:{depth}"));
-            if !end.success || !end.stdout.contains("CHILD-RESULT") || end.stdout.contains("task-panicked") {
+            if !end.success
+                || !end.stdout.contains("CHILD-RESULT")
+                || end.stdout.contains("task-panicked")
+            {
                 failures.push(format!(
                     "{kind} depth {depth}: signal {:?} (6 is SIGABRT, a stack overflow), after {:?}",
                     end.signal, end.elapsed
@@ -860,15 +987,32 @@ fn nesting_failures(kinds: &[&str]) -> Vec<String> {
 #[test]
 fn deeply_nested_constructs_do_not_overflow_the_stack() {
     let failures = nesting_failures(&[
-        "subshell", "brace_group", "if", "while", "for", "case", "backticks",
-        "double_quotes_subst", "pipeline", "and_list", "function_chain",
+        "subshell",
+        "brace_group",
+        "if",
+        "while",
+        "for",
+        "case",
+        "backticks",
+        "double_quotes_subst",
+        "pipeline",
+        "and_list",
+        "function_chain",
     ]);
-    assert!(failures.is_empty(), "the host process died or a task panicked:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "the host process died or a task panicked:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
 #[ignore = "KNOWN GAP: arithmetic and ${x:-...} expansion recurse without a depth limit; 1,000 levels abort the process with a stack overflow"]
 fn deeply_nested_arithmetic_and_parameter_expansion_do_not_overflow_the_stack() {
     let failures = nesting_failures(&["arith_parens", "arith_subst", "param_default"]);
-    assert!(failures.is_empty(), "the host process aborted:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "the host process aborted:\n{}",
+        failures.join("\n")
+    );
 }

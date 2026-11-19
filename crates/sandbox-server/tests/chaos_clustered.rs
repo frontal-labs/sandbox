@@ -56,7 +56,10 @@ async fn a_save_is_atomic_and_a_crash_leaves_the_previous_document() {
     // First save: creates the row with revision 1.
     let (store, saved) = PgStore::connect(&url).await.unwrap();
     assert_eq!(saved.version, VERSION);
-    store.save(|| async { Ok(state_with_key("k1")) }).await.unwrap();
+    store
+        .save(|| async { Ok(state_with_key("k1")) })
+        .await
+        .unwrap();
 
     // Second save: bumps to revision 2 with a different key.
     store
@@ -71,7 +74,10 @@ async fn a_save_is_atomic_and_a_crash_leaves_the_previous_document() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(revision, 2, "a crashed third save must not advance the revision");
+    assert_eq!(
+        revision, 2,
+        "a crashed third save must not advance the revision"
+    );
     let saved: Saved = serde_json::from_value(body).unwrap();
     assert_eq!(
         saved.keys.first().map(|k| k.id.as_str()),
@@ -90,7 +96,10 @@ async fn a_damaged_body_refuses_to_open() {
 
     // Seed a valid row, then corrupt its body with invalid JSON.
     let (store, _) = PgStore::connect(&url).await.unwrap();
-    store.save(|| async { Ok(state_with_key("k1")) }).await.unwrap();
+    store
+        .save(|| async { Ok(state_with_key("k1")) })
+        .await
+        .unwrap();
     drop(store);
     // A body that parses as JSON but is not a Saved document: it carries the right version
     // (so the version check passes) but the rest of the fields are wrong.
@@ -127,14 +136,19 @@ async fn a_wrong_version_refuses_to_open() {
 
     // Seed a valid row, then bump its version past what this server reads.
     let (store, _) = PgStore::connect(&url).await.unwrap();
-    store.save(|| async { Ok(state_with_key("k1")) }).await.unwrap();
-    drop(store);
-    let bumped = (VERSION as i64) + 1;
-    sqlx::query("UPDATE sandbox_state SET body = jsonb_set(body, '{version}', to_jsonb($1::bigint))")
-        .bind(bumped)
-        .execute(&pool)
+    store
+        .save(|| async { Ok(state_with_key("k1")) })
         .await
         .unwrap();
+    drop(store);
+    let bumped = (VERSION as i64) + 1;
+    sqlx::query(
+        "UPDATE sandbox_state SET body = jsonb_set(body, '{version}', to_jsonb($1::bigint))",
+    )
+    .bind(bumped)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     match PgStore::connect(&url).await {
         Ok(_) => panic!("a state of another version must refuse to open"),
@@ -176,11 +190,10 @@ async fn a_stale_node_cannot_overwrite_a_newer_revision() {
     }
 
     // The row still holds B's document.
-    let body: serde_json::Value =
-        sqlx::query_scalar("SELECT body FROM sandbox_state WHERE id = 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let body: serde_json::Value = sqlx::query_scalar("SELECT body FROM sandbox_state WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let saved: Saved = serde_json::from_value(body).unwrap();
     assert_eq!(
         saved.keys.first().map(|k| k.id.as_str()),

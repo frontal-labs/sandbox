@@ -347,7 +347,12 @@ async fn open_probe(mount: &Mount, dirfd: u8, oflags: u8, path: &[u8]) -> (i32, 
     )
     .await
     .expect("the probe guest runs");
-    assert_eq!(out.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.exit_code,
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(!out.stdout.is_empty(), "the probe wrote no errno");
     (i32::from(out.stdout[0]), out.stdout[1..].to_vec())
 }
@@ -395,7 +400,11 @@ fn child_entry() {
         };
         let result = run(&wat, b"", WasiLimits::default(), None).await;
         match result {
-            Ok(out) => println!("CHILD-RESULT exit={} stderr={:?}", out.exit_code, String::from_utf8_lossy(&out.stderr)),
+            Ok(out) => println!(
+                "CHILD-RESULT exit={} stderr={:?}",
+                out.exit_code,
+                String::from_utf8_lossy(&out.stderr)
+            ),
             Err(e) => println!("CHILD-RESULT error={}", e.message),
         }
     });
@@ -527,7 +536,10 @@ async fn symlinks_resolve_inside_the_vfs_never_on_the_host() {
         let started = Instant::now();
         let (rc, body) = open_probe(&mount, 3, 0, link.as_bytes()).await;
         assert_ne!(rc, 0, "symlink {link} opened");
-        assert!(!contains(&body, CANARY), "symlink {link} leaked the host file");
+        assert!(
+            !contains(&body, CANARY),
+            "symlink {link} leaked the host file"
+        );
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "symlink {link} took {:?}",
@@ -635,7 +647,10 @@ async fn a_guest_cannot_import_a_host_function_the_host_does_not_define() {
   (import "env" "system" (func (param i32) (result i32)))
   (func (export "_start")))"#;
     let result = run(wat, b"", WasiLimits::default(), None).await;
-    assert!(result.is_err(), "a module with unknown imports instantiated");
+    assert!(
+        result.is_err(),
+        "a module with unknown imports instantiated"
+    );
 }
 
 // ==========================================================================================
@@ -645,15 +660,23 @@ async fn a_guest_cannot_import_a_host_function_the_host_does_not_define() {
 #[tokio::test]
 async fn fuel_stops_an_endless_loop_quickly() {
     let started = Instant::now();
-    let out = run(SPIN_WAT, b"", WasiLimits::default(), None).await.unwrap();
+    let out = run(SPIN_WAT, b"", WasiLimits::default(), None)
+        .await
+        .unwrap();
     assert_eq!(out.exit_code, 1);
     assert!(contains(&out.stderr, "guest trapped"));
-    assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]
 async fn deep_recursion_traps_and_the_host_survives() {
-    let out = run(RECURSE_WAT, b"", WasiLimits::default(), None).await.unwrap();
+    let out = run(RECURSE_WAT, b"", WasiLimits::default(), None)
+        .await
+        .unwrap();
     // The message carries wasmtime's backtrace but not the trap code, so only the outcome is checked.
     assert_eq!(out.exit_code, 1);
     assert!(contains(&out.stderr, "guest trapped"));
@@ -680,8 +703,16 @@ async fn output_is_capped_on_both_streams() {
         ..WasiLimits::default()
     };
     let out = run(FLOOD_WAT, b"", limits, None).await.unwrap();
-    assert!(out.stdout.len() <= 64 * 1024, "stdout {} bytes", out.stdout.len());
-    assert!(out.stderr.len() <= 64 * 1024 + 4096, "stderr {} bytes", out.stderr.len());
+    assert!(
+        out.stdout.len() <= 64 * 1024,
+        "stdout {} bytes",
+        out.stdout.len()
+    );
+    assert!(
+        out.stderr.len() <= 64 * 1024 + 4096,
+        "stderr {} bytes",
+        out.stderr.len()
+    );
 }
 
 #[tokio::test]
@@ -706,8 +737,16 @@ async fn the_cap_covers_all_memories_together() {
     // Sixteen memories, each grown to about 62.5 MiB. At most one may fit under a 64 MiB total.
     let out = run(&multi_memory_wat(16), b"", limits, None).await.unwrap();
     let grown = out.exit_code as usize;
-    eprintln!("memories grown: {grown} x 62.5 MiB = {} MiB against a {} MiB cap", grown * 625 / 10, cap >> 20);
-    assert!(grown * (1000 * 65536) <= cap, "{grown} memories grew, {} MiB in total", grown * 625 / 10);
+    eprintln!(
+        "memories grown: {grown} x 62.5 MiB = {} MiB against a {} MiB cap",
+        grown * 625 / 10,
+        cap >> 20
+    );
+    assert!(
+        grown * (1000 * 65536) <= cap,
+        "{grown} memories grew, {} MiB in total",
+        grown * 625 / 10
+    );
 }
 
 #[tokio::test]
@@ -720,7 +759,10 @@ async fn a_shared_memory_obeys_the_cap() {
     match run(SHARED_MEMORY_WAT, b"", limits, None).await {
         // Not supported at all is also contained.
         Err(_) => {}
-        Ok(out) => assert_eq!(out.exit_code, 0, "a shared memory grew to 125 MiB under a 16 MiB cap"),
+        Ok(out) => assert_eq!(
+            out.exit_code, 0,
+            "a shared memory grew to 125 MiB under a 16 MiB cap"
+        ),
     }
 }
 
@@ -732,7 +774,10 @@ async fn a_table_cannot_grow_without_bound() {
         ..WasiLimits::default()
     };
     let out = run(TABLE_GROW_WAT, b"", limits, None).await.unwrap();
-    assert_eq!(out.exit_code, 0, "a 20 million element table (160 MB) was granted");
+    assert_eq!(
+        out.exit_code, 0,
+        "a 20 million element table (160 MB) was granted"
+    );
 }
 
 #[tokio::test]
@@ -744,9 +789,14 @@ async fn a_one_byte_read_costs_the_host_about_one_byte() {
     put(&vfs, "/work/big", &vec![7u8; 64 * 1024 * 1024]).await;
     let calls = 200u32;
     let started = Instant::now();
-    let out = run(&pread_loop_wat(calls), b"", WasiLimits::default(), Some(mount))
-        .await
-        .unwrap();
+    let out = run(
+        &pread_loop_wat(calls),
+        b"",
+        WasiLimits::default(),
+        Some(mount),
+    )
+    .await
+    .unwrap();
     let per_call = started.elapsed() / calls;
     assert_eq!(out.exit_code, 0, "{}", String::from_utf8_lossy(&out.stderr));
     eprintln!("fd_pread of 1 byte from a 64 MiB file: {per_call:?} per call");
@@ -765,7 +815,14 @@ async fn an_absurd_iovec_count_cannot_abort_the_host() {
         end.success && end.stdout.contains("CHILD-RESULT"),
         "the host process died: signal {:?}, stderr tail {:?}",
         end.signal,
-        end.stderr.chars().rev().take(300).collect::<String>().chars().rev().collect::<String>()
+        end.stderr
+            .chars()
+            .rev()
+            .take(300)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>()
     );
 }
 
@@ -778,7 +835,11 @@ async fn a_module_with_extremely_deep_nesting_is_rejected_or_run_not_crashed() {
         "the host process died compiling a hostile module: signal {:?}",
         end.signal
     );
-    assert!(end.elapsed < Duration::from_secs(60), "compile took {:?}", end.elapsed);
+    assert!(
+        end.elapsed < Duration::from_secs(60),
+        "compile took {:?}",
+        end.elapsed
+    );
 }
 
 #[tokio::test]
