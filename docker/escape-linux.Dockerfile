@@ -5,8 +5,8 @@
 # and protoc: it exercises namespaces, seccomp, and cgroup v2, not the VM tier.
 # Build and run it with docker/run-escape-tests.sh.
 #
-# Runs as root: the escape suite needs to create namespaces and configure cgroups, which
-# require elevated privileges. No untrusted input is processed.
+# The container is run with --privileged by run-escape-tests.sh so the test suite can create
+# namespaces and configure cgroups. No untrusted input is processed.
 FROM rust:1.97-bookworm
 
 RUN apt-get update \
@@ -16,3 +16,6 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
+
+RUN useradd -m -s /bin/bash sandbox && chown -R sandbox:sandbox /src
+USER sandbox

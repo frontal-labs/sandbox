@@ -3,8 +3,7 @@
 # builds on arm64 hosts (Apple Silicon), where the guest then runs under HVF.
 # Use docker/build-guest-image.sh, which builds this image and runs build-image.sh in it.
 #
-# Runs as root: building a guest kernel + initrd requires access to build tools and
-# filesystem operations that need elevated privileges. No untrusted input is processed.
+# No untrusted input is processed.
 FROM rust:1.97-bookworm
 
 RUN apt-get update \
@@ -15,3 +14,6 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
+
+RUN useradd -m -s /bin/bash sandbox && chown -R sandbox:sandbox /src
+USER sandbox
