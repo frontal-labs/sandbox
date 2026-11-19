@@ -322,6 +322,9 @@ async fn drive(args: &[String]) {
         }
         _ => panic!("mode is bulk or trickle"),
     }
+    // The exec traffic of the create phase counts as activity, so wait a beat for the
+    // sessions to go quiet before reading the counters.
+    tokio::time::sleep(Duration::from_secs(3)).await;
     let slept = metric(&client, &base, &keys[0], "sandbox_sessions_slept_total").await;
     let created = metric(&client, &base, &keys[0], "sandbox_sessions_created_total").await;
     println!("metrics slept={slept} created={created}");
