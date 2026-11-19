@@ -227,8 +227,12 @@ async fn drive(args: &[String]) {
     let failures = Arc::new(AtomicUsize::new(0));
     let first_error: Arc<std::sync::Mutex<Option<String>>> = Arc::new(Default::default());
     let ids: Arc<std::sync::Mutex<Vec<(usize, String)>>> = Arc::new(Default::default());
+    let worker_count: usize = std::env::var("IDLE_WORKERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(128);
     let mut workers = Vec::new();
-    for _ in 0..16 {
+    for _ in 0..worker_count {
         let (client, base, keys, tenants) = (client.clone(), base.clone(), keys.clone(), tenants.clone());
         let (next, failures, first_error) = (next.clone(), failures.clone(), first_error.clone());
         let ids = ids.clone();
