@@ -8,11 +8,15 @@ use tokio::time::sleep;
 
 pub mod concurrent_sessions;
 pub mod exec_throughput;
+pub mod held_sessions;
+pub mod http_sessions;
 pub mod mixed_workload;
 pub mod snapshot_fork;
 
 use concurrent_sessions::ConcurrentSessionsScenario;
 use exec_throughput::ExecThroughputScenario;
+use held_sessions::HeldSessionsScenario;
+use http_sessions::HttpSessionsScenario;
 use mixed_workload::MixedWorkloadScenario;
 use snapshot_fork::SnapshotForkScenario;
 
@@ -21,8 +25,7 @@ pub struct ScenarioConfig {
     pub concurrency: usize,
     pub duration: Duration,
     pub ramp_up: Duration,
-    /// Reserved for server mode. The scenarios run in-process today.
-    #[allow(dead_code)]
+    /// The server `http_sessions` drives. The other scenarios run in-process.
     pub server_url: Option<String>,
 }
 
@@ -31,6 +34,8 @@ pub struct ScenarioConfig {
 pub enum ScenarioType {
     ConcurrentSessions,
     ExecThroughput,
+    HeldSessions,
+    HttpSessions,
     SnapshotFork,
     MixedWorkload,
 }
@@ -40,6 +45,8 @@ impl ScenarioType {
         match name {
             "concurrent_sessions" => Some(Self::ConcurrentSessions),
             "exec_throughput" => Some(Self::ExecThroughput),
+            "held_sessions" => Some(Self::HeldSessions),
+            "http_sessions" => Some(Self::HttpSessions),
             "snapshot_fork" => Some(Self::SnapshotFork),
             "mixed_workload" => Some(Self::MixedWorkload),
             _ => None,
@@ -50,6 +57,8 @@ impl ScenarioType {
         match self {
             Self::ConcurrentSessions => ConcurrentSessionsScenario::new(config).run().await,
             Self::ExecThroughput => ExecThroughputScenario::new(config).run().await,
+            Self::HeldSessions => HeldSessionsScenario::new(config).run().await,
+            Self::HttpSessions => HttpSessionsScenario::new(config).run().await,
             Self::SnapshotFork => SnapshotForkScenario::new(config).run().await,
             Self::MixedWorkload => MixedWorkloadScenario::new(config).run().await,
         }
