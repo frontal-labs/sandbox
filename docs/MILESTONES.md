@@ -168,13 +168,15 @@ Last reviewed against the source tree on 2026-11-21.
 ### Acceptance Criteria
 - [ ] Chaos suite passes. The file-backed suites `chaos_crash`, `chaos_damaged`,
       and `chaos_torn` are plain (not `#[ignore]`-gated) tests, so they run in the
-      `rust` job of `ci.yml` on every pull request and main push. The clustered
-      suite `chaos_clustered.rs` builds only with `--features clustered` (which that
-      job does not enable) and needs `SANDBOX_TEST_DATABASE_URL`, so it is not in
-      any CI job: it was written and passes against Postgres 16 in
-      `reports/gap-verification/CHAOS.md`, and its local runner is
-      `docker/clustered-test.sh`. The full clustered story is still incomplete:
-      no multi-node scheduler, S3 CAS, or clustered billing log.
+      `rust` job of `ci.yml` on every push to `main` and every pull request
+      targeting `main`. The clustered suite `chaos_clustered.rs` builds only with
+      `--features clustered` (which that job does not enable) and needs
+      `SANDBOX_TEST_DATABASE_URL`, so it is not in any CI job: it passed against
+      Postgres 16 in `reports/gap-verification/CHAOS.md` (re-run with `cargo test
+      -p sandbox-server --features clustered --test chaos_clustered`), and the
+      local clustered runner is `docker/clustered-test.sh`. The full clustered
+      story is still incomplete: no multi-node scheduler, S3 CAS, or clustered
+      billing log.
 - [x] 10,000 idle sessions per host. Verified in
       `reports/gap-verification/IDLE.md`: 10,000/10,000 created, the real idle
       sweep puts all 10,000 to sleep, ~121 MiB total RSS (~12.7 KiB/session).
