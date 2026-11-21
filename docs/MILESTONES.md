@@ -3,10 +3,9 @@
 Based on the project specification section 9. A box is ticked only when the code
 clearly implements the item and a test exists for it. Items that are scaffolded
 but not working, or implemented without tests, stay unticked and are marked
-**Partial**. Acceptance criteria are not ticked unless they were demonstrated,
-and none has been demonstrated yet.
+**Partial**. Acceptance criteria are not ticked unless they were demonstrated.
 
-Last reviewed against the source tree on 2026-11-14.
+Last reviewed against the source tree on 2026-11-21.
 
 ## M0: Foundations (Week 1)
 
@@ -107,16 +106,24 @@ Last reviewed against the source tree on 2026-11-14.
 - [x] `sandbox-snapshot`: removed. The in-memory `SnapshotManager` was dead
       scaffolding; the server owns snapshot state in its own table (ADR 0049)
 - [x] `sandbox-worker`: one child process per session, gRPC over a private Unix socket, with
-      crash isolation. Seccomp, cgroups, namespaces, and gRPC are not implemented.
+      crash isolation. On Linux the child gets namespaces, a seccomp denylist, `NO_NEW_PRIVS`,
+      and cgroup v2 limits (ADR 0022); each layer fails closed. `cli/tests/worker_isolation.rs`
+      verifies all of it from outside the process.
 - [ ] **Partial.** `sandbox-server`: session, exec, filesystem, snapshot, and fork routes at `/v1` run on in-memory sessions behind API-key auth, with OpenAPI (utoipa), 429 + Retry-After on session admission refusals (T-08), and file-backed billing (T-03)
 - [ ] **Partial.** `sandbox-scheduler`: placement, pools, and scheduler modules
       exist, with integration tests (15); sleep/wake and metering not verified
 
 ### Acceptance Criteria
-- [ ] Snapshot/fork under 5 ms
-- [ ] 1,000 concurrent sessions on one node in load test
+- [ ] Snapshot/fork under 5 ms (in memory met; durable not met — see SLO.md)
+- [x] 1,000 concurrent sessions on one node in load test. Verified in
+      `reports/gap-verification/LOAD.md`: 1,000/1,000 admitted, 0 errors,
+      4,898 ops/s sustained exec, p99 5.35 ms, no ceiling observed. Harness:
+      `benchmarks/load` + the `load_node` example.
 - [x] Sleeping sessions hold no VFS in memory (ADR 0006). With `serve --data-dir`, live and sleeping sessions, their shell state, their traces, their snapshots, and the keys survive a restart (ADRs 0008, 0010).
-- [ ] Escape test suite passes
+- [ ] Escape test suite passes (runtime, shell, and WASM suites pass natively
+      and in the Linux Docker harness; the OS-level containment suite —
+      `cli/tests/contained_escape.rs` — is not built yet, so the kernel-side
+      tier is uncovered. See `reports/gap-verification/SECURITY.md`)
 - [ ] TS SDK generated from OpenAPI (current TS SDK is hand-written)
 
 ### Status: **Partial**
@@ -159,10 +166,19 @@ Last reviewed against the source tree on 2026-11-14.
       [SECURITY_REVIEW.md](SECURITY_REVIEW.md))
 
 ### Acceptance Criteria
-- [ ] Chaos suite passes
-- [ ] 10,000 idle sessions per host
-- [ ] Documented SLOs
-- [ ] Security review findings resolved
+- [ ] Chaos suite passes (clustered suite `chaos_clustered.rs` exists and passes
+      against Postgres 16 in `reports/gap-verification/CHAOS.md`; the file-backed
+      counterpart `chaos_crash`/`chaos_damaged`/`chaos_torn` also passes. The full
+      clustered story is still incomplete: no multi-node scheduler, S3 CAS, or
+      clustered billing log.)
+- [x] 10,000 idle sessions per host. Verified in
+      `reports/gap-verification/IDLE.md`: 10,000/10,000 created, the real idle
+      sweep puts all 10,000 to sleep, ~121 MiB total RSS (~12.7 KiB/session).
+- [x] Documented SLOs. `docs/SLO.md` records plan targets (snapshot/fork < 5 ms
+      in memory, met; durable not met) and proposed targets (create < 50 ms, exec
+      < 50 ms, idle < 100 KiB, all met) with measured values.
+- [ ] Security review findings resolved (no review performed yet — see
+      [SECURITY_REVIEW.md](SECURITY_REVIEW.md))
 
 ### Status: **Partial**
 
@@ -205,9 +221,9 @@ Last reviewed against the source tree on 2026-11-14.
 | M0 | 1 | Done | CI green on all PRs and main pushes (confirmed 2026-11-14); KVM VM workflow runs `--ignored` suites. The push-only Release workflow is outside that confirmation: it first ran 2026-11-15 and failed to parse on a YAML syntax error in `release.yml` (an unquoted `:all:`), fixed on 2026-11-15 |
 | M1 | 2-5 | Partial | Shell and isolate `exec` work over the VFS; 219 conformance cases pass against GNU bash (acceptance: 200+ cases). `node -e`, `.ts` against VFS, and the cold-start benchmark are still open |
 | M2 | 6-9 | Partial | WASI command modules run over a VFS preopen, with a tool registry; no persistent AOT cache, no preview2 |
-| M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory behind API-key auth with OpenAPI and 429 + Retry-After; worker runs one child process per session |
-| M4 | 14-19 | Partial | QEMU VMM with warm pool, guest agent, promote_to_vm, import_from_dir/export_ext4 all working; auto-promotion, performance targets, and rootfs images not done |
-| M5 | 20-24 | Partial | Postgres state store (one node at a time, conditional writes, tested on Postgres 18). Clustered scheduler, placement, and object-store blobs are not built |
+| M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory behind API-key auth with OpenAPI and 429 + Retry-After; worker runs one child process per session. 1,000-concurrent and SLO targets verified (see `reports/gap-verification/`). Durable snapshot latency and the OS-level escape tier are the open items |
+| M4 | 14-19 | Partial | QEMU VMM with warm pool, guest agent, promote_to_vm, import_from_dir/export_ext4 all working; auto-promotion and the 400 ms target measured in `reports/gap-verification/AUTOPROMOTE.md` but not yet in CI; rootfs images not done |
+| M5 | 20-24 | Partial | Postgres state store (one node at a time, conditional writes, tested on Postgres 18). 10,000-idle verified and SLOs documented; clustered scheduler, placement, object-store blobs, and the external security review are the open items |
 | M6 | Ongoing | Partial | `sandbox replay` and snapshot templates (ADR 0049) are done; PTY shell, VS Code/MCP server, docs site, and examples are not started |
 
 ---

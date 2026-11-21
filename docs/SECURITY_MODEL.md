@@ -1,5 +1,7 @@
 # Security Model
 
+Last verified against the source tree on 2026-11-21.
+
 **Status: pre-alpha. Nothing in this repository is a security boundary yet.** No external security review has been performed — see [SECURITY_REVIEW.md](SECURITY_REVIEW.md). The layers below describe the intended design from the project specification section 5. Each item is marked as:
 
 - **Implemented**: code exists and is wired into a path that runs.
@@ -13,10 +15,10 @@ Do not run untrusted code on this codebase, and do not expose the server to untr
 These assumptions are explicit so they can be checked as the code changes.
 
 1. **Single-tenant development only today.** No tenant isolation is enforced. The `TenantId` field exists in `SessionConfig`, but nothing uses it for isolation.
-2. **Isolates are not a security boundary on their own.** The project specification invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, and on Linux that process has namespaces, a seccomp denylist, `NO_NEW_PRIVS`, and cgroup v2 limits (ADR 0022). The denylist allows any syscall it does not name. The layers are not tested against a hostile workload, and the Linux-only layers do not exist on macOS.
+2. **Isolates are not a security boundary on their own.** The project specification invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, and on Linux that process has namespaces, a seccomp denylist, `NO_NEW_PRIVS`, and cgroup v2 limits (ADR 0022). The denylist allows any syscall it does not name. The V8, WASM, and shell tiers have hostile-input escape suites (`crates/sandbox-{runtime,wasm,shell}/tests/escape.rs`) that pass; the Linux-only OS-level tier is still not covered by an escape suite, and those layers do not exist on macOS.
 3. **Untrusted code is assumed to attempt host access, network exfiltration, resource exhaustion, and sandbox escape.** Each layer below is designed against those attempts.
 4. **The host operating system and QEMU/KVM are trusted** in the design. Tier 2 relies on them when enabled; QEMU with KVM is the hardware boundary, and `Accel::Tcg` is not.
-5. **Dependencies (V8 via `deno_core`, `wasmtime`) are trusted only after review and version pinning.** The workspace pins versions in `Cargo.toml`, but no CVE tracking or automated audit runs in CI.
+5. **Dependencies (V8 via `deno_core`, `wasmtime`) are trusted only after review and version pinning.** The workspace pins versions in `Cargo.toml`, and the `supply-chain` CI job runs `cargo-deny` (licenses, advisories, sources) and `cargo audit --deny warnings` on every PR and main push. An advisory database of accepted exceptions lives in `.cargo/audit.toml`.
 
 ## Defense in depth
 
@@ -25,7 +27,7 @@ Layers, outermost first (project specification section 5):
 | # | Layer | Status | Where |
 |---|-------|--------|-------|
 | 1 | Hardware boundary: QEMU microVM (KVM or TCG) | Partial | `crates/sandbox-vmm/src/qemu.rs` boots a real guest; `sandbox-promote::promote_to_vm` is used for `vm`-tier sessions; not the default tier, and TCG is not a boundary |
-| 2 | Per-tenant OS process: seccomp, cgroups, namespaces, `NO_NEW_PRIVS` | Partial (Linux) | `crates/sandbox-worker/src/isolation.rs` applies namespaces and a seccomp denylist in the child, and sets cgroup v2 limits from the host. Each layer fails closed. Tests run on Linux (`cli/tests/worker_isolation.rs`). Off Linux, only the unisolated worker starts. |
+| 2 | Per-tenant OS process: seccomp, cgroups, namespaces, `NO_NEW_PRIVS` | Partial (Linux) | `crates/sandbox-worker/src/isolation.rs` applies namespaces and a seccomp denylist in the child, and sets cgroup v2 limits from the host. Each layer fails closed. Tests run on Linux (`cli/tests/worker_isolation.rs`). Off Linux, only the unisolated worker starts. An allowlist variant is written but not wired in. |
 | 3 | V8 isolate / wasmtime store: memory and CPU caps | Partial | V8: wall-clock watchdog, heap cap, fresh isolate per run. WASM: fuel and a linear-memory cap per run. |
 | 4 | Capability operations: each host access checks policy | Partial | Policy helpers in `crates/sandbox-policy`; not called from runtime, shell, or server |
 
@@ -37,7 +39,7 @@ Current state: `crates/sandbox-vmm` runs QEMU as the Tier 2 driver (`QemuVm`, wi
 
 ## Layer 2: Per-tenant process (planned)
 
-Built on Linux: one worker process per session, with `NO_NEW_PRIVS` and a seccomp-bpf denylist (`seccompiler`), namespaces (network, IPC, UTS, and a private mount tree), and cgroup v2 limits set from the host. The host needs a delegated cgroup in `SANDBOX_CGROUP_ROOT` (ADR 0022). An allowlist is planned next.
+Built on Linux: one worker process per session, with `NO_NEW_PRIVS` and a seccomp-bpf denylist (`seccompiler`), namespaces (network, IPC, UTS, and a private mount tree), and cgroup v2 limits set from the host. The host needs a delegated cgroup in `SANDBOX_CGROUP_ROOT` (ADR 0022). A denylist is the more conservative posture to start with: it never blocks a syscall the host needs, so it does not break legitimate workloads, but it leaves the default for unknown syscalls as allow. `install_seccomp_allowlist` and `allowed_syscalls` are written in `isolation.rs` but not called from `enter`; wiring them in is the next hardening step.
 
 Current state: `crates/sandbox-worker/src/worker.rs` spawns the `sandbox worker --socket` subcommand as a child process with the isolation flags, and serves gRPC over a Unix socket in a directory the host creates with mode `0700`. Guest output is data in the reply, not a shared stream. A crashed child returns `Unavailable` to the host. `crates/sandbox-worker/src/isolation.rs` holds the namespace, seccomp, and cgroup code.
 
