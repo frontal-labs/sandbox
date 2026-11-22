@@ -758,10 +758,10 @@ version = "0.0.0"
 dependencies = [
  "axum 0.7.9",
  "clap",
- "frontal-sandbox-sdk",
  "object_store",
  "sandbox-runtime",
  "sandbox-scheduler",
+ "sandbox-sdk",
  "sandbox-server",
  "sandbox-session",
  "sandbox-trace",
@@ -1682,9 +1682,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -1697,26 +1697,6 @@ checksum = "e5ff35a391aef949120a0340d690269b3d9f63460a6106e99bd07b961f345ea9"
 dependencies = [
  "swc_macros_common",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "frontal-sandbox-sdk"
-version = "0.2.0"
-dependencies = [
- "axum 0.7.9",
- "bytes",
- "futures",
- "reqwest",
- "sandbox-runtime",
- "sandbox-scheduler",
- "sandbox-server",
- "sandbox-session",
- "sandbox-types",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -4096,10 +4076,10 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
- "frontal-sandbox-sdk",
  "futures",
  "indicatif",
  "rand 0.10.3",
+ "sandbox-sdk",
  "sandbox-session",
  "sandbox-types",
  "sandbox-vfs",
@@ -4210,6 +4190,26 @@ dependencies = [
  "tonic",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "sandbox-sdk"
+version = "0.1.1"
+dependencies = [
+ "axum 0.7.9",
+ "bytes",
+ "futures",
+ "reqwest",
+ "sandbox-runtime",
+ "sandbox-scheduler",
+ "sandbox-server",
+ "sandbox-session",
+ "sandbox-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4325,7 +4325,7 @@ dependencies = [
 
 [[package]]
 name = "sandbox-types"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "blake3",
@@ -6012,9 +6012,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

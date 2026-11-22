@@ -1,7 +1,7 @@
 use crate::reporter::{LatencyHistogram, ScenarioResult};
 use crate::scenarios::{create_session_config, ScenarioConfig};
 use anyhow::{bail, Result};
-use frontal_sandbox_sdk::Client;
+use sandbox_sdk::Client;
 use sandbox_types::{SessionId, TenantId};
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};

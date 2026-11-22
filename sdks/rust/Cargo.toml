@@ -1,14 +1,20 @@
 [package]
-name = "frontal-sandbox-sdk"
-version = "0.2.0"
+name = "sandbox-sdk"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frontal-labs/sandbox"
 authors = ["Frontal Labs"]
 description = "Rust SDK for the sandbox system"
+# The integration tests start a real in-process sandbox-server, so they need
+# workspace crates that are not published (see dev-dependencies below). Exclude
+# the tests dir from the published package so external consumers don't inherit
+# a target that cannot compile; the test still runs in-repo via
+# `cargo test -p sandbox-sdk`.
+exclude = ["tests"]
 
 [dependencies]
-sandbox-types = { version = "0.0.0", path = "../../crates/sandbox-types" }
+sandbox-types = { version = "0.1.0", path = "../../crates/sandbox-types" }
 tokio = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
@@ -18,6 +24,9 @@ serde_json = { workspace = true }
 reqwest = { workspace = true }
 futures = { workspace = true }
 
+# The integration tests (excluded from the published package, see `exclude`
+# above) start a real in-process sandbox-server, so they need these workspace
+# crates. They resolve by path inside the repository, where the tests run.
 [dev-dependencies]
 axum = { workspace = true }
 sandbox-server = { path = "../../crates/sandbox-server" }

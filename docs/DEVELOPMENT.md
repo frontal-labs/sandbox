@@ -236,8 +236,9 @@ of truth. Changesets manages it.
 4. The release job creates tag `sdk-v<version>` and a GitHub release.
 
 GHCR is not a package index. npm, pip, and cargo cannot install from it, so
-consumers pull the artifact with `oras`. See each SDK README. The Rust SDK has
-no crates.io package because `sandbox-types` is not published there.
+consumers pull the artifact with `oras`. See each SDK README. The Rust SDK
+(`sandbox-sdk`) is also published to crates.io along with `sandbox-types`; the
+GHCR snapshot remains for full-workspace use.
 
 Run the publish step without pushing: `scripts/release/publish-sdk.sh <ts|py|rs>
 --dry-run`. The workflow's manual trigger also defaults to a dry run.

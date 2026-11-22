@@ -1,0 +1,11 @@
+---
+"@frontal-labs/sandbox-sdk": major
+"@frontal-labs/sandbox-cli": patch
+---
+
+Rust SDK crate renamed `frontal-sandbox-sdk` -> `sandbox-sdk` (published to
+crates.io as `sandbox-sdk 0.1.1`, with `sandbox-types 0.1.0`; the old
+`frontal-sandbox-sdk 0.2.0` is yanked). 0.1.1 excludes the in-repo integration
+tests from the published package, since they depend on workspace crates that
+are not published. CLI and benchmarks updated to the new crate name. The
+TypeScript and Python SDKs are unaffected.

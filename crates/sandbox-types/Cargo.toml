@@ -1,11 +1,11 @@
 [package]
 name = "sandbox-types"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frontal-labs/sandbox"
 authors = ["Frontal Labs"]
-categories = ["system", "virtualization"]
+categories = ["network-programming", "api-bindings"]
 description = "Shared types for the sandbox system"
 
 [dependencies]
