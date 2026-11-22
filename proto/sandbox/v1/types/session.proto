@@ -49,6 +49,9 @@ message SessionConfig {
   CheckpointPolicy checkpoint = 10;
   optional uint32 checkpoint_retain = 11;
   optional TemplateId initial_template = 12;
+  // Optional filesystem path policy. Unset leaves filesystem access
+  // unrestricted apart from the VFS quotas in `limits`.
+  optional FsPolicy fs = 13;
 }
 
 // Mirrors sandbox_types::SessionState.

@@ -40,6 +40,17 @@ message NetworkPolicy {
   repeated NetworkPolicyRule rules = 2;
 }
 
+message FsPolicyRule {
+  PolicyAction action = 1;
+  // A path prefix to match, or unset for a catch-all rule.
+  optional string path = 2;
+}
+
+message FsPolicy {
+  bool default_deny = 1;
+  repeated FsPolicyRule rules = 2;
+}
+
 message SecretEntry {
   string value = 1;
   repeated string hosts = 2;

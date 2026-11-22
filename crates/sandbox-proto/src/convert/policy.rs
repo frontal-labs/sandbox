@@ -1,8 +1,8 @@
 use super::invalid;
 use crate::v1::types as pb;
 use sandbox_types::policy::{
-    Capability, NetworkPolicy, NetworkPolicyRule, PolicyAction, ResourceLimits, SecretEntry,
-    SecretsConfig,
+    Capability, FsPolicy, NetworkPolicy, NetworkPolicyRule, PathRule, PolicyAction, ResourceLimits,
+    SecretEntry, SecretsConfig,
 };
 use sandbox_types::SandboxError;
 use std::collections::HashMap;
@@ -120,6 +120,56 @@ impl TryFrom<pb::NetworkPolicy> for NetworkPolicy {
                 .rules
                 .into_iter()
                 .map(NetworkPolicyRule::try_from)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+impl From<PathRule> for pb::FsPolicyRule {
+    fn from(rule: PathRule) -> Self {
+        Self {
+            action: pb::PolicyAction::from(rule.action) as i32,
+            path: rule.path,
+        }
+    }
+}
+
+impl TryFrom<pb::FsPolicyRule> for PathRule {
+    type Error = SandboxError;
+    fn try_from(rule: pb::FsPolicyRule) -> Result<Self, Self::Error> {
+        let action = PolicyAction::try_from(
+            pb::PolicyAction::try_from(rule.action)
+                .map_err(|_| invalid("unknown policy action"))?,
+        )?;
+        Ok(Self {
+            action,
+            path: rule.path,
+        })
+    }
+}
+
+impl From<FsPolicy> for pb::FsPolicy {
+    fn from(policy: FsPolicy) -> Self {
+        Self {
+            default_deny: policy.default_deny,
+            rules: policy
+                .rules
+                .into_iter()
+                .map(pb::FsPolicyRule::from)
+                .collect(),
+        }
+    }
+}
+
+impl TryFrom<pb::FsPolicy> for FsPolicy {
+    type Error = SandboxError;
+    fn try_from(policy: pb::FsPolicy) -> Result<Self, Self::Error> {
+        Ok(Self {
+            default_deny: policy.default_deny,
+            rules: policy
+                .rules
+                .into_iter()
+                .map(PathRule::try_from)
                 .collect::<Result<_, _>>()?,
         })
     }

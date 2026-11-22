@@ -2,7 +2,7 @@ use super::invalid;
 use super::time::{from_timestamp, to_timestamp};
 use crate::v1::types as pb;
 use sandbox_types::hash::ContentHash;
-use sandbox_types::policy::{NetworkPolicy, ResourceLimits, SecretsConfig};
+use sandbox_types::policy::{FsPolicy, NetworkPolicy, ResourceLimits, SecretsConfig};
 use sandbox_types::session::{
     CheckpointPolicy, SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
 };
@@ -110,6 +110,7 @@ impl From<SessionConfig> for pb::SessionConfig {
             tier_preference: pb::TierPreference::from(config.tier_preference) as i32,
             limits: Some(config.limits.into()),
             network: Some(config.network.into()),
+            fs: config.fs.map(pb::FsPolicy::from),
             env: config.env.into_iter().collect(),
             cwd: config.cwd,
             initial_snapshot: config.initial_snapshot.map(Into::into),
@@ -133,6 +134,7 @@ impl TryFrom<pb::SessionConfig> for SessionConfig {
             Some(network) => NetworkPolicy::try_from(network)?,
             None => NetworkPolicy::default(),
         };
+        let fs = config.fs.map(FsPolicy::try_from).transpose()?;
         let initial_snapshot = config
             .initial_snapshot
             .map(SnapshotId::try_from)
@@ -150,6 +152,7 @@ impl TryFrom<pb::SessionConfig> for SessionConfig {
             .try_into()?,
             limits: config.limits.map(ResourceLimits::from).unwrap_or_default(),
             network,
+            fs,
             env: config.env.into_iter().collect::<HashMap<_, _>>(),
             cwd: config.cwd,
             initial_snapshot,

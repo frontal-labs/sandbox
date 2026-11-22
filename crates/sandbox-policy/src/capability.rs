@@ -1,16 +1,17 @@
-use sandbox_types::policy::{Capability, NetworkPolicy};
+use sandbox_types::policy::{Capability, FsPolicy, NetworkPolicy};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 
-/// No filesystem path policy exists yet, so every check is denied. The VFS and
-/// its quotas are what bound filesystem access today. These functions used to
-/// match the path against network host rules, which said nothing about paths.
-pub fn check_fs_read(_policy: &NetworkPolicy, _path: &str) -> bool {
-    false
+/// Whether `path` may be read under `fs`. Size, inode, and depth quotas are
+/// enforced by the VFS itself, not here, so a read can exceed no limit by
+/// passing this check.
+pub fn check_fs_read(fs: &FsPolicy, path: &str) -> bool {
+    fs.allows_read(path)
 }
 
-/// See `check_fs_read`.
-pub fn check_fs_write(_policy: &NetworkPolicy, _path: &str) -> bool {
-    false
+/// Whether `path` may be written under `fs`. The VFS enforces the size,
+/// inode, and depth quotas on the actual write.
+pub fn check_fs_write(fs: &FsPolicy, path: &str) -> bool {
+    fs.allows_write(path)
 }
 
 pub fn check_net_http(policy: &NetworkPolicy, host: &str) -> bool {
@@ -21,21 +22,21 @@ pub fn check_net_tcp(policy: &NetworkPolicy, host: &str, port: u16) -> bool {
     policy.check_tcp(host, port)
 }
 
-/// Checks a capability against the policy. Capabilities the policy has no model
-/// for (`Exec`, `Env`, `Clock`, and filesystem access) are denied until a policy
-/// for them exists, so default-deny holds for every variant.
-pub fn check_capability(policy: &NetworkPolicy, cap: &Capability) -> bool {
+/// Checks a capability against the network and filesystem policies. Capabilities
+/// the policy has no model for (`Exec`, `Env`, `Clock`) are denied unconditionally,
+/// so default-deny holds for every variant.
+pub fn check_capability(network: &NetworkPolicy, fs: &FsPolicy, cap: &Capability) -> bool {
     match cap {
-        Capability::FsRead(path) => check_fs_read(policy, path),
-        Capability::FsWrite(path) => check_fs_write(policy, path),
-        Capability::NetHttp(host) => check_net_http(policy, host),
+        Capability::FsRead(path) => check_fs_read(fs, path),
+        Capability::FsWrite(path) => check_fs_write(fs, path),
+        Capability::NetHttp(host) => check_net_http(network, host),
         Capability::NetTcp(addr) => {
             let Some((host, port)) = addr.rsplit_once(':') else {
                 return false;
             };
             let host = host.trim_start_matches('[').trim_end_matches(']');
             match port.parse::<u16>() {
-                Ok(port) => check_net_tcp(policy, host, port),
+                Ok(port) => check_net_tcp(network, host, port),
                 Err(_) => false,
             }
         }
@@ -203,15 +204,44 @@ mod tests {
     #[test]
     fn test_capabilities_without_a_policy_model_are_denied() {
         let policy = NetworkPolicy::allow_all();
+        let fs = FsPolicy::allow_all();
         for cap in [
-            Capability::fs_read("/etc/passwd"),
-            Capability::fs_write("/tmp/x"),
             Capability::exec("sh"),
             Capability::env("HOME"),
             Capability::clock(),
         ] {
-            assert!(!check_capability(&policy, &cap), "{cap:?} should be denied");
+            assert!(
+                !check_capability(&policy, &fs, &cap),
+                "{cap:?} should be denied"
+            );
         }
+    }
+
+    #[test]
+    fn test_fs_capabilities_follow_the_fs_policy() {
+        let policy = NetworkPolicy::allow_all();
+        let deny_all = FsPolicy::deny_all();
+        assert!(!check_capability(
+            &policy,
+            &deny_all,
+            &Capability::fs_read("/etc/passwd")
+        ));
+        assert!(!check_capability(
+            &policy,
+            &deny_all,
+            &Capability::fs_write("/tmp/x")
+        ));
+        let allow_all = FsPolicy::allow_all();
+        assert!(check_capability(
+            &policy,
+            &allow_all,
+            &Capability::fs_read("/etc/passwd")
+        ));
+        assert!(check_capability(
+            &policy,
+            &allow_all,
+            &Capability::fs_write("/tmp/x")
+        ));
     }
 
     #[test]
@@ -219,20 +249,25 @@ mod tests {
         let mut policy = NetworkPolicy::default();
         policy.add_rule(NetworkPolicyRule::allow_http("example.com"));
         policy.add_rule(NetworkPolicyRule::allow_tcp("db.example.com", vec![5432]));
+        let fs = FsPolicy::allow_all();
         assert!(check_capability(
             &policy,
+            &fs,
             &Capability::net_http("example.com")
         ));
         assert!(!check_capability(
             &policy,
+            &fs,
             &Capability::net_http("other.com")
         ));
         assert!(check_capability(
             &policy,
+            &fs,
             &Capability::net_tcp("db.example.com:5432")
         ));
         assert!(!check_capability(
             &policy,
+            &fs,
             &Capability::net_tcp("db.example.com:22")
         ));
     }
@@ -240,9 +275,10 @@ mod tests {
     #[test]
     fn test_malformed_tcp_addresses_are_denied() {
         let policy = NetworkPolicy::allow_all();
+        let fs = FsPolicy::allow_all();
         for addr in ["", "host", "host:", "host:notaport", "host:70000"] {
             assert!(
-                !check_capability(&policy, &Capability::net_tcp(addr)),
+                !check_capability(&policy, &fs, &Capability::net_tcp(addr)),
                 "{addr:?} should be denied"
             );
         }
@@ -255,8 +291,10 @@ mod tests {
             "2606:4700:4700::1111",
             vec![443],
         ));
+        let fs = FsPolicy::allow_all();
         assert!(check_capability(
             &policy,
+            &fs,
             &Capability::net_tcp("[2606:4700:4700::1111]:443")
         ));
     }

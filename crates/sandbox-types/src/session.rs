@@ -1,7 +1,7 @@
 use crate::error::ErrorCode;
 use crate::hash::ContentHash;
 use crate::ids::{SnapshotId, TemplateId, TenantId};
-use crate::policy::{NetworkPolicy, ResourceLimits, SecretsConfig};
+use crate::policy::{FsPolicy, NetworkPolicy, ResourceLimits, SecretsConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -61,6 +61,10 @@ pub struct SessionConfig {
     pub tier_preference: TierPreference,
     pub limits: ResourceLimits,
     pub network: NetworkPolicy,
+    /// Optional filesystem path policy. `None` (the default) leaves filesystem
+    /// access unrestricted apart from the VFS quotas from `limits`.
+    #[serde(default)]
+    pub fs: Option<FsPolicy>,
     pub env: HashMap<String, String>,
     pub cwd: String,
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"))]
@@ -90,6 +94,7 @@ impl Default for SessionConfig {
             tier_preference: TierPreference::default(),
             limits: ResourceLimits::default(),
             network: NetworkPolicy::default(),
+            fs: None,
             env: HashMap::new(),
             cwd: "/work".to_string(),
             initial_snapshot: None,
@@ -122,6 +127,11 @@ impl SessionConfig {
 
     pub fn with_network(mut self, network: NetworkPolicy) -> Self {
         self.network = network;
+        self
+    }
+
+    pub fn with_fs(mut self, fs: FsPolicy) -> Self {
+        self.fs = Some(fs);
         self
     }
 

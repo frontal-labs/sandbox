@@ -4225,6 +4225,7 @@ dependencies = [
  "object_store",
  "reqwest",
  "sandbox-cas",
+ "sandbox-policy",
  "sandbox-promote",
  "sandbox-runtime",
  "sandbox-scheduler",

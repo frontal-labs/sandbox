@@ -6,7 +6,9 @@ use sandbox_proto::status::{from_status, to_status, ALL_ERROR_CODES};
 use sandbox_proto::v1::types as pb;
 use sandbox_types::event::{Event, FileOp};
 use sandbox_types::hash::ContentHash;
-use sandbox_types::policy::{NetworkPolicy, NetworkPolicyRule, PolicyAction, ResourceLimits};
+use sandbox_types::policy::{
+    FsPolicy, NetworkPolicy, NetworkPolicyRule, PathRule, PolicyAction, ResourceLimits,
+};
 use sandbox_types::session::{
     CheckpointPolicy, SessionConfig, SessionState, SessionStatus, Snapshot, Tier, TierPreference,
 };
@@ -81,6 +83,33 @@ fn arb_limits() -> impl Strategy<Value = ResourceLimits> {
         })
 }
 
+fn arb_path_rule() -> impl Strategy<Value = PathRule> {
+    (
+        prop_oneof![Just(PolicyAction::Allow), Just(PolicyAction::Deny)],
+        prop::option::of("/[a-z/]{0,12}"),
+    )
+        .prop_map(|(action, path)| PathRule { action, path })
+}
+
+fn arb_fs_policy() -> impl Strategy<Value = Option<FsPolicy>> {
+    // `None` (no policy: unrestricted), a default-deny policy, and policies
+    // mixing allow/deny rules with and without catch-all patterns must all
+    // survive the round trip.
+    prop_oneof![
+        Just(None),
+        (any::<bool>(), prop::collection::vec(arb_path_rule(), 0..3)).prop_map(
+            |(default_deny, rules)| Some(FsPolicy {
+                default_deny,
+                rules
+            })
+        )
+    ]
+}
+
+fn arb_limits_and_fs() -> impl Strategy<Value = (ResourceLimits, Option<FsPolicy>)> {
+    (arb_limits(), arb_fs_policy())
+}
+
 fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
     (
         arb_ulid(),
@@ -89,7 +118,7 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
             Just(TierPreference::Isolate),
             Just(TierPreference::Vm)
         ],
-        arb_limits(),
+        arb_limits_and_fs(),
         any::<bool>(),
         prop::collection::vec(arb_policy_rule(), 0..3),
         arb_map(),
@@ -107,7 +136,7 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
             |(
                 tenant,
                 tier,
-                limits,
+                (limits, fs),
                 default_deny,
                 rules,
                 env,
@@ -125,6 +154,7 @@ fn arb_session_config() -> impl Strategy<Value = SessionConfig> {
                     default_deny,
                     rules,
                 },
+                fs,
                 env,
                 cwd,
                 initial_snapshot: snap.map(SnapshotId::from_ulid),
