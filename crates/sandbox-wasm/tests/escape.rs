@@ -7,7 +7,7 @@
 //! **Convention.** A test that passes states a property the code holds today. A test marked
 //! `#[ignore = "KNOWN GAP: ..."]` states the property the code *should* hold and currently does
 //! not, so `cargo test` stays green while `cargo test -- --ignored` shows every open gap.
-//! Fixing a gap means removing its `ignore`. See docs/ESCAPE_TESTS.md.
+//! Fixing a gap means removing its `ignore`. The authoritative run is `docker/run-escape-tests.sh`.
 //!
 //! Probes that could abort the host process (and so the test runner) run in a child process:
 //! the test re-executes this binary with `ESCAPE_WASM_CHILD=<probe>` and reports how it ended.

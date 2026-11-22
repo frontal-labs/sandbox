@@ -11,7 +11,7 @@
 //!
 //! **Convention.** A passing test states a property the code holds. A test marked
 //! `#[ignore = "KNOWN GAP: ..."]` states the property the code should hold and does not;
-//! `cargo test -- --ignored` lists every open gap. See docs/ESCAPE_TESTS.md.
+//! `cargo test -- --ignored` lists every open gap. The authoritative run is `docker/run-escape-tests.sh`.
 
 use sandbox_runtime::{execute_script_streamed, ScriptLimits, ScriptOutcome};
 use sandbox_testutil::HostCanary;
