@@ -70,7 +70,7 @@ fn escape_probes() -> Vec<Probe> {
         Box::new(|| {
             // SAFETY: PTRACE_TRACEME takes no pointers. Should be denied.
             let rc = unsafe { libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0) };
-            probe_result(rc)
+            probe_result(rc as libc::c_long)
         }),
     ));
     // Mount manipulation.
@@ -90,7 +90,7 @@ fn escape_probes() -> Vec<Probe> {
                     std::ptr::null(),
                 )
             };
-            probe_result(rc)
+            probe_result(rc as libc::c_long)
         }),
     ));
     probes.push((
@@ -100,7 +100,7 @@ fn escape_probes() -> Vec<Probe> {
             // SAFETY: `target` is a valid NUL-terminated string that lives for
             // the call.
             let rc = unsafe { libc::umount2(target.as_ptr(), 0) };
-            probe_result(rc)
+            probe_result(rc as libc::c_long)
         }),
     ));
     // Namespace creation and joining.
@@ -109,7 +109,7 @@ fn escape_probes() -> Vec<Probe> {
         Box::new(|| {
             // SAFETY: unshare takes only flags. Should be denied.
             let rc = unsafe { libc::unshare(libc::CLONE_NEWNET) };
-            probe_result(rc)
+            probe_result(rc as libc::c_long)
         }),
     ));
     probes.push((
@@ -123,7 +123,7 @@ fn escape_probes() -> Vec<Probe> {
             }
             let rc = unsafe { libc::setns(fd, libc::CLONE_NEWNET) };
             let _ = unsafe { libc::close(fd) };
-            probe_result(rc)
+            probe_result(rc as libc::c_long)
         }),
     ));
     // BPF, perf, userfaultfd, keyctl, and kernel module loading.
@@ -138,7 +138,7 @@ fn escape_probes() -> Vec<Probe> {
             let rc = unsafe {
                 libc::syscall(libc::SYS_bpf, 5i64, &stats as *const u32 as *const _, 4i64)
             };
-            probe_result(rc as i32)
+            probe_result(rc)
         }),
     ));
     probes.push((
@@ -147,7 +147,7 @@ fn escape_probes() -> Vec<Probe> {
             // SAFETY: the arguments are zero-valued; the call should be denied
             // before the kernel inspects them.
             let rc = unsafe { libc::syscall(libc::SYS_perf_event_open, 0, 0, 0, -1, 0) };
-            probe_result(rc as i32)
+            probe_result(rc)
         }),
     ));
     probes.push((
@@ -155,7 +155,7 @@ fn escape_probes() -> Vec<Probe> {
         Box::new(|| {
             // SAFETY: takes only flags. Should be denied.
             let rc = unsafe { libc::syscall(libc::SYS_userfaultfd, 0i64) };
-            probe_result(rc as i32)
+            probe_result(rc)
         }),
     ));
     probes.push((
@@ -170,7 +170,7 @@ fn escape_probes() -> Vec<Probe> {
                     std::ptr::null_mut(),
                 )
             };
-            probe_result(rc as i32)
+            probe_result(rc)
         }),
     ));
     probes.push((
@@ -186,7 +186,7 @@ fn escape_probes() -> Vec<Probe> {
                     std::ptr::null(),
                 )
             };
-            probe_result(rc as i32)
+            probe_result(rc)
         }),
     ));
     probes.push((
@@ -195,15 +195,16 @@ fn escape_probes() -> Vec<Probe> {
             // SAFETY: all pointers are null; the call should be denied.
             let rc =
                 unsafe { libc::syscall(libc::SYS_kexec_load, 0i64, 0i64, 0i64, std::ptr::null()) };
-            probe_result(rc as i32)
+            probe_result(rc)
         }),
     ));
     probes
 }
 
 /// Turns a raw syscall return value into a probe result. `-1` means the call
-/// failed with the current errno; anything else means it succeeded.
-fn probe_result(rc: libc::c_int) -> Result<(), i32> {
+/// failed with the current errno; anything else means it succeeded. Accepts
+/// `libc::c_long` because `libc::syscall()` returns `c_long` (i64 on 64-bit).
+fn probe_result(rc: libc::c_long) -> Result<(), i32> {
     if rc == -1 {
         let errno = std::io::Error::last_os_error().raw_os_error();
         Err(errno.unwrap_or(-1))
@@ -389,7 +390,7 @@ fn the_isolated_child_has_no_usable_host_network() {
         let ready = unsafe { libc::poll(&mut pollfd, 1, 500) };
         if ready > 0 && (pollfd.revents & libc::POLLOUT) != 0 {
             let mut err: i32 = 0;
-            let len = std::mem::size_of::<i32>() as u32;
+            let mut len = std::mem::size_of::<i32>() as u32;
             // SAFETY: `err` and `len` are valid out-arguments for getsockopt.
             let _ = unsafe {
                 libc::getsockopt(
