@@ -82,7 +82,7 @@ fn child_fail(msg: &str) {
     // The return value is discarded: a partial or failed write in a dying
     // child is acceptable; the exit code is what the parent asserts on.
     unsafe {
-        libc::write(2, msg.as_ptr() as *const libc::c_void, msg.len() as usize);
+        libc::write(2, msg.as_ptr() as *const libc::c_void, msg.len());
     }
 }
 
