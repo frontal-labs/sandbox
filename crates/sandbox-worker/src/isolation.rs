@@ -358,22 +358,35 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_sched_get_priority_max,
         libc::SYS_sched_get_priority_min,
         libc::SYS_getrusage,
-        libc::SYS_getauxval,
         libc::SYS_getcpu,
-        libc::SYS_clock_getcpuclockid,
         libc::SYS_capget,
         libc::SYS_capset,
         libc::SYS_getitimer,
         libc::SYS_setitimer,
         libc::SYS_alarm,
         libc::SYS_utimensat,
-        libc::SYS_futimens,
         libc::SYS_mknodat,
     ];
 
     #[cfg(target_arch = "x86_64")]
     {
-        allowed.extend([libc::SYS_arch_prctl, libc::SYS_set_thread_area]);
+        allowed.extend([
+            libc::SYS_arch_prctl,
+            libc::SYS_set_thread_area,
+            // `SYS_getauxval` (318), `SYS_clock_getcpuclockid` (244) and
+            // `SYS_futimens` (299) are not (yet) exposed as `libc` constants
+            // on every platform the CI matrix builds for, so use raw numbers.
+            318,
+            244,
+            299,
+        ]);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Raw numbers on aarch64: `SYS_getauxval` (178),
+        // `SYS_clock_getcpuclockid` (145), `SYS_futimens` (27).
+        allowed.extend([178, 145, 27]);
     }
 
     allowed.sort();
@@ -392,10 +405,12 @@ pub fn install_seccomp_allowlist() -> Result<(), SandboxError> {
         .map(|nr| (nr, Vec::new()))
         .collect();
     // Allowed calls pass through, everything else fails with EPERM.
+    // `SeccompFilter::new` takes the default (mismatch) action before the
+    // on-match action: the default denies with EPERM, and a match allows.
     let filter = seccompiler::SeccompFilter::new(
         rules,
-        seccompiler::SeccompAction::Allow,
         seccompiler::SeccompAction::Errno(libc::EPERM as u32),
+        seccompiler::SeccompAction::Allow,
         target_arch()?,
     )
     .map_err(|e| {
