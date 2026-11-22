@@ -56,10 +56,13 @@ mod code {
 
 /// True when the tests may assume CAP_SYS_ADMIN (a root CI container). The
 /// privileged tiers (`the_probes_actually_run`,
-/// `the_isolated_child_cannot_mount_or_create_namespaces`) need it: without it,
-/// the kernel denies the probes with EPERM for a different reason than seccomp,
-/// and a negative control run by an unprivileged user cannot distinguish a
-/// working filter from a kernel that never allowed the probe.
+/// `the_isolated_child_cannot_mount_or_create_namespaces`, and
+/// `the_isolated_child_has_no_usable_host_network`) need it: `enter()` with
+/// namespaces calls `unshare(CLONE_NEWNET|CLONE_NEWNS)`, which the kernel
+/// denies with EPERM to a process without CAP_SYS_ADMIN, so an isolated child
+/// cannot even be entered and the assertions would be vacuous. A negative
+/// control run by an unprivileged user also cannot distinguish a working
+/// filter from a kernel that never allowed the probe.
 ///
 /// The seccomp-only test is *not* gated: seccomp is self-imposed, so the
 /// assertion holds for any user. The `rust` CI job (non-root) runs the
@@ -407,6 +410,12 @@ fn the_isolated_child_cannot_mount_or_create_namespaces() {
 /// escape. Blocking removes that whole class of error.
 #[test]
 fn the_isolated_child_has_no_usable_host_network() {
+    if !privileged_tests_enabled() {
+        eprintln!(
+            "SKIPPED the_isolated_child_has_no_usable_host_network (set ESCAPE_PRIVILEGED_TESTS=1 in a root container; see docker/run-escape-tests.sh)"
+        );
+        return;
+    }
     // The parent binds the listener before forking. The child inherits the fd
     // but does not use it; it only connects to the address.
     // SAFETY: the socket/bind/listen calls take only the arguments shown.
