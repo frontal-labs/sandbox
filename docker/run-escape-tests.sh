@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs the escape test suite on Linux, inside a privileged container (docs/ESCAPE_TESTS.md).
+# Runs the escape test suite on Linux, inside a privileged container.
 #
 #   docker/run-escape-tests.sh                 # the whole suite
 #   docker/run-escape-tests.sh -- --ignored    # also the tests that record a KNOWN GAP
@@ -34,6 +34,7 @@ exec docker run --rm --privileged --user 0:0 \
   -e CARGO_TERM_COLOR=never \
   -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" \
   -e SANDBOX_CGROUP_ROOT=/sys/fs/cgroup/workers \
+  -e ESCAPE_PRIVILEGED_TESTS=1 \
   -e ESCAPE_EXTRA_ARGS="$extra" \
   -w /src \
   "$IMAGE" sh -c '
