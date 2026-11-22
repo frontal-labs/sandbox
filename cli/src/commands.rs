@@ -146,7 +146,7 @@ pub enum Commands {
         /// Unshare the network, IPC, UTS, and mount namespaces before running.
         #[arg(long)]
         namespaces: bool,
-        /// Install the seccomp denylist before running.
+        /// Install the seccomp allowlist before running.
         #[arg(long)]
         seccomp: bool,
     },
@@ -162,7 +162,7 @@ pub enum Commands {
         /// Unshare the network, IPC, UTS, and mount namespaces before serving.
         #[arg(long)]
         namespaces: bool,
-        /// Install the seccomp denylist before serving.
+        /// Install the seccomp allowlist before serving.
         #[arg(long)]
         seccomp: bool,
     },

@@ -145,7 +145,7 @@
 |--------|-----------|--------|
 | Tenant A → Tenant B | Separate worker process per tenant, no shared heaps | ✅ Implemented |
 | Session → Session | Copy-on-write VFS, independent overlays | ✅ Implemented |
-| Worker → Host | `NO_NEW_PRIVS`, seccomp denylist, cgroups, namespaces | ⚠️ Seccomp is denylist (allowlist planned) |
+| Worker → Host | `NO_NEW_PRIVS`, seccomp allowlist, cgroups, namespaces | ⚠️ Seccomp is now allowlist |
 | VM → Host | QEMU device model (KVM or TCG), no host devices passed | ⚠️ Driver and promote implemented; not the default tier |
 
 ## 5. Controls by Layer (Outer to Inner)
@@ -157,7 +157,7 @@
 
 ### 5.2 OS Process (Per Tenant)
 - **`prctl(PR_SET_NO_NEW_PRIVS)`**: Prevent privilege escalation
-- **Seccomp-bpf**: Syscall filter (currently denylist, allowlist planned)
+- **Seccomp-bpf**: Syscall allowlist filter (unknown syscalls fail with `EPERM`)
 - **cgroup v2**: `memory.max`, `pids.max`, `cpu.max`, `io.max`
 - **Namespaces**: `CLONE_NEWNET`, `CLONE_NEWIPC`, `CLONE_NEWUTS`, `CLONE_NEWNS`
 - **No host mounts**: VFS is the only filesystem
@@ -176,7 +176,7 @@
 ## 6. Residual Risks (Open)
 
 ### 6.1 High Severity
-1. **Seccomp is denylist, not allowlist** - **Allowlist implemented, not yet default**
+1. **Seccomp is now an allowlist** - **Wired into `enter` and live on Linux workers**
 2. **No QEMU integration** - **Driver (`QemuVm`), warm pool (`VmPool`), and promotion implemented; not production-ready, TCG is not a boundary**
 3. **No guest agent** - **Agent implemented, not production-ready**
 4. **No automatic promotion** - `promote_to_vm` is wired for `vm`-tier sessions; the automatic `NeedsVm` re-promotion of an isolate session is not built
@@ -236,7 +236,7 @@
 ## 10. Recommendations
 
 ### Immediate (M3)
-1. Convert seccomp from denylist to allowlist
+1. ~~Convert seccomp from denylist to allowlist~~ (done)
 2. Implement worker isolation tests on Linux CI
 3. Add per-request DNS resolution for egress
 

@@ -25,8 +25,8 @@ with the status line at the top of `docs/SECURITY_MODEL.md`.
 The review should cover at minimum:
 
 1. **Worker isolation** (`crates/sandbox-worker/src/isolation.rs`)
-   - Seccomp denylist completeness: does it block every syscall that could
-     escape the namespaces?
+   - Seccomp allowlist completeness: does it allow every syscall the worker
+     needs while denying every syscall that could escape the namespaces?
    - Namespace configuration: are the network, IPC, UTS, and mount namespaces
      actually independent of the host?
    - Cgroup v2 limits: are `memory.max`, `pids.max`, and `cpu.max` enforced
