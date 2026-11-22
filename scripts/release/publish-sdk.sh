@@ -43,10 +43,10 @@ case "$sdk" in
     )
     ;;
   rs)
-    # The crate depends on sandbox-types, which is not on crates.io, so a
-    # `cargo package` tarball cannot be built. This is a source snapshot of the
-    # workspace at HEAD: committed files only, so untracked local files such as
-    # .env never reach the registry. Build it with `cargo build -p sandbox-sdk`.
+    # sandbox-sdk (and sandbox-types) are on crates.io; consumers normally do
+    # `cargo add sandbox-sdk`. This snapshot is kept for full-workspace builds
+    # that need the other workspace crates. Committed files only, so untracked
+    # local files such as .env never reach the registry.
     prefix="sandbox-sdk-rs-${version}"
     git archive --format=tar --prefix="$prefix/" HEAD | gzip -n > "$out/${prefix}.tar.gz"
     artifacts=("$out/${prefix}.tar.gz:application/gzip")

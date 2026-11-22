@@ -758,7 +758,7 @@ version = "0.0.0"
 dependencies = [
  "axum 0.7.9",
  "clap",
- "frontal-sandbox-sdk",
+ "sandbox-sdk",
  "object_store",
  "sandbox-runtime",
  "sandbox-scheduler",
@@ -1707,8 +1707,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "frontal-sandbox-sdk"
-version = "0.2.0"
+name = "sandbox-sdk"
+version = "0.1.0"
 dependencies = [
  "axum 0.7.9",
  "bytes",
@@ -4103,7 +4103,7 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
- "frontal-sandbox-sdk",
+ "sandbox-sdk",
  "futures",
  "indicatif",
  "rand 0.10.3",
@@ -7070,4 +7070,10 @@ checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",
+]
+fig",
+]
+fig",
+]
+fig",
 ]

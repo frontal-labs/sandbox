@@ -4,7 +4,13 @@ Rust client for `sandbox-server`. Every call is one HTTP request to the `/v1` AP
 
 **Status: early.** The client covers sessions, exec, streaming exec (`exec_stream`, which yields each output chunk and the exit as they arrive), files, snapshots, and forks. It has no retries and no WebSocket.
 
-**Distribution: source snapshot, not a crates.io crate.** `sandbox-sdk` depends on `sandbox-types`, which is not on crates.io, so `cargo publish` cannot succeed. Each release is instead a tarball of the whole workspace at the release commit, pushed to GHCR as `ghcr.io/frontal-labs/sandbox-sdk-rs`. Unpack it and point a path dependency at the `sdks/rust` crate:
+**Distribution: crates.io.** `sandbox-sdk` (and its dependency `sandbox-types`) are published to crates.io:
+
+```bash
+cargo add sandbox-sdk
+```
+
+A full-workspace tarball is also pushed to GHCR as `ghcr.io/frontal-labs/sandbox-sdk-rs` for builds that need the workspace crates besides the SDK. Unpack it and point a path dependency at the `sdks/rust` crate:
 
 ```bash
 oras pull ghcr.io/frontal-labs/sandbox-sdk-rs:0.1.0
