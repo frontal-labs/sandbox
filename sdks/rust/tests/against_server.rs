@@ -5,9 +5,9 @@
 //! the repository (the sandbox-* workspace crates resolve via path). It is
 //! included in the published package but not part of the CI/publish flow.
 
-use sandbox_sdk::Client;
 use futures::StreamExt;
 use sandbox_scheduler::Scheduler;
+use sandbox_sdk::Client;
 use sandbox_server::auth::AuthManager;
 use sandbox_server::create_router;
 use sandbox_types::{
