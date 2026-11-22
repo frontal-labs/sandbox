@@ -773,8 +773,8 @@ fn serve(
     Ok(0)
 }
 
-fn client() -> Result<frontal_sandbox_sdk::Client, SandboxError> {
-    frontal_sandbox_sdk::Client::from_env()
+fn client() -> Result<sandbox_sdk::Client, SandboxError> {
+    sandbox_sdk::Client::from_env()
 }
 
 fn snapshot(session_id: &str) -> Result<i32, SandboxError> {

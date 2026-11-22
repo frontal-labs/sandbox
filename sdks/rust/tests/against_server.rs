@@ -1,7 +1,11 @@
 //! Runs the client against the real router on a local port, so each call goes
 //! over HTTP to the same code the server runs.
+//!
+//! This test starts an in-process `sandbox-server`, so it only builds inside
+//! the repository (the sandbox-* workspace crates resolve via path). It is
+//! included in the published package but not part of the CI/publish flow.
 
-use frontal_sandbox_sdk::Client;
+use sandbox_sdk::Client;
 use futures::StreamExt;
 use sandbox_scheduler::Scheduler;
 use sandbox_server::auth::AuthManager;
