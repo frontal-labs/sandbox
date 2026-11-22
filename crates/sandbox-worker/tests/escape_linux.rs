@@ -232,11 +232,15 @@ fn escape_probes() -> Vec<Probe> {
     probes.push((
         "kexec_load",
         Box::new(|| {
-            // SAFETY: all arguments are zero/null; the call should be denied.
+            // A non-zero segment count makes the unprivileged control fail with
+            // EPERM (the capability check precedes any segment copy), while a
+            // zero count would fail with ENODEV (no image staged) instead, which
+            // the isolated assertion reads as "not denied with EPERM". The null
+            // flags keep it from unloading a staged image.
             let rc = unsafe {
                 libc::syscall(
                     libc::SYS_kexec_load,
-                    0i64,
+                    1i64,
                     0i64,
                     0i64,
                     std::ptr::null::<libc::c_long>() as *const libc::c_char,
