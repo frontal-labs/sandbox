@@ -131,15 +131,12 @@ fn escape_probes() -> Vec<Probe> {
         "bpf",
         Box::new(|| {
             // SAFETY: BPF_STATS takes a pointer to a u32 we own. Should be denied.
-            // Use syscall() directly: `libc::bpf` is not in every libc version.
+            // Use syscall() directly: `libc::bpf` is not in every libc version,
+            // and the `BPF_STATS` command constant is not in every libc either
+            // (raw value 5 from <linux/bpf.h>).
             let stats: u32 = 0;
             let rc = unsafe {
-                libc::syscall(
-                    libc::SYS_bpf,
-                    libc::BPF_STATS,
-                    &stats as *const u32 as *const _,
-                    4i64,
-                )
+                libc::syscall(libc::SYS_bpf, 5i64, &stats as *const u32 as *const _, 4i64)
             };
             probe_result(rc as i32)
         }),
