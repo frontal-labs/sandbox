@@ -196,15 +196,8 @@ fn escape_probes() -> Vec<Probe> {
         "kexec_load",
         Box::new(|| {
             // SAFETY: all pointers are null; the call should be denied.
-            let rc = unsafe {
-                libc::syscall(
-                    libc::SYS_kexec_load,
-                    0i64,
-                    0i64,
-                    0i64,
-                    std::ptr::null(),
-                )
-            };
+            let rc =
+                unsafe { libc::syscall(libc::SYS_kexec_load, 0i64, 0i64, 0i64, std::ptr::null()) };
             probe_result(rc as i32)
         }),
     ));
