@@ -173,6 +173,134 @@ fn normalize_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
+/// A filesystem path policy. Like [`NetworkPolicy`], it is a default posture plus
+/// a list of rules, and a matching deny rule always wins, whatever the order of
+/// the rules and whether `default_deny` is set.
+///
+/// The rules name paths, not hosts. A `None` pattern is a catch-all that matches
+/// every path; a `Some` pattern is a prefix, matched on a path-segment boundary
+/// so `/work` matches `/work` and `/work/a/b` but not `/workdir`. Paths are
+/// compared case-sensitively and without a trailing slash, and must be absolute.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct FsPolicy {
+    pub default_deny: bool,
+    pub rules: Vec<PathRule>,
+}
+
+impl Default for FsPolicy {
+    fn default() -> Self {
+        Self {
+            default_deny: true,
+            rules: Vec::new(),
+        }
+    }
+}
+
+impl FsPolicy {
+    /// No rules and a deny posture: every path is denied.
+    pub fn deny_all() -> Self {
+        Self::default()
+    }
+
+    /// An allow posture with no rules: every path is allowed.
+    pub fn allow_all() -> Self {
+        Self {
+            default_deny: false,
+            rules: Vec::new(),
+        }
+    }
+
+    pub fn add_rule(&mut self, rule: PathRule) {
+        self.rules.push(rule);
+    }
+
+    /// Whether `path` is allowed for reads.
+    pub fn allows_read(&self, path: &str) -> bool {
+        self.decide(path)
+    }
+
+    /// Whether `path` is allowed for writes.
+    pub fn allows_write(&self, path: &str) -> bool {
+        self.decide(path)
+    }
+
+    /// A matching deny rule always wins, whatever the order of the rules and
+    /// whether `default_deny` is set. Otherwise the path is allowed when
+    /// `default_deny` is off or an allow rule matches.
+    fn decide(&self, path: &str) -> bool {
+        let mut allowed = !self.default_deny;
+        for rule in self.rules.iter().filter(|r| r.matches(path)) {
+            match rule.action {
+                PolicyAction::Deny => return false,
+                PolicyAction::Allow => allowed = true,
+            }
+        }
+        allowed
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PathRule {
+    pub action: PolicyAction,
+    /// A path prefix to match, or `None` for a catch-all rule.
+    pub path: Option<String>,
+}
+
+impl PathRule {
+    pub fn allow(path: impl Into<String>) -> Self {
+        Self {
+            action: PolicyAction::Allow,
+            path: Some(path.into()),
+        }
+    }
+
+    pub fn deny(path: impl Into<String>) -> Self {
+        Self {
+            action: PolicyAction::Deny,
+            path: Some(path.into()),
+        }
+    }
+
+    /// A catch-all rule that matches every path.
+    pub fn allow_all() -> Self {
+        Self {
+            action: PolicyAction::Allow,
+            path: None,
+        }
+    }
+
+    /// A catch-all rule that denies every path.
+    pub fn deny_all() -> Self {
+        Self {
+            action: PolicyAction::Deny,
+            path: None,
+        }
+    }
+
+    /// A `None` pattern matches every path. A `Some` pattern matches when `path`
+    /// is equal to it or lies beneath it on a segment boundary, so `/work` does
+    /// not match `/workdir`. Relative and empty paths never match.
+    fn matches(&self, path: &str) -> bool {
+        let pattern = match &self.path {
+            None => return true,
+            Some(p) => p,
+        };
+        if path.is_empty() || !path.starts_with('/') {
+            return false;
+        }
+        if pattern.is_empty() || !pattern.starts_with('/') {
+            return false;
+        }
+        if path == pattern {
+            return true;
+        }
+        let boundary = format!("{pattern}/");
+        path.starts_with(&boundary)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResourceLimits {

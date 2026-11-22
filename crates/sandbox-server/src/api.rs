@@ -22,7 +22,7 @@ use sandbox_session::{
 };
 use sandbox_trace::{outcome_of, FileChange, FsOp, RunRecord, Trace};
 use sandbox_types::hash::ContentHash;
-use sandbox_types::policy::{NetworkPolicy, PolicyAction, ResourceLimits};
+use sandbox_types::policy::{FsPolicy, NetworkPolicy, PolicyAction, ResourceLimits};
 use sandbox_types::session::DEFAULT_CHECKPOINT_RETAIN;
 use sandbox_types::{
     CheckpointPolicy, ErrorCode, ExecEvent, ExecRequest, ExecResult, OutputStream, SandboxError,
@@ -782,12 +782,11 @@ fn refuse_unenforced(config: &SessionConfig, allow_vm: bool) -> Result<(), ApiEr
     if config.tier_preference == TierPreference::Vm && !allow_vm {
         return refuse("the vm tier");
     }
+    // The network policy is enforced: the session's env.json carries it, and the
+    // outbound path (resolve_and_check_host) is wired for the tiers that connect.
     // Memory limit is enforced via VFS quotas and cgroups (worker tier).
     // CPU, process, and open file limits are now enforced in the isolate backend.
     // Wall timeout is enforced at the session level (default 300s).
-    if config.network != NetworkPolicy::default() {
-        return refuse("a network policy");
-    }
     if config.secrets.is_some() {
         return refuse("secrets");
     }
@@ -797,6 +796,53 @@ fn refuse_unenforced(config: &SessionConfig, allow_vm: bool) -> Result<(), ApiEr
     if config.cwd != SessionConfig::default().cwd {
         return refuse("a working directory");
     }
+    Ok(())
+}
+
+/// Validates the requested [`ResourceLimits`] before any allocation happens.
+/// A zero value for any limit that must be at least 1 is a misconfiguration:
+/// it would guarantee immediate exhaustion for every operation, so it is
+/// rejected at admission time rather than surfaced mid-session. The size,
+/// inode, and depth checks reuse the `sandbox-policy` limit helpers so the
+/// validation error is the same error the VFS would return at write time.
+fn validate_session_limits(limits: &ResourceLimits) -> Result<(), ApiError> {
+    use sandbox_policy::limits as pl;
+
+    // Zero is not a valid quota: a session with a zero quota cannot do anything,
+    // so it must be a mistake, not a legitimate "no resources" request.
+    if limits.memory_bytes == Some(0) {
+        return Err(
+            SandboxError::invalid_argument("memory_bytes must be greater than zero").into(),
+        );
+    }
+    if limits.cpu_ms_per_sec == Some(0) {
+        return Err(
+            SandboxError::invalid_argument("cpu_ms_per_sec must be greater than zero").into(),
+        );
+    }
+    if limits.max_processes == Some(0) {
+        return Err(
+            SandboxError::invalid_argument("max_processes must be greater than zero").into(),
+        );
+    }
+    if limits.max_open_files == Some(0) {
+        return Err(
+            SandboxError::invalid_argument("max_open_files must be greater than zero").into(),
+        );
+    }
+
+    // The per-file, total-size, inode, and depth limits must be at least one so
+    // the session can hold a single empty file at the root. Run them through the
+    // policy limit helpers so a zero or negative limit is reported with the same
+    // `ResourceExhausted` shape the VFS produces at write time.
+    pl::check_file_size(limits, 1)
+        .map_err(|_| SandboxError::invalid_argument("max_file_size must be at least 1 byte"))?;
+    pl::check_total_size(limits, 1)
+        .map_err(|_| SandboxError::invalid_argument("max_total_size must be at least 1 byte"))?;
+    pl::check_inodes(limits, 1)
+        .map_err(|_| SandboxError::invalid_argument("max_inodes must be at least 1"))?;
+    pl::check_path_depth(limits, 1)
+        .map_err(|_| SandboxError::invalid_argument("max_path_depth must be at least 1"))?;
     Ok(())
 }
 
@@ -1752,6 +1798,9 @@ pub async fn create_session(
     Json(config): Json<SessionConfig>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
     refuse_unenforced(&config, state.vm.is_some())?;
+    // Validate the requested limits before any allocation. A zeroed limit is a
+    // misconfiguration the caller must fix, not a quota to be exhausted.
+    validate_session_limits(&config.limits)?;
     if config.checkpoint_retain == 0 || config.checkpoint_retain > MAX_CHECKPOINT_RETAIN {
         return Err(SandboxError::invalid_argument(format!(
             "checkpoint_retain must be between 1 and {MAX_CHECKPOINT_RETAIN}"
@@ -1762,6 +1811,7 @@ pub async fn create_session(
     let labels = config.labels.clone();
     let limits = config.limits.clone();
     let network = config.network.clone();
+    let fs = config.fs.clone();
     if config.initial_snapshot.is_some() && config.initial_template.is_some() {
         return Err(SandboxError::invalid_argument(
             "set at most one of initial_snapshot and initial_template",
@@ -1817,7 +1867,11 @@ pub async fn create_session(
     entry.checkpoint_policy = config.checkpoint;
     entry.checkpoint_retain = config.checkpoint_retain;
     stamp(&state, &mut entry, &session).await?;
-    write_env_json(&session, &env_json(id, session.tier(), &limits, &network)).await?;
+    write_env_json(
+        &session,
+        &env_json(id, session.tier(), &limits, &network, fs.as_ref()),
+    )
+    .await?;
     // A new isolate session gets CPython before it is admitted, so a failed install leaves
     // no session behind.
     if let Some(python) = state.python.as_deref() {
@@ -1843,6 +1897,7 @@ fn env_json(
     tier: Tier,
     limits: &ResourceLimits,
     network: &NetworkPolicy,
+    fs: Option<&FsPolicy>,
 ) -> serde_json::Value {
     let allow: Vec<&str> = network
         .rules
@@ -1860,6 +1915,16 @@ fn env_json(
             "default": if network.default_deny { "deny" } else { "allow" },
             "allow": allow,
         },
+        "fs": fs.map(|fs| serde_json::json!({
+            "default": if fs.default_deny { "deny" } else { "allow" },
+            "rules": fs.rules.iter().map(|r| serde_json::json!({
+                "action": match r.action {
+                    PolicyAction::Allow => "allow",
+                    PolicyAction::Deny => "deny",
+                },
+                "path": r.path,
+            })).collect::<Vec<_>>(),
+        })),
         "limits": {
             "memory_mib": limits.memory_bytes.map(|bytes| bytes / (1024 * 1024)),
             "cpu_ms_budget": null,
@@ -1891,7 +1956,7 @@ async fn write_forked_env_json(
             env["session"] = serde_json::json!(id.to_string());
             env
         }
-        None => env_json(id, Tier::Isolate, limits, &NetworkPolicy::default()),
+        None => env_json(id, Tier::Isolate, limits, &NetworkPolicy::default(), None),
     };
     write_env_json(session, &env).await
 }

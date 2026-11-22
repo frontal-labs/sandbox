@@ -1297,6 +1297,27 @@ components:
           description: The exit code, or nothing when the command could not run.
         session_id:
           type: string
+    FsPolicy:
+      type: object
+      description: |-
+        A filesystem path policy. Like [`NetworkPolicy`], it is a default posture plus
+        a list of rules, and a matching deny rule always wins, whatever the order of
+        the rules and whether `default_deny` is set.
+
+        The rules name paths, not hosts. A `None` pattern is a catch-all that matches
+        every path; a `Some` pattern is a prefix, matched on a path-segment boundary
+        so `/work` matches `/work` and `/work/a/b` but not `/workdir`. Paths are
+        compared case-sensitively and without a trailing slash, and must be absolute.
+      required:
+      - default_deny
+      - rules
+      properties:
+        default_deny:
+          type: boolean
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/PathRule'
     NetworkPolicy:
       type: object
       required:
@@ -1333,6 +1354,18 @@ components:
       enum:
       - stdout
       - stderr
+    PathRule:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          $ref: '#/components/schemas/PolicyAction'
+        path:
+          type:
+          - string
+          - 'null'
+          description: A path prefix to match, or `None` for a catch-all rule.
     PolicyAction:
       type: string
       enum:
@@ -1445,6 +1478,13 @@ components:
             type: string
           propertyNames:
             type: string
+        fs:
+          oneOf:
+          - $ref: '#/components/schemas/FsPolicy'
+            description: |-
+              Optional filesystem path policy. `None` (the default) leaves filesystem
+              access unrestricted apart from the VFS quotas from `limits`.
+          - type: 'null'
         initial_snapshot:
           type:
           - string

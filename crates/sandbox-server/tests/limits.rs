@@ -206,9 +206,9 @@ async fn a_zero_quota_is_refused_as_an_invalid_argument() {
         json_body(&config_with(max_file_size(0))),
     )
     .await;
-    // Zero quota is now accepted at session creation, but enforced at runtime.
-    // The session is created successfully (201), but operations will fail.
-    assert_eq!(status, StatusCode::CREATED);
+    // A zero quota is a misconfiguration: it is refused at admission time
+    // rather than creating a session that could never do anything.
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
