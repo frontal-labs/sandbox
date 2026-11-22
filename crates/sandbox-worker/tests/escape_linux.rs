@@ -57,7 +57,7 @@ mod code {
 /// A probe that should be denied by the live seccomp filter, with the name and
 /// the code that runs it. Each probe returns the raw result: `Ok(())` if the
 /// syscall succeeded, `Err(errno)` if it failed.
-type Probe = (&'static str, Box<dyn FnMut() -> Result<(), i32>>);
+type Probe = (&'static str, Box<dyn Fn() -> Result<(), i32>>);
 
 /// The escape probes: syscalls the live denylist filter denies, and that an
 /// allowlist filter (being made live concurrently in a separate PR) also
@@ -131,9 +131,17 @@ fn escape_probes() -> Vec<Probe> {
         "bpf",
         Box::new(|| {
             // SAFETY: BPF_STATS takes a pointer to a u32 we own. Should be denied.
+            // Use syscall() directly: `libc::bpf` is not in every libc version.
             let stats: u32 = 0;
-            let rc = unsafe { libc::bpf(libc::BPF_STATS, &stats as *const u32 as *const _, 4) };
-            probe_result(rc)
+            let rc = unsafe {
+                libc::syscall(
+                    libc::SYS_bpf,
+                    libc::BPF_STATS,
+                    &stats as *const u32 as *const _,
+                    4i64,
+                )
+            };
+            probe_result(rc as i32)
         }),
     ));
     probes.push((
@@ -149,8 +157,8 @@ fn escape_probes() -> Vec<Probe> {
         "userfaultfd",
         Box::new(|| {
             // SAFETY: takes only flags. Should be denied.
-            let rc = unsafe { libc::userfaultfd(0) };
-            probe_result(rc)
+            let rc = unsafe { libc::syscall(libc::SYS_userfaultfd, 0i64) };
+            probe_result(rc as i32)
         }),
     ));
     probes.push((
@@ -173,16 +181,31 @@ fn escape_probes() -> Vec<Probe> {
         Box::new(|| {
             // SAFETY: the image pointer is null and the length is zero; the
             // call should be denied before the kernel reads the image.
-            let rc = unsafe { libc::init_module(std::ptr::null(), 0, std::ptr::null()) };
-            probe_result(rc)
+            let rc = unsafe {
+                libc::syscall(
+                    libc::SYS_init_module,
+                    std::ptr::null() as *const _,
+                    0i64,
+                    std::ptr::null(),
+                )
+            };
+            probe_result(rc as i32)
         }),
     ));
     probes.push((
         "kexec_load",
         Box::new(|| {
             // SAFETY: all pointers are null; the call should be denied.
-            let rc = unsafe { libc::kexec_load(0, 0, 0, std::ptr::null()) };
-            probe_result(rc)
+            let rc = unsafe {
+                libc::syscall(
+                    libc::SYS_kexec_load,
+                    0i64,
+                    0i64,
+                    0i64,
+                    std::ptr::null(),
+                )
+            };
+            probe_result(rc as i32)
         }),
     ));
     probes
