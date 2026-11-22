@@ -7,20 +7,20 @@
 //!   namespaces, so it has no network interfaces and cannot see or change the
 //!   host's mounts, hostname, or IPC objects. Its mounts are made private first,
 //!   so nothing it does propagates to the host.
-//! - **Seccomp.** A BPF filter denies syscalls that a script host never needs and
-//!   that are the usual escape routes: debugging and cross-process memory access,
-//!   kernel module and boot control, BPF and perf, keyrings, and mount and
-//!   namespace manipulation. Denied calls fail with `EPERM`. `NO_NEW_PRIVS` is set
-//!   by the filter install, so no later exec can gain privileges.
+//! - **Seccomp.** A BPF allowlist permits only the syscalls a worker needs:
+//!   process, memory, file, time, signal, futex, socket, and polling syscalls.
+//!   Everything else — including the usual escape routes such as ptrace, mount,
+//!   namespace manipulation, BPF, and kernel module control — fails with `EPERM`.
+//!   `NO_NEW_PRIVS` is set by the filter install, so no later exec can gain
+//!   privileges.
 //! - **cgroups v2.** The host creates a cgroup for the worker with memory, pid,
 //!   and CPU limits, and moves the worker into it right after it starts.
 //!
 //! Each layer fails closed. If one cannot be applied, the worker does not start,
 //! so an unisolated worker is never served as if it were isolated.
 //!
-//! The filter is a denylist, so an unknown syscall is allowed. An allowlist is
-//! stronger, and it is the next step once the set of syscalls the isolate needs
-//! has been measured.
+//! The filter is an allowlist: an unknown syscall is denied, so the set of
+//! permitted calls is exactly the one in [`allowed_syscalls`].
 
 use sandbox_types::{ErrorCode, SandboxError};
 
@@ -31,7 +31,7 @@ use sandbox_types::{ErrorCode, SandboxError};
 pub struct Isolation {
     /// Unshare the network, IPC, UTS, and mount namespaces.
     pub namespaces: bool,
-    /// Install the seccomp denylist.
+    /// Install the seccomp allowlist.
     pub seccomp: bool,
     /// Put the worker in a cgroup with these limits. `None` leaves it in the host's cgroup.
     pub cgroup: Option<CgroupLimits>,
@@ -105,7 +105,7 @@ pub fn enter(isolation: &Isolation) -> Result<(), SandboxError> {
         unshare_namespaces()?;
     }
     if isolation.seccomp {
-        install_seccomp()?;
+        install_seccomp_allowlist()?;
     }
     Ok(())
 }
@@ -205,13 +205,13 @@ fn denied_syscalls() -> Vec<i64> {
     denied
 }
 
-/// Syscalls the worker explicitly allows. This is the allowlist approach,
-/// which is more secure than the denylist because it only permits known-safe
-/// syscalls. The list below includes syscalls needed for basic script execution,
-/// file I/O, and memory management.
-/// See the Linux syscall table for the architecture-specific numbers.
+/// Syscalls the worker explicitly allows. This is the allowlist: only these
+/// syscalls succeed, everything else fails with `EPERM`.
+///
+/// The list covers what a worker process needs: process management, memory,
+/// file I/O, directory operations, time, signals, futex, sockets, polling,
+/// and the misc calls the Rust runtime and tokio make on startup.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 fn allowed_syscalls() -> Vec<i64> {
     let mut allowed = vec![
         // Process management
@@ -219,10 +219,21 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_exit_group,
         libc::SYS_getpid,
         libc::SYS_getppid,
+        libc::SYS_gettid,
         libc::SYS_getuid,
         libc::SYS_geteuid,
         libc::SYS_getgid,
         libc::SYS_getegid,
+        libc::SYS_set_tid_address,
+        libc::SYS_clone,
+        libc::SYS_fork,
+        libc::SYS_vfork,
+        libc::SYS_wait4,
+        libc::SYS_waitid,
+        libc::SYS_execve,
+        // Process signaling (for killing child processes)
+        libc::SYS_kill,
+        libc::SYS_tgkill,
         // Memory management
         libc::SYS_mmap,
         libc::SYS_munmap,
@@ -230,6 +241,12 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_brk,
         libc::SYS_madvise,
         libc::SYS_mincore,
+        libc::SYS_mremap,
+        libc::SYS_msync,
+        // Memory policy (glibc calls these at startup on some configs)
+        libc::SYS_get_mempolicy,
+        libc::SYS_set_mempolicy,
+        libc::SYS_mbind,
         // File I/O
         libc::SYS_openat,
         libc::SYS_close,
@@ -240,39 +257,64 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_lseek,
         libc::SYS_fstat,
         libc::SYS_statx,
+        libc::SYS_newfstatat,
+        libc::SYS_access,
+        libc::SYS_faccessat,
         libc::SYS_fcntl,
         libc::SYS_ioctl,
         libc::SYS_dup,
         libc::SYS_dup2,
         libc::SYS_dup3,
         libc::SYS_pipe2,
+        libc::SYS_ftruncate,
+        libc::SYS_truncate,
+        libc::SYS_fsync,
+        libc::SYS_fdatasync,
+        libc::SYS_readv,
+        libc::SYS_writev,
         // Directory operations
         libc::SYS_getdents64,
         libc::SYS_mkdirat,
         libc::SYS_unlinkat,
         libc::SYS_renameat,
+        libc::SYS_renameat2,
         libc::SYS_linkat,
         libc::SYS_symlinkat,
         libc::SYS_readlinkat,
         libc::SYS_fchdir,
         libc::SYS_getcwd,
+        libc::SYS_chdir,
+        libc::SYS_fchmodat,
+        libc::SYS_fchmod,
+        libc::SYS_fchownat,
+        libc::SYS_fchown,
         // Time
         libc::SYS_clock_gettime,
         libc::SYS_nanosleep,
+        libc::SYS_clock_nanosleep,
         libc::SYS_gettimeofday,
+        libc::SYS_clock_getres,
+        libc::SYS_get_robust_list,
+        libc::SYS_set_robust_list,
         // Signal handling
         libc::SYS_rt_sigaction,
         libc::SYS_rt_sigprocmask,
         libc::SYS_rt_sigreturn,
+        libc::SYS_rt_sigsuspend,
+        libc::SYS_rt_sigpending,
+        libc::SYS_rt_sigqueueinfo,
+        libc::SYS_rt_sigtimedwait,
         libc::SYS_sigaltstack,
         // Futex (for threading)
         libc::SYS_futex,
         // Socket (for the guest agent's forwarded port)
         libc::SYS_socket,
+        libc::SYS_socketpair,
         libc::SYS_connect,
         libc::SYS_bind,
         libc::SYS_listen,
         libc::SYS_accept,
+        libc::SYS_accept4,
         libc::SYS_sendmsg,
         libc::SYS_recvmsg,
         libc::SYS_sendto,
@@ -284,6 +326,19 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_epoll_create1,
         libc::SYS_epoll_ctl,
         libc::SYS_epoll_pwait,
+        libc::SYS_epoll_pwait2,
+        libc::SYS_pselect6,
+        libc::SYS_ppoll,
+        libc::SYS_select,
+        // I/O multiplexing (io_uring, used by some runtimes)
+        libc::SYS_io_uring_setup,
+        libc::SYS_io_uring_enter,
+        libc::SYS_io_uring_register,
+        // File locking
+        libc::SYS_flock,
+        // PID file descriptors (modern process management)
+        libc::SYS_pidfd_open,
+        libc::SYS_pidfd_send_signal,
         // Miscellaneous
         libc::SYS_getrandom,
         libc::SYS_prlimit64,
@@ -302,16 +357,23 @@ fn allowed_syscalls() -> Vec<i64> {
         libc::SYS_sched_setscheduler,
         libc::SYS_sched_get_priority_max,
         libc::SYS_sched_get_priority_min,
+        libc::SYS_getrusage,
+        libc::SYS_getauxval,
+        libc::SYS_getcpu,
+        libc::SYS_clock_getcpuclockid,
+        libc::SYS_capget,
+        libc::SYS_capset,
+        libc::SYS_getitimer,
+        libc::SYS_setitimer,
+        libc::SYS_alarm,
+        libc::SYS_utimensat,
+        libc::SYS_futimens,
+        libc::SYS_mknodat,
     ];
 
     #[cfg(target_arch = "x86_64")]
     {
-        allowed.extend([libc::SYS_ioctl, libc::SYS_sigaltstack, libc::SYS_arch_prctl]);
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        allowed.extend([libc::SYS_ioctl, libc::SYS_sigaltstack]);
+        allowed.extend([libc::SYS_arch_prctl, libc::SYS_set_thread_area]);
     }
 
     allowed.sort();
@@ -319,10 +381,10 @@ fn allowed_syscalls() -> Vec<i64> {
     allowed
 }
 
-/// Installs an allowlist-based seccomp filter (more secure than denylist).
+/// Installs an allowlist-based seccomp filter. Only the syscalls in
+/// [`allowed_syscalls`] are permitted; everything else fails with `EPERM`.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
-fn install_seccomp_allowlist() -> Result<(), SandboxError> {
+pub fn install_seccomp_allowlist() -> Result<(), SandboxError> {
     use std::convert::TryInto;
 
     let rules = allowed_syscalls()
@@ -332,8 +394,8 @@ fn install_seccomp_allowlist() -> Result<(), SandboxError> {
     // Allowed calls pass through, everything else fails with EPERM.
     let filter = seccompiler::SeccompFilter::new(
         rules,
-        seccompiler::SeccompAction::Errno(libc::EPERM as u32),
         seccompiler::SeccompAction::Allow,
+        seccompiler::SeccompAction::Errno(libc::EPERM as u32),
         target_arch()?,
     )
     .map_err(|e| {

@@ -106,7 +106,7 @@ Last reviewed against the source tree on 2026-11-21.
 - [x] `sandbox-snapshot`: removed. The in-memory `SnapshotManager` was dead
       scaffolding; the server owns snapshot state in its own table (ADR 0049)
 - [x] `sandbox-worker`: one child process per session, gRPC over a private Unix socket, with
-      crash isolation. On Linux the child gets namespaces, a seccomp denylist, `NO_NEW_PRIVS`,
+      crash isolation. On Linux the child gets namespaces, a seccomp allowlist, `NO_NEW_PRIVS`,
       and cgroup v2 limits (ADR 0022); each layer fails closed. `cli/tests/worker_isolation.rs`
       verifies all of it from outside the process.
 - [ ] **Partial.** `sandbox-server`: session, exec, filesystem, snapshot, and fork routes at `/v1` run on in-memory sessions behind API-key auth, with OpenAPI (utoipa), 429 + Retry-After on session admission refusals (T-08), and file-backed billing (T-03)
