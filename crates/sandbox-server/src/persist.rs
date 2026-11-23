@@ -14,7 +14,7 @@ use sandbox_cas::{DiskStore, TieredStore};
 use sandbox_session::install_blob_store;
 use sandbox_types::hash::ContentHash;
 use sandbox_types::{
-    CheckpointPolicy, SandboxError, SessionId, SessionState, SnapshotId, TemplateId,
+    CheckpointPolicy, SandboxError, SessionId, SessionState, SnapshotId, TemplateId, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -116,6 +116,10 @@ pub struct SavedKey {
     pub id: String,
     /// Hex BLAKE3 digest of the secret. The secret itself is never stored.
     pub digest: String,
+    /// The tenant the key is bound to. Older state logs have no field; the
+    /// `#[serde(default)]` reads them as the nil tenant.
+    #[serde(default)]
+    pub tenant: TenantId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -80,4 +80,10 @@ impl TenantId {
     pub const fn nil() -> Self {
         Self(Ulid::nil())
     }
+
+    /// True for the all-zero id. Older state and unbound callers produce it; a
+    /// minted tenant never does.
+    pub const fn is_nil(self) -> bool {
+        self.0.is_nil()
+    }
 }

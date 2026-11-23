@@ -94,6 +94,113 @@ impl NetworkPolicy {
     }
 }
 
+/// True when `self`, a tenant's network policy, admits at least every (host,
+/// port) pair that `other`, a session's network policy, admits.
+///
+/// The check compares rule shapes so it is independent of what a session might
+/// later request:
+///
+/// - A default-open tenant (`self.default_deny` false) admits every (host,
+///   port) its deny rules do not take. It covers a default-deny session
+///   (which admits exactly its allow rules) unless a tenant deny rule takes
+///   one of them. It covers a default-open session (which admits everything
+///   its deny rules do not take) only when the tenant has no rules at all,
+///   i.e. it is [`NetworkPolicy::allow_all`].
+/// - A default-deny tenant admits only what its allow rules admit. It covers
+///   a default-deny session when each session allow rule fits inside a tenant
+///   allow rule with an equal-or-broader host set and, for TCP, whose ports
+///   include the session's. It never covers a default-open session, because
+///   the session admits everything its deny rules do not take, which is
+///   always a superset of any finite allow set.
+///
+/// Deny rules in `other` only shrink what the session admits, so they never
+/// fail the check. The comparison is conservative: a host pattern is admitted
+/// to cover another only when it is `*`, the same pattern, or a wildcard whose
+/// suffix the other's wildcard suffix is a subdomain of.
+impl NetworkPolicy {
+    pub fn is_superset_of(&self, other: &Self) -> bool {
+        // A default-open tenant admits every (host, port) its deny rules do
+        // not take. It covers a default-deny session (which admits exactly its
+        // allow rules) unless a tenant deny rule takes one of them. It covers
+        // a default-open session (which admits everything its deny rules do
+        // not take) only when it has no rules at all, because any tenant rule
+        // narrows the admitted set.
+        if !self.default_deny {
+            if other.default_deny {
+                other.rules.iter().all(|rule| {
+                    if rule.action != PolicyAction::Allow {
+                        return true;
+                    }
+                    !self.rules.iter().any(|tenant_rule| {
+                        tenant_rule.action == PolicyAction::Deny
+                            && tenant_rule.host_pattern == rule.host_pattern
+                    })
+                })
+            } else {
+                self.rules.is_empty()
+            }
+        } else if other.default_deny {
+            // Both default-deny: each session allow rule must fit inside a
+            // tenant allow rule with an equal-or-broader host set and, for
+            // TCP, whose ports include the session's.
+            other.rules.iter().all(|rule| {
+                if rule.action != PolicyAction::Allow {
+                    return true;
+                }
+                self.rules.iter().any(|tenant_rule| {
+                    tenant_rule.action == PolicyAction::Allow
+                        && host_covers(&tenant_rule.host_pattern, &rule.host_pattern)
+                        && match (&rule.ports, &tenant_rule.ports) {
+                            (None, None) => true,
+                            (Some(ports), Some(allowed)) => {
+                                ports.iter().all(|p| allowed.contains(p))
+                            }
+                            (None, Some(_)) => false,
+                            (Some(_), None) => false,
+                        }
+                })
+            })
+        } else {
+            // A default-deny tenant admits only its allow rules; a default-
+            // open session admits everything its deny rules do not take, which
+            // is always a superset of any finite allow set. The tenant never
+            // covers the session.
+            false
+        }
+    }
+}
+
+/// True when a host matched by `inner` is always matched by `outer`, over the
+/// pattern forms [`NetworkPolicyRule::matches_host`] understands: `*`, `*.suffix`
+/// on a label boundary, or a literal. `*` covers everything. A literal covers
+/// only the same literal. `*.suffix` covers `*.` followed by a subdomain of
+/// `suffix` (including `suffix` itself as apex of the wildcard) and a literal
+/// that is a subdomain of `suffix`.
+fn host_covers(outer: &str, inner: &str) -> bool {
+    let outer = outer.to_ascii_lowercase();
+    let inner = inner.to_ascii_lowercase();
+    if outer == "*" {
+        return true;
+    }
+    let outer_suffix = outer.strip_prefix("*.");
+    let inner_suffix = inner.strip_prefix("*.");
+    match (outer_suffix, inner_suffix) {
+        (Some(os), Some(is)) => is == os || is.ends_with(&format!(".{os}")),
+        // A wildcard outer covers a literal inner when the inner is a
+        // subdomain of the outer's suffix (on a label boundary).
+        (Some(os), None) => {
+            let os = os.trim_end_matches('.');
+            !inner.is_empty() && inner.len() > os.len() && inner.ends_with(&format!(".{os}"))
+        }
+        // A literal outer covers a literal inner only when they are the same
+        // host, compared case-insensitively and ignoring a trailing dot.
+        (None, None) => normalize_host(&outer) == normalize_host(&inner),
+        // A literal outer cannot cover a wildcard inner: the wildcard names
+        // hosts the literal does not.
+        (None, Some(_)) => false,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NetworkPolicyRule {
@@ -434,5 +541,115 @@ mod tests {
         policy.add_rule(NetworkPolicyRule::allow_tcp("db.example.com", vec![5432]));
         assert!(policy.check_tcp("db.example.com", 5432));
         assert!(!policy.check_tcp("db.example.com", 22));
+    }
+
+    #[test]
+    fn test_superset_default_open_session_needs_allow_all_tenant() {
+        // A default-open session admits every host and port, so only an
+        // allow_all tenant covers it. A tenant with any rule is too narrow.
+        let open = NetworkPolicy::allow_all();
+        assert!(NetworkPolicy::allow_all().is_superset_of(&open));
+        let mut narrow = NetworkPolicy::allow_all();
+        narrow.add_rule(NetworkPolicyRule::allow_http("api.example.com"));
+        assert!(!narrow.is_superset_of(&open));
+    }
+
+    #[test]
+    fn test_superset_default_open_tenant_covers_default_deny_session() {
+        // A default-open tenant admits every (host, port) its deny rules do
+        // not take, so it covers a default-deny session that names a host the
+        // tenant does not deny.
+        let session = allow("api.example.com");
+        assert!(NetworkPolicy::allow_all().is_superset_of(&session));
+        // A default-open tenant with a deny rule that takes the session's host
+        // does not cover it.
+        let mut tenant = NetworkPolicy::allow_all();
+        tenant.add_rule(NetworkPolicyRule::deny_http("api.example.com"));
+        assert!(!tenant.is_superset_of(&session));
+        // A default-open tenant with an allow rule (which narrows nothing in
+        // default-open mode) still covers the session.
+        let mut tenant2 = NetworkPolicy::allow_all();
+        tenant2.add_rule(NetworkPolicyRule::allow_http("api.example.com"));
+        assert!(tenant2.is_superset_of(&session));
+    }
+
+    #[test]
+    fn test_superset_default_deny_tenant_never_covers_default_open_session() {
+        // A default-deny tenant admits only its allow rules; a default-open
+        // session admits everything its deny rules do not take, which is
+        // always a superset. The tenant never covers the session.
+        let open = NetworkPolicy::allow_all();
+        let tenant = allow("api.example.com");
+        assert!(!tenant.is_superset_of(&open));
+        let empty_tenant = NetworkPolicy::default();
+        assert!(!empty_tenant.is_superset_of(&open));
+    }
+
+    #[test]
+    fn test_superset_default_deny_session_fits_inside_tenant_rules() {
+        let session = allow("api.example.com");
+        // A wider wildcard covers the literal.
+        let wider = allow("*.example.com");
+        assert!(wider.is_superset_of(&session));
+        // The same literal covers itself.
+        assert!(allow("api.example.com").is_superset_of(&session));
+        // A different literal does not.
+        assert!(!allow("api.example.org").is_superset_of(&session));
+        // A literal that is a subdomain of the session's wildcard does not
+        // cover the wildcard (the wildcard names the apex's siblings too).
+        assert!(!allow("api.example.com").is_superset_of(&allow("*.example.com")));
+        // `*` covers everything, including a wildcard.
+        assert!(allow("*").is_superset_of(&allow("*.example.com")));
+        // A subdomain wildcard is covered by the broader wildcard.
+        assert!(allow("*.example.com").is_superset_of(&allow("*.api.example.com")));
+    }
+
+    #[test]
+    fn test_superset_port_lists_must_contain_session_ports() {
+        let session_tcp = |ports: Vec<u16>| -> NetworkPolicy {
+            let mut p = NetworkPolicy::default();
+            p.add_rule(NetworkPolicyRule::allow_tcp("db.example.com", ports));
+            p
+        };
+        let tenant_all_ports = |ports: Vec<u16>| -> NetworkPolicy {
+            let mut p = NetworkPolicy::default();
+            p.add_rule(NetworkPolicyRule::allow_tcp("db.example.com", ports));
+            p
+        };
+        // The same ports cover each other.
+        assert!(tenant_all_ports(vec![5432, 3306]).is_superset_of(&session_tcp(vec![5432])));
+        // A tenant port list missing a session port does not cover it.
+        assert!(!tenant_all_ports(vec![5432]).is_superset_of(&session_tcp(vec![5432, 3306])));
+        // A tenant HTTP rule (no ports) does not cover a session TCP rule.
+        assert!(!allow("db.example.com").is_superset_of(&session_tcp(vec![5432])));
+        // A tenant TCP rule does not cover a session HTTP rule.
+        assert!(!tenant_all_ports(vec![5432]).is_superset_of(&allow("db.example.com")));
+    }
+
+    #[test]
+    fn test_superset_deny_rules_never_fail_the_check() {
+        // The session denies a host the tenant allows; the session's deny
+        // rule only shrinks what it admits, so the check still passes.
+        let mut session = allow("*");
+        session.default_deny = false;
+        session.add_rule(NetworkPolicyRule::deny_http("evil.com"));
+        assert!(NetworkPolicy::allow_all().is_superset_of(&session));
+        // A default-deny session with a deny rule: the deny rule is skipped.
+        let mut deny_session = NetworkPolicy::default();
+        deny_session.add_rule(NetworkPolicyRule::allow_http("api.example.com"));
+        deny_session.add_rule(NetworkPolicyRule::deny_http("evil.com"));
+        assert!(allow("*.example.com").is_superset_of(&deny_session));
+    }
+
+    #[test]
+    fn test_superset_empty_tenant_covers_only_default_deny_no_rules() {
+        let empty_tenant = NetworkPolicy::default();
+        let mut session = NetworkPolicy::default();
+        session.add_rule(NetworkPolicyRule::allow_http("api.example.com"));
+        // The tenant has no allow rule, so it covers nothing the session
+        // admits.
+        assert!(!empty_tenant.is_superset_of(&session));
+        // But it covers a default-deny session that names no host at all.
+        assert!(empty_tenant.is_superset_of(&NetworkPolicy::default()));
     }
 }

@@ -46,7 +46,7 @@ fn keys_have_full_length_and_do_not_repeat() {
 fn revoked_key_is_rejected() {
     let auth = AuthManager::new();
     let key = auth.create_key();
-    let id = auth.validate_api_key(&key).unwrap();
+    let (id, _) = auth.validate_api_key(&key).unwrap();
     assert!(auth.revoke(&id));
     assert!(auth.validate_api_key(&key).is_err());
     assert!(!auth.revoke(&id));
@@ -64,5 +64,5 @@ fn digests_roundtrip_through_export_and_import() {
     let id = KeyId::from_stored(records[0].0.clone());
     assert!(other
         .validate_api_key(&key)
-        .is_ok_and(|validated| validated == id));
+        .is_ok_and(|validated| validated.0 == id));
 }
