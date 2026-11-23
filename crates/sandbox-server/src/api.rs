@@ -2678,7 +2678,7 @@ async fn send_event(tx: &mut SocketTx, event: &ExecEvent) -> bool {
     let Ok(json) = serde_json::to_string(event) else {
         return false;
     };
-    futures::SinkExt::send(tx, Message::Text(json))
+    futures::SinkExt::send(tx, Message::Text(json.into()))
         .await
         .is_ok()
 }
