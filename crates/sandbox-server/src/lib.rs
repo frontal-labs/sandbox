@@ -16,6 +16,7 @@ pub mod persist;
 pub mod pg_store;
 pub mod pty;
 pub mod rate_limit;
+pub mod tls;
 
 pub use api::{
     create_router, create_router_with_options, create_router_with_python, create_router_with_state,

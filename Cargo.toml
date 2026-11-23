@@ -62,7 +62,7 @@ async-stream = "0.3"
 futures = "0.3"
 bytes = "1"
 http = "1"
-hyper = "1"
+hyper = { version = "1.1", features = ["http1"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 async-trait = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -83,7 +83,7 @@ prost-build = "0.14"
 tonic-prost-build = "0.14"
 tonic-prost = "0.14"
 tokio-stream = "0.1"
-hyper-util = "0.1"
+hyper-util = { version = "0.1", features = ["tokio"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 redb = "4"
 chrono = { version = "0.4", features = ["serde"] }
@@ -98,7 +98,9 @@ axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.5", features = ["limit", "timeout", "retry"] }
 utoipa = { version = "6", features = ["axum_extras", "chrono", "yaml"] }
 argon2 = { version = "0.6", features = ["rand_core"] }
-rustls = { version = "0.23", features = ["std"] }
+rustls = { version = "0.23", features = ["std", "ring"] }
+rustls-pemfile = "2"
+tokio-rustls = "0.26"
 ipnet = "2"
 seccompiler = "0.5"
 rustix = { version = "1.1", features = ["process", "fs", "net", "mount", "time"] }

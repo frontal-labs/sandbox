@@ -12,8 +12,8 @@ rate_limit_rps = 100
 
 [server.tls]
 enabled = false   # fronted by a TLS termination proxy in staging
-cert_file = ""
-key_file = ""
+cert = ""
+key = ""
 
 [server.telemetry]
 metrics_addr = "0.0.0.0:9090"

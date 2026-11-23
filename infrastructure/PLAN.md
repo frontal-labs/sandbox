@@ -119,7 +119,7 @@ Three service configs, each with a JSON Schema file under
 - `addr` (string, default `0.0.0.0:8080`)
 - `data_dir` (string, default `/var/lib/sandbox`)
 - `auth` { `api_key_hash` (string, optional), `rate_limit_rps` (u32) }
-- `tls` { `enabled` (bool), `cert_file`, `key_file` }
+- `tls` { `enabled` (bool), `cert`, `key`, `ca`, `require_client_auth` (bool) }
 - `telemetry` { `metrics_addr` (string, default `0.0.0.0:9090`),
   `otlp_endpoint` (string, optional), `service_name` (string, default `sandbox-server`) }
 - `scheduler` { `address` (string, default `127.0.0.1:50051`) }

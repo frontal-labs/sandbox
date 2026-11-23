@@ -34,13 +34,19 @@ toml = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 hyper = { workspace = true }
+hyper-util = { workspace = true }
+tower-service = "0.3"
 utoipa = { workspace = true }
 argon2 = { workspace = true }
 blake3 = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio-rustls = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
+reqwest = { workspace = true }
 sandbox-runtime = { path = "../sandbox-runtime" }
 tokio-tungstenite = "0.30"
 tower = { workspace = true, features = ["util"] }

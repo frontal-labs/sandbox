@@ -12,8 +12,8 @@ rate_limit_rps = 100
 
 [server.tls]
 enabled = true
-cert_file = "/etc/sandbox/tls/server.crt"
-key_file = "/etc/sandbox/tls/server.key"
+cert = "/etc/sandbox/tls/server.crt"
+key = "/etc/sandbox/tls/server.key"
 
 [server.telemetry]
 metrics_addr = "0.0.0.0:9090"
