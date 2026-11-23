@@ -190,7 +190,7 @@ async fn malformed_and_revoked_keys_are_refused() {
         StatusCode::UNAUTHORIZED
     );
 
-    let id = auth.validate_api_key(&key).unwrap();
+    let (id, _) = auth.validate_api_key(&key).unwrap();
     assert!(auth.revoke(&id));
     assert_eq!(
         send(app(auth.clone()), "POST", uri, Some(&key)).await,

@@ -115,6 +115,7 @@ fn state_of(sessions: Vec<SavedSession>) -> Saved {
         keys: vec![SavedKey {
             id: "k1".to_string(),
             digest: "digest".to_string(),
+            tenant: TenantId::nil(),
         }],
         snapshots: Vec::new(),
         templates: Vec::new(),

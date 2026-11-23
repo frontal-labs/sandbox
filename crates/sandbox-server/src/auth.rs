@@ -5,8 +5,14 @@
 //! kept, so a leaked store does not reveal usable keys. The secret has full
 //! entropy, so a fast hash is appropriate here; slow password hashing would
 //! only add per-request cost.
+//!
+//! Every key is bound to a [`TenantId`]: creating a key mints a tenant, and a
+//! key presented to the server authenticates as that tenant. Sessions a key
+//! opens belong to the key's tenant, whatever the request says. The binding is
+//! stored with the key's digest, so a leaked store still cannot reveal usable
+//! keys, and it cannot be re-pointed at another tenant.
 
-use sandbox_types::SandboxError;
+use sandbox_types::{SandboxError, TenantId};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -27,9 +33,17 @@ impl KeyId {
     }
 }
 
+/// A stored key record: the BLAKE3 digest of the secret and the tenant the key
+/// is bound to.
+#[derive(Debug, Clone)]
+struct KeyRecord {
+    digest: blake3::Hash,
+    tenant: TenantId,
+}
+
 #[derive(Default)]
 pub struct AuthManager {
-    keys: RwLock<HashMap<String, blake3::Hash>>,
+    keys: RwLock<HashMap<String, KeyRecord>>,
 }
 
 impl AuthManager {
@@ -37,8 +51,9 @@ impl AuthManager {
         Self::default()
     }
 
-    /// Creates a key and returns its plaintext. The plaintext is not stored
-    /// and cannot be recovered; the caller must hand it to the user now.
+    /// Creates a key bound to a freshly minted tenant and returns its plaintext.
+    /// The plaintext is not stored and cannot be recovered; the caller must hand
+    /// it to the user now.
     pub fn create_key(&self) -> String {
         let mut id_bytes = [0u8; 8];
         let mut secret_bytes = [0u8; 32];
@@ -52,13 +67,19 @@ impl AuthManager {
         self.keys
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(id.clone(), digest);
+            .insert(
+                id.clone(),
+                KeyRecord {
+                    digest,
+                    tenant: TenantId::new(),
+                },
+            );
 
         format!("{KEY_PREFIX}{id}_{secret}")
     }
 
-    /// Checks a presented key. Returns the key id on success.
-    pub fn validate_api_key(&self, api_key: &str) -> Result<KeyId, SandboxError> {
+    /// Checks a presented key. Returns the key id and the key's tenant on success.
+    pub fn validate_api_key(&self, api_key: &str) -> Result<(KeyId, TenantId), SandboxError> {
         let denied = || SandboxError::permission_denied("invalid API key");
 
         let body = api_key.strip_prefix(KEY_PREFIX).ok_or_else(denied)?;
@@ -68,27 +89,33 @@ impl AuthManager {
             .keys
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let stored = keys.get(id).copied().ok_or_else(denied)?;
+        let stored = keys.get(id).ok_or_else(denied)?;
 
         // blake3::Hash equality is constant-time, so a wrong secret leaks no
         // timing information about the stored digest.
-        if blake3::hash(secret.as_bytes()) == stored {
-            Ok(KeyId(id.to_string()))
+        if blake3::hash(secret.as_bytes()) == stored.digest {
+            Ok((KeyId(id.to_string()), stored.tenant))
         } else {
             Err(denied())
         }
     }
 
-    /// The stored key records as (id, hex digest). Digests only, so the result
-    /// cannot be used to authenticate.
-    pub fn export_digests(&self) -> Vec<(String, String)> {
+    /// The stored key records as (id, hex digest, tenant). Digests only, so the
+    /// result cannot be used to authenticate.
+    pub fn export_digests(&self) -> Vec<(String, String, String)> {
         let keys = self
             .keys
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut out: Vec<(String, String)> = keys
+        let mut out: Vec<(String, String, String)> = keys
             .iter()
-            .map(|(id, digest)| (id.clone(), digest.to_hex().to_string()))
+            .map(|(id, record)| {
+                (
+                    id.clone(),
+                    record.digest.to_hex().to_string(),
+                    record.tenant.to_string(),
+                )
+            })
             .collect();
         out.sort();
         out
@@ -96,12 +123,15 @@ impl AuthManager {
 
     /// Loads key records exported by `export_digests`. Keys already present are
     /// replaced.
-    pub fn import_digests(&self, records: &[(String, String)]) -> Result<(), SandboxError> {
+    pub fn import_digests(&self, records: &[(String, String, String)]) -> Result<(), SandboxError> {
         let mut parsed = Vec::with_capacity(records.len());
-        for (id, digest) in records {
+        for (id, digest, tenant) in records {
             let digest = blake3::Hash::from_hex(digest)
                 .map_err(|_| SandboxError::internal(format!("key {id} has a damaged digest")))?;
-            parsed.push((id.clone(), digest));
+            let tenant: TenantId = tenant
+                .parse()
+                .map_err(|_| SandboxError::internal(format!("key {id} has a damaged tenant id")))?;
+            parsed.push((id.clone(), KeyRecord { digest, tenant }));
         }
         let mut keys = self
             .keys

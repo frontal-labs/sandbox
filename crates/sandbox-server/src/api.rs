@@ -136,6 +136,11 @@ pub struct AppState {
     pub(crate) max_sessions_total: usize,
     /// Maximum snapshots across all keys. Configurable via `SANDBOX_MAX_SNAPSHOTS_TOTAL`.
     pub(crate) max_snapshots_total: usize,
+    /// The network policy every tenant's sessions fit inside (PLAN §multi-tenancy).
+    /// A session's `NetworkPolicy` must not admit a (host, port) the tenant policy does
+    /// not; it is checked at creation. Defaults to [`NetworkPolicy::allow_all`], which
+    /// imposes no tenant restriction, so an unconfigured server behaves as before.
+    pub tenant_network: NetworkPolicy,
 }
 
 /// A snapshot taken through the API. Only the key that took it can see it, and
@@ -1001,9 +1006,11 @@ async fn require_api_key(
     };
 
     match state.auth.validate_api_key(key) {
-        Ok(id) => {
+        Ok((id, tenant)) => {
             tracing::debug!(key_id = %KeyId::as_str(&id), "request authenticated");
             request.extensions_mut().insert(id);
+            // The key's tenant, not one the caller may choose per request.
+            request.extensions_mut().insert(tenant);
             next.run(request).await
         }
         Err(_) => StatusCode::UNAUTHORIZED.into_response(),
@@ -1156,6 +1163,7 @@ fn router_with_options(
         max_snapshots_total: crate::config::env_str("SANDBOX_MAX_SNAPSHOTS_TOTAL")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_MAX_SNAPSHOTS_TOTAL),
+        tenant_network: NetworkPolicy::allow_all(),
     };
     (build_router(state.clone()), state)
 }
@@ -1337,10 +1345,10 @@ async fn attach_store(
     let new_key = if saved.keys.is_empty() {
         Some(auth.create_key())
     } else {
-        let records: Vec<(String, String)> = saved
+        let records: Vec<(String, String, String)> = saved
             .keys
             .iter()
-            .map(|k| (k.id.clone(), k.digest.clone()))
+            .map(|k| (k.id.clone(), k.digest.clone(), k.tenant.to_string()))
             .collect();
         auth.import_digests(&records)?;
         None
@@ -1373,6 +1381,7 @@ async fn attach_store(
         max_snapshots_total: crate::config::env_str("SANDBOX_MAX_SNAPSHOTS_TOTAL")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_MAX_SNAPSHOTS_TOTAL),
+        tenant_network: NetworkPolicy::allow_all(),
     };
     restore(&state, saved).await?;
     persist(&state).await.map_err(|e| e.into_inner())?;
@@ -1486,7 +1495,11 @@ async fn capture(state: &AppState) -> Result<crate::persist::Saved, SandboxError
         .auth
         .export_digests()
         .into_iter()
-        .map(|(id, digest)| SavedKey { id, digest })
+        .map(|(id, digest, tenant)| SavedKey {
+            id,
+            digest,
+            tenant: tenant.parse().unwrap_or_default(),
+        })
         .collect();
     let snapshots = {
         let records = state.snapshots.records.read().await;
@@ -1824,19 +1837,30 @@ async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
 pub async fn create_session(
     State(state): State<AppState>,
     Extension(owner): Extension<KeyId>,
+    // The tenant is the key's, from the auth middleware. A `tenant_id` in the
+    // body would let a key open sessions under someone else's tenant; it is
+    // ignored, so the field stays for wire compatibility.
+    Extension(tenant): Extension<TenantId>,
     Json(config): Json<SessionConfig>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
     refuse_unenforced(&config, state.vm.is_some())?;
     // Validate the requested limits before any allocation. A zeroed limit is a
     // misconfiguration the caller must fix, not a quota to be exhausted.
     validate_session_limits(&config.limits)?;
+    // A session may not admit a (host, port) its tenant has not admitted
+    // (PLAN §multi-tenancy, item 4). Checked before any allocation.
+    if !state.tenant_network.is_superset_of(&config.network) {
+        return Err(SandboxError::invalid_argument(
+            "session network policy exceeds the tenant's admitted network policy",
+        )
+        .into());
+    }
     if config.checkpoint_retain == 0 || config.checkpoint_retain > MAX_CHECKPOINT_RETAIN {
         return Err(SandboxError::invalid_argument(format!(
             "checkpoint_retain must be between 1 and {MAX_CHECKPOINT_RETAIN}"
         ))
         .into());
     }
-    let tenant_id = config.tenant_id;
     let labels = config.labels.clone();
     let limits = config.limits.clone();
     let network = config.network.clone();
@@ -1883,7 +1907,7 @@ pub async fn create_session(
     let mut entry = entry(
         owner.clone(),
         session.clone(),
-        tenant_id,
+        tenant,
         labels,
         limits.clone(),
         config.tier_preference != TierPreference::Isolate,
@@ -3559,6 +3583,9 @@ async fn wake_parked(
 pub async fn fork_snapshot(
     State(state): State<AppState>,
     Extension(owner): Extension<KeyId>,
+    // The key's tenant, from the auth middleware. The children belong to it,
+    // like the key's other sessions.
+    Extension(tenant): Extension<TenantId>,
     Path(id): Path<String>,
     Json(request): Json<ForkRequest>,
 ) -> Result<Json<ForkResponse>, ApiError> {
@@ -3581,7 +3608,7 @@ pub async fn fork_snapshot(
         let mut entry = entry(
             owner.clone(),
             session.clone(),
-            TenantId::nil(),
+            tenant,
             HashMap::new(),
             record.limits.clone(),
             record.allow_vm,
@@ -4010,6 +4037,8 @@ async fn fork_locked(
         return Err(SandboxError::invalid_argument("argv must not be empty").into());
     }
     let owner = &own.owner;
+    // The children belong to the parent's tenant.
+    let tenant = own.state.tenant_id;
     // The children start from the current state, which is pinned first.
     let newest = checkpoint_now(state, owner, own.state.id, &own.session).await?;
     let mut children = Vec::with_capacity(count as usize);
@@ -4021,7 +4050,7 @@ async fn fork_locked(
         let mut entry = entry(
             owner.clone(),
             child.clone(),
-            TenantId::nil(),
+            tenant,
             HashMap::new(),
             own.limits.clone(),
             own.state.allow_vm,

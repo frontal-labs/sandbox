@@ -6,7 +6,7 @@
 
 use sandbox_server::persist::{Saved, SavedKey, VERSION};
 use sandbox_server::pg_store::PgStore;
-use sandbox_types::ErrorCode;
+use sandbox_types::{ErrorCode, TenantId};
 
 /// The tests share one table, so they run one at a time.
 static DATABASE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -22,6 +22,7 @@ fn state_with_key(id: &str) -> Saved {
         keys: vec![SavedKey {
             id: id.to_string(),
             digest: "00".repeat(32),
+            tenant: TenantId::nil(),
         }],
         ..Saved::default()
     }
