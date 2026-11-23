@@ -23,6 +23,8 @@ pub enum ConfigError {
         #[source]
         source: toml::de::Error,
     },
+    #[error("invalid value for {key}: {value} (expected \"true\" or \"false\")")]
+    InvalidBool { key: String, value: String },
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -227,7 +229,7 @@ pub fn load(path: Option<&Path>) -> Result<ResolvedServeConfig, ConfigError> {
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "config file not found"),
         });
     }
-    apply_env(&mut resolved);
+    apply_env(&mut resolved)?;
     Ok(resolved)
 }
 
@@ -285,7 +287,7 @@ pub fn env_str(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
-fn apply_env(resolved: &mut ResolvedServeConfig) {
+fn apply_env(resolved: &mut ResolvedServeConfig) -> Result<(), ConfigError> {
     if let Some(v) = env_str("SANDBOX_SERVER_ADDR") {
         resolved.addr = v;
     }
@@ -342,8 +344,19 @@ fn apply_env(resolved: &mut ResolvedServeConfig) {
         resolved.tls.ca = Some(expand_tilde(&v));
     }
     if let Some(v) = env_str("SANDBOX_TLS_REQUIRE_CLIENT_AUTH") {
-        resolved.tls.require_client_auth = v == "true" || v == "1";
+        let parsed = match v.as_str() {
+            "true" => true,
+            "false" => false,
+            other => {
+                return Err(ConfigError::InvalidBool {
+                    key: "SANDBOX_TLS_REQUIRE_CLIENT_AUTH".to_string(),
+                    value: other.to_string(),
+                })
+            }
+        };
+        resolved.tls.require_client_auth = parsed;
     }
+    Ok(())
 }
 
 pub fn telemetry_from_resolved(resolved: &ResolvedServeConfig) -> Option<SpanExporter> {

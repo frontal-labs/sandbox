@@ -252,3 +252,50 @@ fn rate_limit_not_in_ignored_security_settings() {
         "rate_limit should not be listed as ignored: {warnings:?}"
     );
 }
+
+#[test]
+fn tls_require_client_auth_env_true() {
+    let _g = env_lock().lock().expect("lock");
+    clear_env();
+    std::env::set_var("SANDBOX_TLS_REQUIRE_CLIENT_AUTH", "true");
+    let resolved = load(None).expect("defaults");
+    clear_env();
+    assert!(resolved.tls.require_client_auth);
+}
+
+#[test]
+fn tls_require_client_auth_env_false() {
+    let _g = env_lock().lock().expect("lock");
+    clear_env();
+    std::env::set_var("SANDBOX_TLS_REQUIRE_CLIENT_AUTH", "false");
+    let resolved = load(None).expect("defaults");
+    clear_env();
+    assert!(!resolved.tls.require_client_auth);
+}
+
+#[test]
+fn tls_require_client_auth_env_invalid_value_is_error() {
+    let _g = env_lock().lock().expect("lock");
+    clear_env();
+    std::env::set_var("SANDBOX_TLS_REQUIRE_CLIENT_AUTH", "yes");
+    let err = load(None).unwrap_err();
+    clear_env();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("SANDBOX_TLS_REQUIRE_CLIENT_AUTH"),
+        "error names the variable: {msg}"
+    );
+    assert!(msg.contains("yes"), "error names the bad value: {msg}");
+}
+
+#[test]
+fn tls_require_client_auth_env_invalid_zero_is_error() {
+    // "0" used to silently mean false; now it's an explicit error so a
+    // typo cannot disable client authentication.
+    let _g = env_lock().lock().expect("lock");
+    clear_env();
+    std::env::set_var("SANDBOX_TLS_REQUIRE_CLIENT_AUTH", "0");
+    let err = load(None).unwrap_err();
+    clear_env();
+    assert!(matches!(err, ConfigError::InvalidBool { .. }));
+}

@@ -55,7 +55,6 @@ fn generate_self_signed() -> (std::path::PathBuf, std::path::PathBuf, std::path:
 
 #[tokio::test]
 async fn tls_serves_and_rejects_plaintext() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
     let (cert, key, _ca) = generate_self_signed();
 
     let cfg = TlsConfig {
