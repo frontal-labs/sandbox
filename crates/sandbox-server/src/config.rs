@@ -39,7 +39,7 @@ pub struct ServerSection {
     pub addr: Option<String>,
     pub data_dir: Option<String>,
     pub auth: Table,
-    pub tls: Table,
+    pub tls: TlsSection,
     pub telemetry: TelemetrySection,
     pub scheduler: Table,
     pub rate_limit: Option<RateLimitSection>,
@@ -50,6 +50,18 @@ pub struct ServerSection {
 pub struct RateLimitSection {
     /// Maximum requests per key per second. `0` disables limiting.
     pub requests_per_second: Option<u64>,
+}
+
+/// Parsed contents of the `[server.tls]` table.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct TlsSection {
+    pub enabled: bool,
+    pub cert: Option<String>,
+    pub key: Option<String>,
+    /// CA bundle used to verify client certificates (mTLS).
+    pub ca: Option<String>,
+    pub require_client_auth: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -130,6 +142,8 @@ pub struct ResolvedServeConfig {
     pub max_snapshots_total: usize,
     /// Maximum requests per key per second. `0` disables limiting.
     pub rate_limit_rps: Option<u64>,
+    /// TLS termination settings for the HTTP listener.
+    pub tls: crate::tls::TlsConfig,
 }
 
 impl std::fmt::Debug for ResolvedServeConfig {
@@ -150,22 +164,14 @@ impl std::fmt::Debug for ResolvedServeConfig {
             .field("max_sessions_total", &self.max_sessions_total)
             .field("max_snapshots_total", &self.max_snapshots_total)
             .field("rate_limit_rps", &self.rate_limit_rps)
+            .field("tls", &self.tls)
             .finish()
     }
 }
 
-/// Security settings the file asks for that the server does not implement. An
-/// operator who sets `tls.enabled = true` would otherwise believe the server
-/// speaks TLS while it serves plaintext.
+/// Security settings the file asks for that the server does not implement.
 pub fn ignored_security_settings(file: &ServerConfigFile) -> Vec<String> {
     let mut out = Vec::new();
-    if file.server.tls.get("enabled").and_then(|v| v.as_bool()) == Some(true) {
-        out.push(
-            "[server.tls] enabled = true is not implemented: the server listens in plaintext. \
-             Terminate TLS in a reverse proxy or load balancer."
-                .to_string(),
-        );
-    }
     if !file.server.auth.is_empty() {
         out.push(
             "[server.auth] settings (such as api_key_hash) are not \
@@ -191,6 +197,7 @@ impl Default for ResolvedServeConfig {
             max_sessions_total: 20_000,
             max_snapshots_total: 20_000,
             rate_limit_rps: None,
+            tls: crate::tls::TlsConfig::default(),
         }
     }
 }
@@ -238,7 +245,7 @@ fn nonempty(s: &Option<String>) -> Option<String> {
         .and_then(|v| if v.is_empty() { None } else { Some(v.clone()) })
 }
 
-fn apply_file(resolved: &mut ResolvedServeConfig, file: &ServerConfigFile) {
+pub fn apply_file(resolved: &mut ResolvedServeConfig, file: &ServerConfigFile) {
     if let Some(addr) = &file.server.addr {
         resolved.addr = addr.clone();
     }
@@ -265,7 +272,16 @@ fn apply_file(resolved: &mut ResolvedServeConfig, file: &ServerConfigFile) {
     {
         resolved.rate_limit_rps = Some(rps);
     }
+    resolved.tls = crate::tls::TlsConfig {
+        enabled: file.server.tls.enabled,
+        cert: file.server.tls.cert.as_deref().map(expand_tilde),
+        key: file.server.tls.key.as_deref().map(expand_tilde),
+        ca: file.server.tls.ca.as_deref().map(expand_tilde),
+        require_client_auth: file.server.tls.require_client_auth,
+    };
 }
+
+
 
 pub fn env_str(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
@@ -317,6 +333,18 @@ fn apply_env(resolved: &mut ResolvedServeConfig) {
         if let Ok(n) = v.parse() {
             resolved.rate_limit_rps = Some(n);
         }
+    }
+    if let Some(v) = env_str("SANDBOX_TLS_CERT") {
+        resolved.tls.cert = Some(expand_tilde(&v));
+    }
+    if let Some(v) = env_str("SANDBOX_TLS_KEY") {
+        resolved.tls.key = Some(expand_tilde(&v));
+    }
+    if let Some(v) = env_str("SANDBOX_TLS_CA") {
+        resolved.tls.ca = Some(expand_tilde(&v));
+    }
+    if let Some(v) = env_str("SANDBOX_TLS_REQUIRE_CLIENT_AUTH") {
+        resolved.tls.require_client_auth = v == "true" || v == "1";
     }
 }
 

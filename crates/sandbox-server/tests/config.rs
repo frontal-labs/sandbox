@@ -23,6 +23,11 @@ fn clear_env() {
         "SANDBOX_SCHEDULER_IDLE_SLEEP_AFTER_SECONDS",
         "SANDBOX_OBJECT_STORE_BUCKET",
         "SANDBOX_OBJECT_STORE_ENDPOINT",
+        "SANDBOX_RATE_LIMIT_RPS",
+        "SANDBOX_TLS_CERT",
+        "SANDBOX_TLS_KEY",
+        "SANDBOX_TLS_CA",
+        "SANDBOX_TLS_REQUIRE_CLIENT_AUTH",
         "HOME",
     ] {
         std::env::remove_var(k);
@@ -104,23 +109,66 @@ fn debug_output_hides_the_database_password() {
 }
 
 #[test]
-fn unimplemented_tls_and_auth_settings_are_reported() {
+fn unimplemented_auth_settings_are_reported() {
     let file: ServerConfigFile = toml::from_str(
-        "[server.tls]\nenabled = true\ncert_file = \"/c\"\n\
-         [server.auth]\nrate_limit_rps = 100\n",
+        "[server.auth]\nrate_limit_rps = 100\n",
     )
     .expect("parses");
     let warnings = ignored_security_settings(&file);
-    assert_eq!(warnings.len(), 2, "{warnings:?}");
-    assert!(warnings[0].contains("plaintext"));
-    assert!(warnings[1].contains("[server.auth]"));
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("[server.auth]"));
 }
 
 #[test]
-fn disabled_tls_and_empty_auth_report_nothing() {
+fn tls_is_not_reported_when_configured() {
+    // TLS is implemented now; enabling it must not be flagged as ignored.
+    let file: ServerConfigFile = toml::from_str(
+        "[server.tls]\nenabled = true\ncert = \"/c\"\nkey = \"/k\"\n",
+    )
+    .expect("parses");
+    assert!(ignored_security_settings(&file).is_empty());
+    let mut resolved = ResolvedServeConfig::default();
+    sandbox_server::config::apply_file(&mut resolved, &file);
+    assert!(resolved.tls.enabled);
+    assert_eq!(resolved.tls.cert.as_deref(), Some(std::path::Path::new("/c")));
+}
+
+#[test]
+fn disabled_tls_reports_nothing() {
     let file: ServerConfigFile = toml::from_str("[server.tls]\nenabled = false\n").expect("parses");
     assert!(ignored_security_settings(&file).is_empty());
     assert!(ignored_security_settings(&ServerConfigFile::default()).is_empty());
+}
+
+#[test]
+fn tls_defaults_to_disabled() {
+    let mut resolved = ResolvedServeConfig::default();
+    sandbox_server::config::apply_file(&mut resolved, &ServerConfigFile::default());
+    assert!(!resolved.tls.enabled);
+    assert!(resolved.tls.cert.is_none());
+    assert!(!resolved.tls.require_client_auth);
+}
+
+#[test]
+fn tls_unknown_field_is_rejected() {
+    // A typo in `cert` must be a config error, not silently plaintext.
+    let err = toml::from_str::<ServerConfigFile>(
+        "[server.tls]\nenabled = true\ncert = \"/c\"\nkey = \"/k\"\ncertfile = \"/x\"\n",
+    )
+    .expect_err("unknown tls field must fail");
+    assert!(err.to_string().contains("certfile"), "error names the typo: {err}");
+}
+
+#[test]
+fn tls_client_auth_parses_ca() {
+    let file: ServerConfigFile = toml::from_str(
+        "[server.tls]\nenabled = true\ncert = \"/c\"\nkey = \"/k\"\nca = \"/ca\"\nrequire_client_auth = true\n",
+    )
+    .expect("parses");
+    let mut resolved = ResolvedServeConfig::default();
+    sandbox_server::config::apply_file(&mut resolved, &file);
+    assert!(resolved.tls.require_client_auth);
+    assert_eq!(resolved.tls.ca.as_deref(), Some(std::path::Path::new("/ca")));
 }
 
 #[test]

@@ -408,6 +408,7 @@ impl Cli {
                     resolved.idle_sleep_secs,
                     resolved.database_url.as_deref(),
                     resolved.rate_limit_rps,
+                    resolved.tls.clone(),
                     sandbox_server::ServerOptions {
                         vm,
                         python,
@@ -687,6 +688,7 @@ fn serve(
     idle_sleep_secs: u64,
     database_url: Option<&str>,
     rate_limit_rps: Option<u64>,
+    tls: sandbox_server::tls::TlsConfig,
     options: sandbox_server::ServerOptions,
 ) -> Result<i32, SandboxError> {
     use std::sync::Arc;
@@ -762,7 +764,7 @@ fn serve(
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| SandboxError::unavailable(format!("binding {addr}: {e}")))?;
-        eprintln!("sandbox server listening on {addr}");
+        eprintln!("sandbox server listening on {addr} (tls: {})", tls.enabled);
         if let Some(dir) = data_dir {
             eprintln!("state directory: {}", dir.display());
         }
@@ -772,9 +774,18 @@ fn serve(
         if let Some(key) = &new_key {
             eprintln!("API key (shown once): {key}");
         }
-        axum::serve(listener, app)
-            .await
-            .map_err(|e| SandboxError::unavailable(format!("server stopped: {e}")))
+        if tls.enabled {
+            let acceptor = tls
+                .acceptor()
+                .map_err(|e| SandboxError::unavailable(format!("TLS setup failed: {e}")))?;
+            sandbox_server::tls::serve(listener, Some(acceptor), app)
+                .await
+                .map_err(|e| SandboxError::unavailable(format!("server stopped: {e}")))
+        } else {
+            axum::serve(listener, app)
+                .await
+                .map_err(|e| SandboxError::unavailable(format!("server stopped: {e}")))
+        }
     })?;
     Ok(0)
 }
