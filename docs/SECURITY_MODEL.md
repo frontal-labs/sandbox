@@ -1,6 +1,6 @@
 # Security Model
 
-Last verified against the source tree on 2026-11-21.
+Last verified against the source tree on 2026-11-23.
 
 **Status: pre-alpha. Nothing in this repository is a security boundary yet.** No external security review has been performed — see [SECURITY_REVIEW.md](SECURITY_REVIEW.md). The layers below describe the intended design from the project specification section 5. Each item is marked as:
 
@@ -8,14 +8,14 @@ Last verified against the source tree on 2026-11-21.
 - **Partial**: code exists, but it is not enforced or not reachable from the public API.
 - **Planned**: no code, or only a placeholder.
 
-Do not run untrusted code on this codebase, and do not expose the server to untrusted clients. Session, exec, and filesystem handlers run against in-memory sessions. Requests need a valid API key, but key provisioning, TLS, and rate limiting are not implemented (see Authentication).
+Do not run untrusted code on this codebase, and do not expose the server to untrusted clients. Session, exec, and filesystem handlers run against in-memory sessions. Requests need a valid API key; TLS termination with optional mTLS, per-API-key rate limiting, and key-to-tenant binding are implemented (see Authentication).
 
 ## Assumptions
 
 These assumptions are explicit so they can be checked as the code changes.
 
-1. **Single-tenant development only today.** No tenant isolation is enforced. The `TenantId` field exists in `SessionConfig`, but nothing uses it for isolation.
-2. **Isolates are not a security boundary on their own.** The project specification invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, and on Linux that process has namespaces, a seccomp allowlist, `NO_NEW_PRIVS`, and cgroup v2 limits (ADR 0022). The allowlist permits only the syscalls a worker needs; everything else — including the usual escape routes such as ptrace, mount, and namespace manipulation — fails with `EPERM`. The V8, WASM, and shell tiers have hostile-input escape suites (`crates/sandbox-{runtime,wasm,shell}/tests/escape.rs`) that pass; the Linux-only OS-level tier is still not covered by an escape suite, and those layers do not exist on macOS.
+1. **Multi-tenant by key.** Each API key is bound to a `TenantId` minted at key creation (1 key = 1 tenant). Sessions inherit the key's tenant; a request body's `tenant_id` is ignored server-side. Per-tenant session bounds and a tenant network policy ceiling (`NetworkPolicy::is_superset_of`) are enforced at session admission. VFS and CAS are namespaced by design: a tenant cannot obtain a foreign root hash through its own VFS. Per-tenant compute quotas (memory/CPU) are not implemented — that is a server-wide config and worker-protocol change.
+2. **Isolates are not a security boundary on their own.** The project specification invariant 5 says one OS process per tenant. `sandbox-worker` runs each session in its own child process, and on Linux that process has namespaces, a seccomp allowlist, `NO_NEW_PRIVS`, and cgroup v2 limits (ADR 0022). The allowlist permits only the syscalls a worker needs; everything else — including the usual escape routes such as ptrace, mount, and namespace manipulation — fails with `EPERM`. The V8, WASM, and shell tiers have hostile-input escape suites (`crates/sandbox-{runtime,wasm,shell}/tests/escape.rs`) that pass; the Linux-only OS-level tier is covered by `crates/sandbox-worker/tests/escape_linux.rs` (`#[cfg(target_os = "linux")]`, runs in the regular CI `cargo test --workspace` job on Linux). Those layers do not exist on macOS.
 3. **Untrusted code is assumed to attempt host access, network exfiltration, resource exhaustion, and sandbox escape.** Each layer below is designed against those attempts.
 4. **The host operating system and QEMU/KVM are trusted** in the design. Tier 2 relies on them when enabled; QEMU with KVM is the hardware boundary, and `Accel::Tcg` is not.
 5. **Dependencies (V8 via `deno_core`, `wasmtime`) are trusted only after review and version pinning.** The workspace pins versions in `Cargo.toml`, and the `supply-chain` CI job runs `cargo-deny` (licenses, advisories, sources) and `cargo audit --deny warnings` on every PR and main push. An advisory database of accepted exceptions lives in `.cargo/audit.toml`.
@@ -27,7 +27,7 @@ Layers, outermost first (project specification section 5):
 | # | Layer | Status | Where |
 |---|-------|--------|-------|
 | 1 | Hardware boundary: QEMU microVM (KVM or TCG) | Partial | `crates/sandbox-vmm/src/qemu.rs` boots a real guest; `sandbox-promote::promote_to_vm` is used for `vm`-tier sessions; not the default tier, and TCG is not a boundary |
-| 2 | Per-tenant OS process: seccomp, cgroups, namespaces, `NO_NEW_PRIVS` | Partial (Linux) | `crates/sandbox-worker/src/isolation.rs` applies namespaces and a seccomp allowlist in the child, and sets cgroup v2 limits from the host. Each layer fails closed. Tests run on Linux (`cli/tests/worker_isolation.rs`). Off Linux, only the unisolated worker starts. |
+| 2 | Per-tenant OS process: seccomp, cgroups, namespaces, `NO_NEW_PRIVS` | Implemented (Linux) | `crates/sandbox-worker/src/isolation.rs` applies namespaces and a seccomp allowlist in the child, and sets cgroup v2 limits from the host. Each layer fails closed. `cli/tests/worker_isolation.rs` and `crates/sandbox-worker/tests/escape_linux.rs` (OS-level escape probes) verify it from outside the process. Off Linux, only the unisolated worker starts. |
 | 3 | V8 isolate / wasmtime store: memory and CPU caps | Partial | V8: wall-clock watchdog, heap cap, fresh isolate per run. WASM: fuel and a linear-memory cap per run. |
 | 4 | Capability operations: each host access checks policy | Partial | Policy helpers in `crates/sandbox-policy`; not called from runtime, shell, or server |
 
@@ -37,9 +37,9 @@ Planned: a microVM per session, launched by the VMM. KVM acceleration requires `
 
 Current state: `crates/sandbox-vmm` runs QEMU as the Tier 2 driver (`QemuVm`, with `Accel::Tcg` or `Accel::Kvm`), waits for the guest agent before handing the guest out, and holds a warm pool (`VmPool`). `crates/sandbox-promote` implements `promote_to_vm`, and the server uses it for sessions created with the `vm` tier preference. The earlier Firecracker driver and jailer were scaffolding and were removed (T-05).
 
-## Layer 2: Per-tenant process (planned)
+## Layer 2: Per-tenant process
 
-Built on Linux: one worker process per session, with `NO_NEW_PRIVS` and a seccomp-bpf allowlist (`seccompiler`), namespaces (network, IPC, UTS, and a private mount tree), and cgroup v2 limits set from the host. The host needs a delegated cgroup in `SANDBOX_CGROUP_ROOT` (ADR 0022). The allowlist is the more secure posture: an unknown syscall is denied, so the set of permitted calls is exactly the one in `allowed_syscalls`. `install_seccomp_allowlist` is called from `enter` when `Isolation.seccomp` is set.
+Built on Linux: one worker process per session, with `NO_NEW_PRIVS` and a seccomp-bpf allowlist (`seccompiler`), namespaces (network, IPC, UTS, and a private mount tree), and cgroup v2 limits set from the host. The host needs a delegated cgroup in `SANDBOX_CGROUP_ROOT` (ADR 0022). The allowlist is the more secure posture: an unknown syscall is denied, so the set of permitted calls is exactly the one in `allowed_syscalls`. `install_seccomp_allowlist` is called from `enter` when `Isolation.seccomp` is set. The OS-level escape probes in `crates/sandbox-worker/tests/escape_linux.rs` verify the kernel-side tier: ptrace, mount, namespace manipulation, and seccomp denial are probed from outside the child and expected to fail.
 
 Current state: `crates/sandbox-worker/src/worker.rs` spawns the `sandbox worker --socket` subcommand as a child process with the isolation flags, and serves gRPC over a Unix socket in a directory the host creates with mode `0700`. Guest output is data in the reply, not a shared stream. A crashed child returns `Unavailable` to the host. `crates/sandbox-worker/src/isolation.rs` holds the namespace, seccomp, and cgroup code.
 
@@ -107,11 +107,12 @@ Planned (project specification section 4.7): an in-process HTTP client that is t
 
 ## Authentication and authorization
 
-- `crates/sandbox-server/src/auth.rs`: keys are `sbx_<id>_<secret>` with 256-bit secrets and 64-bit ids drawn from the OS random source (through the `uuid` v4 generator, whose fixed version bits are skipped). Until this refresh they came from a clock-seeded counter, which was predictable, so keys minted by an earlier build should be treated as compromised and replaced. If the OS source is unavailable, key creation panics instead of using a weak source. Only a BLAKE3 digest of the secret is stored, and comparison uses `blake3::Hash` equality. `AuthManager::revoke` exists, but no route exposes it, so a leaked key cannot be revoked without wiping the stored key state.
-- `crates/sandbox-server/src/api.rs`: `require_api_key` is a `route_layer` on every `/v1` route. It returns 401 unless the bearer key validates.
-- Still planned (project specification section 4.15): per-key scopes, quotas, key provisioning, and OIDC.
+- `crates/sandbox-server/src/auth.rs`: keys are `sbx_<id>_<secret>` with 256-bit secrets and 64-bit ids drawn from the OS random source (through the `uuid` v4 generator, whose fixed version bits are skipped). Until this refresh they came from a clock-seeded counter, which was predictable, so keys minted by an earlier build should be treated as compromised and replaced. If the OS source is unavailable, key creation panics instead of using a weak source. Only a BLAKE3 digest of the secret is stored, and comparison uses `blake3::Hash` equality. Each key is bound to a `TenantId` minted at creation (`KeyRecord { digest, tenant }`); `validate_api_key` returns `(KeyId, TenantId)`. `AuthManager::revoke` exists, but no route exposes it, so a leaked key cannot be revoked without wiping the stored key state.
+- `crates/sandbox-server/src/api.rs`: `require_api_key` is a `route_layer` on every `/v1` route. It returns 401 unless the bearer key validates, and inserts both `KeyId` and `TenantId` into the request extensions. `create_session` and `fork_snapshot` take the tenant from the extension; a request body's `tenant_id` is ignored server-side (untrusted). Per-tenant session bounds: `MAX_SESSIONS_PER_TENANT` (256) and `MAX_SESSIONS_PER_KEY` (64, hit first with the 1-key-1-tenant model) are checked in `admit_session`.
+- **TLS termination.** `crates/sandbox-server/src/tls.rs` terminates TLS on the listen socket with `rustls`. The cert and key come from `SANDBOX_TLS_CERT` / `SANDBOX_TLS_KEY` (PEM); optional mTLS via `SANDBOX_TLS_CA` + `SANDBOX_TLS_REQUIRE_CLIENT_AUTH=true` (strict `true`/`false`). The default bind is plaintext; enable TLS before exposing the server to untrusted clients.
+- **Per-API-key rate limiting.** A fixed-window middleware in `crates/sandbox-server/src/api.rs` limits each key to `rate_limit_rps` requests per second (default 200; `0` disables). Excess requests get `429` with a `Retry-After` header (milliseconds) and a JSON body.
+- Still planned (project specification section 4.15): per-key scopes, key provisioning, and OIDC.
 - `crates/sandbox-server/src/middleware.rs` adds a request ID and logs requests. It does not authenticate them.
-- The server listens in plaintext. `[server.tls]` and `[server.auth]` in the TOML config (ADR 0036) are accepted but not implemented, and loading a file that sets `tls.enabled = true` or any `[server.auth]` value logs a warning. The default bind address is `0.0.0.0:8080`. Put the server behind a TLS-terminating proxy and do not expose it directly.
 - `/v1/gc` and `/metrics` need only some valid key. Any tenant can trigger the global collection, which takes every session's gate, at most once a minute. There is no admin role yet.
 
 ## Trace and audit
@@ -135,7 +136,7 @@ The project specification section 5 lists these. Some are done, and the rest are
 - [x] Threat model document: `docs/THREAT_MODEL.md`
 - [ ] External security review of the worker and VMM — **not yet performed** (see [SECURITY_REVIEW.md](SECURITY_REVIEW.md))
 - [x] Fuzz targets: shell parser, VFS path handling, WASI fs shim, guest protocol decoder (`cargo-fuzz`). All four are in `fuzz/` (see DEVELOPMENT.md). The guest protocol target covers the wire frames and the generated messages; the guest agent itself does not exist yet, and the 24 h run that PLAN §9 M4 asks for has not been done
-- [ ] Escape tests: host file reads, metadata IP reachability, memory/CPU/inode/PID exhaustion, fork-bomb equivalents, symlink races, zip bombs
+- [x] Escape tests: the V8, WASM, and shell tiers have hostile-input escape suites (`crates/sandbox-{runtime,wasm,shell}/tests/escape.rs`) that pass natively and in the Linux Docker harness. The OS-level containment tier — `crates/sandbox-worker/tests/escape_linux.rs` — is `#[cfg(target_os = "linux")]` and probes ptrace, mount, namespace manipulation, and seccomp denial from outside the child
 - [ ] Never share a V8 heap or wasmtime store across tenants
 - [ ] Pin and track V8, wasmtime, and QEMU CVEs; automate dependency updates
 - [x] `cargo-deny` and `cargo-audit` in CI (the `supply-chain` job; see above)
