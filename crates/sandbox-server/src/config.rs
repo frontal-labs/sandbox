@@ -42,6 +42,14 @@ pub struct ServerSection {
     pub tls: Table,
     pub telemetry: TelemetrySection,
     pub scheduler: Table,
+    pub rate_limit: Option<RateLimitSection>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct RateLimitSection {
+    /// Maximum requests per key per second. `0` disables limiting.
+    pub requests_per_second: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -120,6 +128,8 @@ pub struct ResolvedServeConfig {
     pub max_sessions_total: usize,
     /// Maximum snapshots the server holds across all keys.
     pub max_snapshots_total: usize,
+    /// Maximum requests per key per second. `0` disables limiting.
+    pub rate_limit_rps: Option<u64>,
 }
 
 impl std::fmt::Debug for ResolvedServeConfig {
@@ -139,6 +149,7 @@ impl std::fmt::Debug for ResolvedServeConfig {
             .field("python_artifacts", &self.python_artifacts)
             .field("max_sessions_total", &self.max_sessions_total)
             .field("max_snapshots_total", &self.max_snapshots_total)
+            .field("rate_limit_rps", &self.rate_limit_rps)
             .finish()
     }
 }
@@ -157,7 +168,7 @@ pub fn ignored_security_settings(file: &ServerConfigFile) -> Vec<String> {
     }
     if !file.server.auth.is_empty() {
         out.push(
-            "[server.auth] settings (such as api_key_hash and rate_limit_rps) are not \
+            "[server.auth] settings (such as api_key_hash) are not \
              implemented and are ignored."
                 .to_string(),
         );
@@ -179,6 +190,7 @@ impl Default for ResolvedServeConfig {
             python_artifacts: None,
             max_sessions_total: 20_000,
             max_snapshots_total: 20_000,
+            rate_limit_rps: None,
         }
     }
 }
@@ -245,6 +257,14 @@ fn apply_file(resolved: &mut ResolvedServeConfig, file: &ServerConfigFile) {
     if let Some(bucket) = nonempty(&file.scheduler.cas.bucket) {
         resolved.object_store_bucket = Some(bucket);
     }
+    if let Some(rps) = file
+        .server
+        .rate_limit
+        .as_ref()
+        .and_then(|r| r.requests_per_second)
+    {
+        resolved.rate_limit_rps = Some(rps);
+    }
 }
 
 pub fn env_str(key: &str) -> Option<String> {
@@ -291,6 +311,11 @@ fn apply_env(resolved: &mut ResolvedServeConfig) {
     if let Some(v) = env_str("SANDBOX_MAX_SNAPSHOTS_TOTAL") {
         if let Ok(n) = v.parse() {
             resolved.max_snapshots_total = n;
+        }
+    }
+    if let Some(v) = env_str("SANDBOX_RATE_LIMIT_RPS") {
+        if let Ok(n) = v.parse() {
+            resolved.rate_limit_rps = Some(n);
         }
     }
 }

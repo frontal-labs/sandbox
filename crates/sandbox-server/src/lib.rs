@@ -15,6 +15,7 @@ pub mod persist;
 #[cfg(feature = "clustered")]
 pub mod pg_store;
 pub mod pty;
+pub mod rate_limit;
 
 pub use api::{
     create_router, create_router_with_options, create_router_with_python, create_router_with_state,
