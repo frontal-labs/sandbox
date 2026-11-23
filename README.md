@@ -11,10 +11,13 @@ command requires them.
 ## Security status
 
 **Pre-alpha: nothing in this repository is a security boundary yet.** The V8
-tier runs in the host process, and the isolation layers that do exist
-(namespaces, seccomp, cgroups — Linux only) are untested against hostile
-workloads. Do not run untrusted code on it, and do not expose the server to
-untrusted clients. See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) and
+tier runs in the host process. The Linux isolation layers (namespaces, seccomp
+allowlist, cgroups, `NO_NEW_PRIVS`) are tested by escape suites, including an
+OS-level containment tier (`crates/sandbox-worker/tests/escape_linux.rs`).
+TLS termination, per-API-key rate limiting, and key-to-tenant binding are
+implemented, but no external security review has been performed. Do not run
+untrusted code on it, and do not expose the server to untrusted clients. See
+[docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) and
 [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
 
 ## Product direction

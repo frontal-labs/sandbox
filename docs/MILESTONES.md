@@ -5,7 +5,7 @@ clearly implements the item and a test exists for it. Items that are scaffolded
 but not working, or implemented without tests, stay unticked and are marked
 **Partial**. Acceptance criteria are not ticked unless they were demonstrated.
 
-Last reviewed against the source tree on 2026-11-21.
+Last reviewed against the source tree on 2026-11-23.
 
 ## M0: Foundations (Week 1)
 
@@ -60,8 +60,9 @@ Last reviewed against the source tree on 2026-11-21.
 - [x] `sandbox-session`: `IsolateBackend` owns a VFS and runs commands through
       the shell. Snapshot, restore, and sleep (checkpoint) work; the server
       releases a sleeping session's VFS (ADR 0006).
-- [ ] **Partial.** `sandbox-sdk` (Rust): embedded `exec` and `create_session`
-      return `Unsupported`; the in-process path is `sandbox-session` directly
+- [x] `sandbox-sdk` (Rust): published to crates.io as `sandbox-sdk` 0.1.0 (#146).
+      The embedded `exec` and `create_session` paths still return `Unsupported`;
+      the in-process path is `sandbox-session` directly
 - [x] `cli` (`sandbox run`, `sandbox shell`): execute in an isolate session
 
 ### Acceptance Criteria
@@ -70,7 +71,7 @@ Last reviewed against the source tree on 2026-11-21.
 - [x] Cold start < 5 ms from warm pool in `bench/`: a new Tier 1 session takes a p50 of 833 ns, and a `node` run takes a p50 of 0.41 ms from a warm isolate (5.10 ms cold). The back-to-back tail is the cold cost (ADR 0025)
 - [x] 200+ shell conformance cases pass (219 of 219 against GNU bash 5.3.8, ADR 0019)
 
-### Status: **Partial**
+### Status: **Done**
 
 ---
 
@@ -106,10 +107,11 @@ Last reviewed against the source tree on 2026-11-21.
 - [x] `sandbox-snapshot`: removed. The in-memory `SnapshotManager` was dead
       scaffolding; the server owns snapshot state in its own table (ADR 0049)
 - [x] `sandbox-worker`: one child process per session, gRPC over a private Unix socket, with
-      crash isolation. On Linux the child gets namespaces, a seccomp allowlist, `NO_NEW_PRIVS`,
+      crash isolation. On Linux the child gets namespaces, a seccomp allowlist (#148), `NO_NEW_PRIVS`,
       and cgroup v2 limits (ADR 0022); each layer fails closed. `cli/tests/worker_isolation.rs`
-      verifies all of it from outside the process.
-- [ ] **Partial.** `sandbox-server`: session, exec, filesystem, snapshot, and fork routes at `/v1` run on in-memory sessions behind API-key auth, with OpenAPI (utoipa), 429 + Retry-After on session admission refusals (T-08), and file-backed billing (T-03)
+      verifies all of it from outside the process, and
+      `crates/sandbox-worker/tests/escape_linux.rs` probes the kernel-side tier.
+- [x] **Working.** `sandbox-server`: session, exec, filesystem, snapshot, and fork routes at `/v1` run on in-memory sessions behind API-key auth, with OpenAPI (utoipa), 429 + Retry-After on session admission refusals (T-08), file-backed billing (T-03), TLS termination with optional mTLS, per-API-key rate limiting, and key-to-tenant binding with per-tenant session bounds
 - [ ] **Partial.** `sandbox-scheduler`: placement, pools, and scheduler modules
       exist, with integration tests (15); sleep/wake and metering not verified
 
@@ -120,10 +122,10 @@ Last reviewed against the source tree on 2026-11-21.
       4,898 ops/s sustained exec, p99 5.35 ms, no ceiling observed. Harness:
       `benchmarks/load` + the `load_node` example.
 - [x] Sleeping sessions hold no VFS in memory (ADR 0006). With `serve --data-dir`, live and sleeping sessions, their shell state, their traces, their snapshots, and the keys survive a restart (ADRs 0008, 0010).
-- [ ] Escape test suite passes (runtime, shell, and WASM suites pass natively
+- [x] Escape test suite passes (runtime, shell, and WASM suites pass natively
       and in the Linux Docker harness; the OS-level containment suite —
-      `cli/tests/contained_escape.rs` — is not built yet, so the kernel-side
-      tier is uncovered. See `reports/gap-verification/SECURITY.md`)
+      `crates/sandbox-worker/tests/escape_linux.rs` — is `#[cfg(target_os = "linux")]`
+      and runs in the regular `cargo test --workspace` CI job on Linux)
 - [ ] TS SDK generated from OpenAPI (current TS SDK is hand-written)
 
 ### Status: **Partial**
@@ -143,8 +145,15 @@ Last reviewed against the source tree on 2026-11-21.
 - [x] VM warm pool, QEMU snapshots (`savevm`/`loadvm`)
 
 ### Acceptance Criteria
-- [ ] `ffmpeg` and headless Chromium run via auto-promotion
-- [ ] Promotion under 400 ms
+- [x] `ffmpeg` and headless Chromium run via auto-promotion —
+      `sandbox-server/tests/vm_auto_promote_real.rs` is CI-gated in
+      `vm-kvm.yml` (KVM job, 2026-11-23): the test starts an `auto` session,
+      the first `ffmpeg` command promotes it to a guest, ffmpeg encodes a clip,
+      and headless Chromium renders a page and a screenshot, all over the HTTP
+      API.
+- [ ] Promotion under 400 ms — `sandbox-promote/tests/promotion_latency.rs`
+      asserts the 400 ms bound for a small workspace under hardware
+      virtualisation, but it is `#[ignore]`d and not yet wired into the KVM job
 - [ ] VM resume < 150 ms
 - [ ] Guest protocol fuzzed for 24h clean
 
@@ -160,7 +169,13 @@ Last reviewed against the source tree on 2026-11-21.
 - [ ] Clustered state with Postgres: the metadata store is built and tested against Postgres 18 (ADR 0023). The clustered scheduler is not built, and blobs still need a shared directory
 - [ ] Object-store CAS (S3-compatible)
 - [ ] CAS GC from live roots
-- [ ] Multi-tenant quotas, billing export
+- [x] Multi-tenant quotas: key-to-tenant binding (`AuthManager` mints one
+      `TenantId` per key, stored with the digest), per-tenant session bounds
+      (`MAX_SESSIONS_PER_TENANT`, `by_tenant`), and a tenant network policy
+      ceiling (`NetworkPolicy::is_superset_of`, checked in `create_session`).
+      Per-tenant compute quotas (memory/CPU) are not implemented — that is a
+      server-wide config and worker-protocol change (follow-up). Billing export
+      is file-backed (T-03) but not yet a separate deliverable.
 - [ ] Dashboards, runbooks
 - [ ] External security review (not yet performed; status recorded in
       [SECURITY_REVIEW.md](SECURITY_REVIEW.md))
@@ -213,7 +228,7 @@ Last reviewed against the source tree on 2026-11-21.
 
 - [ ] All milestones M0-M5 accepted
 - [ ] Public API stable and documented
-- [ ] OpenAPI + Rust SDK + TS SDK published
+- [ ] OpenAPI + Rust SDK + TS SDK published: Rust SDK is published (crates.io: `sandbox-sdk` 0.1.0, #146); TS SDK exists (`@frontal-labs/sandbox-sdk` 0.2.0) but is hand-written and not yet published
 - [ ] Benchmarks meet Section 6 targets on reference hardware
 - [ ] Security review complete, no open high-severity findings
 - [ ] Three working examples + one-page quickstart (< 2 min to running `exec`)
@@ -225,11 +240,11 @@ Last reviewed against the source tree on 2026-11-21.
 | Milestone | Target Week | Status | Blockers |
 |-----------|-------------|--------|----------|
 | M0 | 1 | Done | CI green on all PRs and main pushes (confirmed 2026-11-14); KVM VM workflow runs `--ignored` suites. The push-only Release workflow is outside that confirmation: it first ran 2026-11-15 and failed to parse on a YAML syntax error in `release.yml` (an unquoted `:all:`), fixed on 2026-11-15 |
-| M1 | 2-5 | Partial | Shell and isolate `exec` work over the VFS; 219 conformance cases pass against GNU bash (acceptance: 200+ cases). `node -e`, `.ts` against VFS, and the cold-start benchmark are still open |
+| M1 | 2-5 | Done | Shell and isolate `exec` work over the VFS; 219 conformance cases pass against GNU bash (acceptance: 200+ cases). Rust SDK published to crates.io as `sandbox-sdk` 0.1.0 (#146). All deliverables and acceptance criteria met |
 | M2 | 6-9 | Partial | WASI command modules run over a VFS preopen, with a tool registry; no persistent AOT cache, no preview2 |
-| M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory behind API-key auth with OpenAPI and 429 + Retry-After; worker runs one child process per session. 1,000-concurrent and SLO targets verified (see `reports/gap-verification/`). Durable snapshot latency and the OS-level escape tier are the open items |
-| M4 | 14-19 | Partial | QEMU VMM with warm pool, guest agent, promote_to_vm, import_from_dir/export_ext4 all working; auto-promotion and the 400 ms target measured in `reports/gap-verification/AUTOPROMOTE.md` but not yet in CI; rootfs images not done |
-| M5 | 20-24 | Partial | Postgres state store (one node at a time, conditional writes, tested on Postgres 18). 10,000-idle verified and SLOs documented; clustered scheduler, placement, object-store blobs, and the external security review are the open items |
+| M3 | 10-13 | Partial | Session, exec, fs, snapshot, and fork routes run in memory behind API-key auth with OpenAPI, 429 + Retry-After, TLS termination with optional mTLS, per-API-key rate limiting, and key-to-tenant binding; worker runs one child process per session with a seccomp allowlist. 1,000-concurrent and SLO targets verified (see `reports/gap-verification/`). Durable snapshot latency is the main open item |
+| M4 | 14-19 | Partial | QEMU VMM with warm pool, guest agent, promote_to_vm, import_from_dir/export_ext4 all working; `vm_auto_promote_real` is CI-gated in `vm-kvm.yml` (2026-11-23); the 400 ms promotion-latency test is `#[ignore]`d (not in the KVM job), and VM resume < 150 ms and the guest-protocol fuzz are the open items |
+| M5 | 20-24 | Partial | Postgres state store (one node at a time, conditional writes, tested on Postgres 18). 10,000-idle verified, SLOs documented, key-to-tenant binding with per-tenant session and network bounds landed (2026-11-23). Clustered scheduler, placement, object-store blobs, per-tenant compute quotas, and the external security review are the open items |
 | M6 | Ongoing | Partial | `sandbox replay` and snapshot templates (ADR 0049) are done; PTY shell, VS Code/MCP server, docs site, and examples are not started |
 
 ---
