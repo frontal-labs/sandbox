@@ -142,11 +142,19 @@ fn terminal_text(text: &str) -> String {
 }
 
 fn output(data: &str) -> Message {
-    Message::Text(serde_json::json!({ "type": "output", "data": data }).to_string().into())
+    Message::Text(
+        serde_json::json!({ "type": "output", "data": data })
+            .to_string()
+            .into(),
+    )
 }
 
 fn exit(code: i32) -> Message {
-    Message::Text(serde_json::json!({ "type": "exit", "code": code }).to_string().into())
+    Message::Text(
+        serde_json::json!({ "type": "exit", "code": code })
+            .to_string()
+            .into(),
+    )
 }
 
 /// Whether a client message is Ctrl-C typed while a command runs.
