@@ -407,11 +407,13 @@ impl Cli {
                     resolved.gc_interval_secs,
                     resolved.idle_sleep_secs,
                     resolved.database_url.as_deref(),
+                    resolved.rate_limit_rps,
                     sandbox_server::ServerOptions {
                         vm,
                         python,
                         telemetry,
                         blob_remote,
+                        rate_limit: resolved.rate_limit_rps,
                     },
                 )
             }
@@ -684,6 +686,7 @@ fn serve(
     gc_interval_secs: u64,
     idle_sleep_secs: u64,
     database_url: Option<&str>,
+    rate_limit_rps: Option<u64>,
     options: sandbox_server::ServerOptions,
 ) -> Result<i32, SandboxError> {
     use std::sync::Arc;
@@ -692,6 +695,7 @@ fn serve(
         python,
         telemetry,
         blob_remote,
+        rate_limit: _,
     } = options;
     // Log to stderr, so stdout keeps its key line. RUST_LOG overrides the default.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -718,6 +722,7 @@ fn serve(
                 python,
                 telemetry,
                 blob_remote,
+                rate_limit: rate_limit_rps,
             },
         ))?,
         (None, _) => {
@@ -731,6 +736,7 @@ fn serve(
                     python,
                     telemetry,
                     blob_remote: None,
+                    rate_limit: rate_limit_rps,
                 },
             );
             (app, state, Some(key))

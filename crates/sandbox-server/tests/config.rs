@@ -141,3 +141,60 @@ fn missing_default_file_uses_defaults() {
     assert_eq!(resolved.gc_interval_secs, 600);
     assert_eq!(resolved.idle_sleep_secs, 300);
 }
+
+#[test]
+fn parses_rate_limit_from_toml() {
+    let file: ServerConfigFile =
+        toml::from_str("[server]\nrate_limit = { requests_per_second = 500 }\n").expect("parses");
+    assert_eq!(
+        file.server.rate_limit.and_then(|rl| rl.requests_per_second),
+        Some(500)
+    );
+}
+
+#[test]
+fn rate_limit_zero_in_toml() {
+    let file: ServerConfigFile =
+        toml::from_str("[server]\nrate_limit = { requests_per_second = 0 }\n").expect("parses");
+    assert_eq!(
+        file.server.rate_limit.and_then(|rl| rl.requests_per_second),
+        Some(0)
+    );
+}
+
+#[test]
+fn rate_limit_absent_by_default() {
+    let file: ServerConfigFile = toml::from_str("[server]\n").expect("parses");
+    assert!(file.server.rate_limit.is_none());
+}
+
+#[test]
+fn rate_limit_rejects_unknown_field() {
+    let result: Result<ServerConfigFile, _> =
+        toml::from_str("[server]\nrate_limit = { burst = 10 }\n");
+    assert!(result.is_err(), "unknown field should be rejected");
+}
+
+#[test]
+fn rate_limit_env_overrides_file() {
+    let _g = env_lock().lock().expect("lock");
+    clear_env();
+    std::env::set_var("HOME", "/tmp/home");
+    std::env::set_var("SANDBOX_RATE_LIMIT_RPS", "999");
+    let resolved = load(None).expect("defaults");
+    clear_env();
+    assert_eq!(resolved.rate_limit_rps, Some(999));
+}
+
+#[test]
+fn rate_limit_not_in_ignored_security_settings() {
+    // Rate limiting is now implemented, so it should not appear in the
+    // "ignored" list even when configured.
+    let file: ServerConfigFile =
+        toml::from_str("[server]\nrate_limit = { requests_per_second = 100 }\n").expect("parses");
+    let warnings = ignored_security_settings(&file);
+    assert!(
+        !warnings.iter().any(|w| w.contains("rate_limit")),
+        "rate_limit should not be listed as ignored: {warnings:?}"
+    );
+}

@@ -113,6 +113,8 @@ pub struct AppState {
     pub(crate) meters: crate::metering::MeterTable,
     /// The billing event stream, on a clustered server (see `billing`).
     pub(crate) billing: Option<crate::billing::BillingLog>,
+    /// Per-key request rate limit (see `rate_limit`).
+    pub(crate) limiter: crate::rate_limit::RateLimiter,
     /// The Tier 2 guest the server can promote a session into. `None` when no image is
     /// configured, and then a command the isolate tier cannot run is refused.
     pub(crate) vm: Option<Arc<VmConfig>>,
@@ -1020,7 +1022,7 @@ pub fn create_router_with_state(
     scheduler: Arc<Scheduler>,
     auth: Arc<AuthManager>,
 ) -> (Router, AppState) {
-    router_with_options(scheduler, auth, None, None, None)
+    router_with_options(scheduler, auth, None, None, None, None)
 }
 
 /// Like [`create_router_with_state`], and sessions may move to the Tier 2 guest `vm`
@@ -1030,7 +1032,7 @@ pub fn create_router_with_vm(
     auth: Arc<AuthManager>,
     vm: VmConfig,
 ) -> (Router, AppState) {
-    router_with_options(scheduler, auth, Some(Arc::new(vm)), None, None)
+    router_with_options(scheduler, auth, Some(Arc::new(vm)), None, None, None)
 }
 
 /// Like [`create_router_with_state`], and every new isolate session has CPython installed
@@ -1040,7 +1042,7 @@ pub fn create_router_with_python(
     auth: Arc<AuthManager>,
     python: sandbox_wasm::PythonArtifacts,
 ) -> (Router, AppState) {
-    router_with_options(scheduler, auth, None, Some(Arc::new(python)), None)
+    router_with_options(scheduler, auth, None, Some(Arc::new(python)), None, None)
 }
 
 /// The options an in-memory server can be started with. Any of them may be absent.
@@ -1055,6 +1057,9 @@ pub struct ServerOptions {
     /// An object store that keeps every blob too, on a durable server. A node that lacks a blob
     /// reads it from here. `None` keeps the blobs on this node only.
     pub blob_remote: Option<Arc<dyn object_store::ObjectStore>>,
+    /// Per-key request rate limit. `None` uses the default budget
+    /// ([`crate::rate_limit::DEFAULT_RPS`]); `Some(0)` disables limiting.
+    pub rate_limit: Option<u64>,
 }
 
 /// An in-memory server with the given options.
@@ -1069,6 +1074,7 @@ pub fn create_router_with_options(
         options.vm.map(Arc::new),
         options.python.map(Arc::new),
         options.telemetry,
+        options.rate_limit,
     )
 }
 
@@ -1078,7 +1084,16 @@ pub fn create_router_with_telemetry(
     auth: Arc<AuthManager>,
     exporter: crate::otel::SpanExporter,
 ) -> (Router, AppState) {
-    router_with_options(scheduler, auth, None, None, Some(exporter))
+    router_with_options(scheduler, auth, None, None, Some(exporter), None)
+}
+
+/// Build the per-key rate limiter from a configured requests-per-second budget.
+/// `None` uses the default budget; `Some(0)` disables limiting.
+fn build_limiter(rps: Option<u64>) -> crate::rate_limit::RateLimiter {
+    let rps = rps.unwrap_or(crate::rate_limit::DEFAULT_RPS);
+    crate::rate_limit::RateLimiter::new(crate::rate_limit::RateLimitConfig {
+        requests_per_second: rps,
+    })
 }
 
 /// The warm pool for a VM configuration, or `None` without one.
@@ -1114,6 +1129,7 @@ fn router_with_options(
     vm: Option<Arc<VmConfig>>,
     python: Option<Arc<sandbox_wasm::PythonArtifacts>>,
     otel: Option<crate::otel::SpanExporter>,
+    rate_limit: Option<u64>,
 ) -> (Router, AppState) {
     let state = AppState {
         scheduler,
@@ -1125,6 +1141,7 @@ fn router_with_options(
         usage: UsageTable::default(),
         meters: crate::metering::MeterTable::default(),
         billing: None,
+        limiter: build_limiter(rate_limit),
         epoch_ms: now_millis(),
         usage_log: None,
         parked: None,
@@ -1207,6 +1224,7 @@ pub async fn open_durable_with_options(
             parked: Some(parked),
             snapshot_files: Some(snapshot_files),
             billing: Some(billing),
+            rate_limit: options.rate_limit,
         },
     )
     .await?;
@@ -1270,6 +1288,7 @@ pub async fn open_clustered_with_remote(
             parked: None,
             snapshot_files: None,
             billing: Some(billing),
+            rate_limit: None,
         },
     )
     .await?;
@@ -1293,6 +1312,7 @@ struct Attachments {
     parked: Option<crate::parked::ParkedStore>,
     snapshot_files: Option<crate::parked::SnapshotFiles>,
     billing: Option<crate::billing::BillingLog>,
+    rate_limit: Option<u64>,
 }
 
 /// Builds the server around a store and its saved state: restores the keys, snapshots, and
@@ -1311,6 +1331,7 @@ async fn attach_store(
         usage_log,
         parked,
         snapshot_files,
+        rate_limit,
     } = attachments;
     let auth = Arc::new(AuthManager::new());
     let new_key = if saved.keys.is_empty() {
@@ -1337,6 +1358,7 @@ async fn attach_store(
         usage: UsageTable::default(),
         meters: crate::metering::MeterTable::default(),
         billing,
+        limiter: build_limiter(rate_limit),
         vm_pool: pool_for(&vm),
         vm,
         python,
@@ -1759,6 +1781,13 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/usage/export", get(get_usage_export))
         .route("/v1/billing/events", get(get_billing_events))
         .route("/metrics", get(get_metrics))
+        // Per-key rate limit. Runs inside the authenticated group, so it sees the
+        // `Extension(KeyId)` that `require_api_key` inserts. A key over its
+        // budget is rejected here, before its request reaches a handler.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::rate_limit::require_rate_limit,
+        ))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_api_key,
