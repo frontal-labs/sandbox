@@ -281,8 +281,6 @@ pub fn apply_file(resolved: &mut ResolvedServeConfig, file: &ServerConfigFile) {
     };
 }
 
-
-
 pub fn env_str(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }

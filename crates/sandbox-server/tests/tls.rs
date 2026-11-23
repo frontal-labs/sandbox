@@ -12,7 +12,7 @@ use std::sync::Arc;
 use sandbox_scheduler::Scheduler;
 use sandbox_server::auth::AuthManager;
 use sandbox_server::tls::TlsConfig;
-use sandbox_server::{create_router_with_options, ServerOptions, tls};
+use sandbox_server::{create_router_with_options, tls, ServerOptions};
 
 fn tmpdir() -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("sandbox-tls-test-{}", std::process::id()));
@@ -68,12 +68,8 @@ async fn tls_serves_and_rejects_plaintext() {
     let acceptor = cfg.acceptor().unwrap();
 
     let auth = Arc::new(AuthManager::new());
-    let router = create_router_with_options(
-        Arc::new(Scheduler::new()),
-        auth,
-        ServerOptions::default(),
-    )
-    .0;
+    let router =
+        create_router_with_options(Arc::new(Scheduler::new()), auth, ServerOptions::default()).0;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

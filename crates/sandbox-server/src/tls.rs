@@ -189,10 +189,11 @@ pub async fn serve(
         // connection and driven by `service_fn`.
         let service = app.clone();
         tokio::spawn(async move {
-            let svc = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                let mut router = service.clone();
-                router.call(req)
-            });
+            let svc =
+                hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
+                    let mut router = service.clone();
+                    router.call(req)
+                });
             if let Err(e) = hyper::server::conn::http1::Builder::new()
                 .serve_connection(io, svc)
                 .await
@@ -220,13 +221,12 @@ fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsError> {
 }
 
 fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsError> {
-    let data = std::fs::read(path).map_err(|e| TlsError::ReadKey(path.to_path_buf(), e.to_string()))?;
+    let data =
+        std::fs::read(path).map_err(|e| TlsError::ReadKey(path.to_path_buf(), e.to_string()))?;
     let key = rustls_pemfile::private_key(&mut data.as_slice())
         .map_err(|e| TlsError::ReadKey(path.to_path_buf(), e.to_string()))?
         .ok_or_else(|| {
-            TlsError::ParseKey(
-                "no PEM private key found (expected PKCS#8, RSA or EC)".to_string(),
-            )
+            TlsError::ParseKey("no PEM private key found (expected PKCS#8, RSA or EC)".to_string())
         })?;
     Ok(key)
 }

@@ -110,10 +110,8 @@ fn debug_output_hides_the_database_password() {
 
 #[test]
 fn unimplemented_auth_settings_are_reported() {
-    let file: ServerConfigFile = toml::from_str(
-        "[server.auth]\nrate_limit_rps = 100\n",
-    )
-    .expect("parses");
+    let file: ServerConfigFile =
+        toml::from_str("[server.auth]\nrate_limit_rps = 100\n").expect("parses");
     let warnings = ignored_security_settings(&file);
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].contains("[server.auth]"));
@@ -122,15 +120,17 @@ fn unimplemented_auth_settings_are_reported() {
 #[test]
 fn tls_is_not_reported_when_configured() {
     // TLS is implemented now; enabling it must not be flagged as ignored.
-    let file: ServerConfigFile = toml::from_str(
-        "[server.tls]\nenabled = true\ncert = \"/c\"\nkey = \"/k\"\n",
-    )
-    .expect("parses");
+    let file: ServerConfigFile =
+        toml::from_str("[server.tls]\nenabled = true\ncert = \"/c\"\nkey = \"/k\"\n")
+            .expect("parses");
     assert!(ignored_security_settings(&file).is_empty());
     let mut resolved = ResolvedServeConfig::default();
     sandbox_server::config::apply_file(&mut resolved, &file);
     assert!(resolved.tls.enabled);
-    assert_eq!(resolved.tls.cert.as_deref(), Some(std::path::Path::new("/c")));
+    assert_eq!(
+        resolved.tls.cert.as_deref(),
+        Some(std::path::Path::new("/c"))
+    );
 }
 
 #[test]
@@ -156,7 +156,10 @@ fn tls_unknown_field_is_rejected() {
         "[server.tls]\nenabled = true\ncert = \"/c\"\nkey = \"/k\"\ncertfile = \"/x\"\n",
     )
     .expect_err("unknown tls field must fail");
-    assert!(err.to_string().contains("certfile"), "error names the typo: {err}");
+    assert!(
+        err.to_string().contains("certfile"),
+        "error names the typo: {err}"
+    );
 }
 
 #[test]
@@ -168,7 +171,10 @@ fn tls_client_auth_parses_ca() {
     let mut resolved = ResolvedServeConfig::default();
     sandbox_server::config::apply_file(&mut resolved, &file);
     assert!(resolved.tls.require_client_auth);
-    assert_eq!(resolved.tls.ca.as_deref(), Some(std::path::Path::new("/ca")));
+    assert_eq!(
+        resolved.tls.ca.as_deref(),
+        Some(std::path::Path::new("/ca"))
+    );
 }
 
 #[test]
