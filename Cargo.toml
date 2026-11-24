@@ -94,7 +94,7 @@ flate2 = "1"
 # RUSTSEC-2023-0071, with no fix), which the clustered scheduler does not use.
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 tonic = { version = "0.14", features = ["tls-ring", "transport"] }
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 tower = { version = "0.5", features = ["limit", "timeout", "retry"] }
 utoipa = { version = "6", features = ["axum_extras", "chrono", "yaml"] }
 argon2 = { version = "0.6", features = ["rand_core"] }
